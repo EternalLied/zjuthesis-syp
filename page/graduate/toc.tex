@@ -1,11 +1,5 @@
 \cleardoublepage
 
-\ifbooltrue{ListOfContents}
-{
-    \phantomsection
-    \markloc
-    \tableofcontents
-}
 
 \begingroup
     \renewcommand*{\addvspace}[1]{}
@@ -33,3 +27,11 @@
         \listofalgotocloft
     }
 \endgroup
+
+\ifbooltrue{ListOfContents}
+{
+    \cleardoublepage
+    \phantomsection
+    \markloc
+    \tableofcontents
+}

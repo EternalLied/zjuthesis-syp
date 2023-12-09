@@ -122,18 +122,92 @@
 
 \subsection{通信时间关键特征分析}
 
-分布式训练每次迭代的通信时间主要由GPU集群的通信配置决定，包括通信数据量、GPU之间的通信带宽、GPU的数目、集群拓扑结构、分布式训练架构和连接GPU的物理链路类型。下面具体分析这些因素对通信时间的影响。
+分布式训练每次迭代的通信时间主要由GPU集群的通信配置决定，包括通信数据量、节点（GPU）之间的通信带宽、节点的数目、集群拓扑结构、分布式训练架构和连接GPU的物理链路类型。下面具体分析这些因素对通信时间的影响。
 
-一般而言，分布式训练的通信时间随通信数据量的增加而增大。不过其变化关系并不是线性的，因为真实的通信带宽并不是固定的，而是会随着通信数据量变化。本章将真实的通信带宽称为实时吞吐量。在实际测量中，实时吞吐量与通信数据量呈现正相关关系。
+一般而言，分布式训练的通信时间随通信数据量的增加而增大。不过其变化关系并不是线性的，因为真实的通信带宽并不是固定且等于最大通信带宽的，而是会随着通信数据量变化。本章将真实的通信带宽称为实时吞吐量。如\autoref{fig:Fig2-4}所示，在实际测量中，实时吞吐量与通信数据量的对数之间呈现类似Sigmoid函数的关系。
 
-GPU数目对通信时间的影响取决于集群的拓扑结构和分布式训练架构，例如，在Ring All-Reduce算法中，随着GPU数目的增加，数据传输时间将先增加然后趋于稳定，
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/fig2-4-throughput.pdf}
+    \caption{\label{fig:Fig2-4}实时吞吐量随通信数据量的变化}
+\end{figure}
+
+节点数目对通信时间的影响取决于分布式训练架构和集群的拓扑结构。在参数服务器（Parameter Server，简称PS）架构中，每个工作者节点需要将数据发送给参数服务器节点，因此通信时间会随着工作者节点数目的增加而增大，进而导致参数服务器节的通信开销成为性能瓶颈。在全归约（All-Reduce）架构中，以Ring All-Reduce算法为例（算法细节在\autoref{subsection_2_3_3}中），随着节点数目的增加，数据传输时间将先增加然后趋于稳定，从而实现数据传输时间几乎不依赖于节点数目，但由于Ring All-Reduce的实现需要数据在各节点间依次传递，因此通信时延将随着节点数目线性增加。这里的通信时延指数据传输时间之外的通信时间，包括排队延迟、通信协议开销等。在去中心化的分布式（Gossip）架构中，由于每个节点只与邻居节点进行通信，所以通信时间与拓扑结构密切相关，具体而言，每次迭代的通信时间取决于拓扑中节点的最大度。并且通常情况下，节点数目越多，拓扑越稠密，通信时间越大。
+
+在GPU之间进行通信时，不同类型的物理链路会导致不同的通信带宽，进而影响通信时间。在本章中，我们主要考虑如\autoref{fig:Fig2-3}所示的标准服务器架构中常见的三种物理链路类型：PIX、NODE和SYS。其中PIX指挂载在同一个PCIe Bridge（Switch）上的两个GPU之间的通信链路，相当于图中的GPU1到GPU2；NODE指单个非一致性内存访问节点（NUMA node）内经过Host Bridge PCIe总线的通信链路，相当于图中的GPU1到GPU3；SYS指通过QPI（PCIe+QPI总线）跨NUMA node间GPU通信的链路，相当于图中的GPU1到GPU5。对于其他类型的链路，例如跨服务器的链路、NVLink等，本章的分析和建模方法也同样适用，但是由于用于实验测试的系统的限制，本章的介绍中不涵盖其他类型的物理链路。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/fig2-3-server_architecture.pdf}
+    \caption{\label{fig:Fig2-3}标准服务器架构}
+\end{figure}
 
 
+\section{分布式深度学习训练时间预测方法}
+\subsection{方法概述}
 
-\section{分布式深度学习训练时间预测框架}
-\subsection{框架概述}
+本章提出了一种新的训练时间预测方法，将其称为面向一般拓扑的分布式深度学习训练时间预测（Training Time Prediction of Distributed Deep Learning over General Topology，PreTopo）。\autoref{fig:Fig2-5}为PreTopo的框架图，可以看到，PreTopo主要由三个部分组成：
+\begin{itemize}
+    \item 计算时间预测。由于神经网络的不同层和模块通过直接连接进行交互，同时保持计算和功能的独立性，因此PreTopo将神经网络模型分解为单个神经网络层的组合，逐层预测神经网络的计算时间。在预测模型的建立过程中，首先对每种类型的神经网络层的特征空间进行采样，然后根据采样的特征搭建单层神经网络并测试其计算时间。接下来使用\autoref{tab:features_fomula}对特征进行扩充，并将每种类型的神经网络层的特征和对应的测试时间作为基准测试数据集，用于训练特定的多层感知器模型（MLP）。最后使用这些多层感知器模型即可预测一个新的神经网络的计算时间。
+    \item 通信时间预测。首先分析实时吞吐量随通信数据量的变化并建立单链路通信时间预测模型。然后基于对分布式训练中常用的集合通信原语的执行机理的分析，结合单链路模型建立多GPU通信时间预测模型。最后通过分析在特定分布式训练架构上利用各种拓扑结构进行通信所需的通信次数以及每次参与通信的GPU集合，并利用已经建立的单链路模型和多GPU模型，建立适用于一般拓扑的通信时间预测模型。
+    \item 计算与通信的并行性分析。在得到各神经网络层的计算时间和通信时间之后，PreTopo为集群中的每个节点和每条边建立对应的操作队列和设备时间，并根据分布式训练的执行流程依次将每个计算操作和通信操作加入到其操作队列中，然后更新相应的设备时间。最后基于每个操作开始执行和结束执行的设备时间提取关键路径，进而预测分布式训练的迭代时间。
+\end{itemize}
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/fig2-5-framework.pdf}
+    \caption{\label{fig:Fig2-5}PreTopo框架图}
+\end{figure}
+
+\textcolor{red}{此处补充一个算法流程图}
+\begin{center}
+% \begin{minipage}{8.5cm}
+\begin{algorithm}[!htbp]
+      \caption{\textbf{PerfTop}: \underline{Perf}ormance prediction framework over general \underline{Top}ologies} 
+      % \small
+      \label{Algorithm-PreTopo} 
+        \begin{algorithmic}[1]
+        \REQUIRE{The depth of neural network $l$; The type of each neural network layer $layer_i, i\in{1,...,l}$; The set of features for each neural network layer $\boldsymbol{c}_{nn}^{layer_i}$; The set of hardware features of GPU $\boldsymbol{c}_{gpu}$; The set of communication features of the cluster $\boldsymbol{c}_{cluster}$}.
+        \ENSURE{The iteration time of distributed training $T_{iter}$}.
+        \FOR{each layer $i \in [1, l]$}
+            \STATE Calculate the expanded features of $layer_i$ using Eq.~\eqref{tab:features_fomula}
+            \begin{align*}
+            \small
+                &mem_w=\begin{cases}
+                    k^2c_{in}c_{out}+c_{out},&bias=1\\
+                    k^2c_{in}c_{out},&bias=0\\
+                \end{cases}\\
+                &mem_{in}=bm_{in}^2c_{in}, \hspace{0.2in} mem_{out}=bm_{out}^2c_{out},\\
+                &m_{out}=\lfloor \frac{m_{in}+2p-k}{s} \rfloor +1,\\
+                &ops_{conv}=bm_{out}^2k^2c_{in}c_{out}, \hspace{0.2in} ops_{fc}=bd_{in}d_{out}.
+            \end{align*}
+            
+            \STATE Predict computation time using the MLP model.
+        \ENDFOR
+        \STATE \textbf{end for}
+        \IF{data communication is realized by \texttt{distributed.} \texttt{all\underline{~}reduce}}
+        \STATE Predict the communication time using Equation
+        \begin{align*}
+        \small
+            t_{all\underline{~}reduce}^{cluster}=\left( m-1 \right) \cdot t_{all\underline{~}reduce}^{link}\left( \frac{2N}{m} \right),
+        \end{align*}
+        \ELSE
+        \STATE Obtain the number of communications $c$ and the set of communication links $links_i$ based on consensus protocol.
+        \STATE Predict the communication time using Equation
+        \begin{align*}
+        \small
+            t_{comm}=\sum_{i=1}^c{t_{broadcast}^{cluster}\left( n_i, links_i \right)},
+        \end{align*}
+        \ENDIF
+        \STATE \textbf{end if}
+        \STATE Extract the critical path and compute the iteration time.
+        \end{algorithmic}
+\end{algorithm}
+% \end{minipage}
+\end{center}
+
 \subsection{计算时间预测模型}
-\subsection{通信时间预测模型}
+\subsection{通信时间预测模型}\label{subsection_2_3_3}
 \subsection{计算与通信的并行性分析}
 
 \section{算力分析}

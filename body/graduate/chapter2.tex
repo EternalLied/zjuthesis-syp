@@ -273,11 +273,11 @@
 \begin{figure}[!htbp]
     \centering
     \subfigure[1次scatter-reduce操作]{
-        \includegraphics[width=0.45\linewidth]{figure/chapter2/fig2-7-1-scatter-reduce-1.pdf}
+        \includegraphics[width=0.48\linewidth]{figure/chapter2/fig2-7-1-scatter-reduce-1.pdf}
         \label{fig:Fig2-7-scatter-reduce-1}%文中引用该图片代号
     }
     \subfigure[scatter-reduce阶段结束]{
-        \includegraphics[width=0.45\linewidth]{figure/chapter2/fig2-7-2-scatter-reduce-2.pdf}
+        \includegraphics[width=0.48\linewidth]{figure/chapter2/fig2-7-2-scatter-reduce-2.pdf}
         \label{fig:Fig2-7-scatter-reduce-2}%文中引用该图片代号
     }
     \caption{Ring All-Reduce的scatter-reduce操作}
@@ -287,11 +287,11 @@
 \begin{figure}[!htbp]
     \centering
     \subfigure[1次all-gather操作]{
-        \includegraphics[width=0.45\linewidth]{figure/chapter2/fig2-8-1-all-gather-1.pdf}
+        \includegraphics[width=0.48\linewidth]{figure/chapter2/fig2-8-1-all-gather-1.pdf}
         \label{fig:Fig2-8-all-gather-1}%文中引用该图片代号
     }
     \subfigure[all-gather阶段结束]{
-        \includegraphics[width=0.45\linewidth]{figure/chapter2/fig2-8-2-all-gather-2.pdf}
+        \includegraphics[width=0.48\linewidth]{figure/chapter2/fig2-8-2-all-gather-2.pdf}
         \label{fig:Fig2-8-all-gather-2}%文中引用该图片代号
     }
     \caption{Ring All-Reduce的all-gather操作}
@@ -314,11 +314,34 @@
 
 基于我们的分析方法，只要为每种类型的物理链路建立基于$all\underline{~}reduce$的单链路通信时间预测模型（物理链路类型通常为\autoref{section2-2-3}中提到的五种类型），即可得到在任意规模的GPU集群上使用$all\underline{~}reduce$进行通信所需的时间。
 
-与$all\underline{~}reduce$不同，基于$broadcast$的通信主要用于将一个节点的数据发送给其他节点。传统的$broadcast$操作是利用链式拓扑将待通信的数据从源节点依次发送给每个节点，因此通信时间会随着GPU的数目线性增加。为了提高通信效率，英伟达提出的NCCL（Nvidia Collective multi-GPU Communication Library）通信库对$broadcast$的通信模式进行了改进。如所示，在开始通信之前，源节点将待通信的数据切分为$S$个数据块，然后从源节点开始依次将$S$个数据块发送给下一个节点。即在第$k$次通信时，第$i\left(\max \left( 2, k-S+2 \right) \leqslant i\leqslant \min \left( k+1, n-1 \right)\right)$个节点从第$i-1$个节点接收第$k+2-i$个数据块，并将第$k+1-i$个数据块发送给第$i+1$个节点，如此进行$S+n-2$次通信使得每个节点最终都接收到完整的数据。
+与$all\underline{~}reduce$不同，基于$broadcast$的通信主要用于将一个节点的数据发送给其他节点。传统的$broadcast$操作是利用链式拓扑将待通信的数据从源节点依次发送给每个节点，因此通信时间会随着GPU的数目线性增加。为了提高通信效率，英伟达提出的NCCL（Nvidia Collective multi-GPU Communication Library）通信库对$broadcast$的通信模式进行了改进。如\autoref{fig:Fig2-9}所示，在开始通信之前，源节点将待通信的数据切分为$S$个数据块，然后从源节点开始依次将$S$个数据块发送给下一个节点。即在第$k$次通信时，第$i\left(\max \left( 2, k-S+2 \right) \leqslant i\leqslant \min \left( k+1, n-1 \right)\right)$个节点从第$i-1$个节点接收第$k+2-i$个数据块，并将第$k+1-i$个数据块发送给第$i+1$个节点，如此进行$S+n-2$次通信使得每个节点最终都接收到完整的数据。
 
-
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.5\linewidth]{figure/chapter2/fig2-9-broadcast.png}
+    \caption{\label{fig:Fig2-9}基于$broadcast$的通信流程}
+\end{figure}
 
 基于上述broadcast的原理，我们建立如下多节点broadcast通信时间预测模型：
+\begin{equation}
+    \label{tab:multi_gpu_broadcast}
+        t_{broadcast}^{cluster}=\left( S+n-2 \right) t_{broadcast}^{link}\left( \frac{N}{S} \right).
+\end{equation}
+考虑到不同GPU之间可能经过不同的物理链路进行通信，例如\autoref{fig:Fig2-4}中有三种不同的物理链路，并且这三种链路对应着不同的通信带宽。因此，我们将\autoref{tab:multi_gpu_broadcast}进一步精细化为：
+\begin{equation}
+    \small
+    \label{tab:multi_gpu_broadcast_refined}
+    \begin{aligned}
+        t_{broadcast}^{cluster}\left( n, links \right) =&\left( S-1 \right) \cdot t_{broadcast}^{link_j}\left( \frac{N}{S} \right)+\sum_{link_i\in links}{t_{broadcast}^{link_i}\left( \frac{N}{S} \right)}\\t_{broadcast}^{link_j}=&\underset{link_i\in links}{\max}t_{broadcast}^{link_i},
+    \end{aligned}
+\end{equation}
+其中$links=\left\{ link_1,..., link_{n-1} \right\}$是参与通信的所有物理链路的集合。
+
+\textbf{3. 一般拓扑上的集群通信时间预测模型}
+
+由于基于$all\underline{~}reduce$的通信采用固定的环形拓扑，因此在分布式深度学习中，各种通信拓扑上的训练通常是基于$broadcast$来实现通信。利用上一小结中建立的单链路通信时间预测模型和多GPU通信时间预测模型，参考项目结题文档
+
+然后讲Gossip架构和All-Reduce架构分别进行1次通信和多次通信。
 
 \subsection{计算与通信的并行性分析}
 

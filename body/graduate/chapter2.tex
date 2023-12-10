@@ -25,7 +25,7 @@
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=0.7\linewidth]{figure/chapter2/fig2-1-training_step.pdf}
-    \caption{\label{fig:Fig2-1}论文的主要研究内容框架图}
+    \caption{\label{fig:Fig2-1}分布式训练的执行流程}
 \end{figure}
 
 根据上述训练过程，本文将分布式训练的迭代时间建模为如下数学表达形式：
@@ -117,7 +117,7 @@
         &m_{out}=\lfloor \frac{m_{in}+2p-k}{s} \rfloor +1,\\
         &ops_{conv}=bm_{out}^2k^2c_{in}c_{out}, \hspace{0.2in} ops_{fc}=bd_{in}d_{out}.
     \end{aligned}
-    \end{equation}
+\end{equation}
 其中各个符号的定义可以在\autoref{tab:features-of-CNN}中找到。
 
 \subsection{通信时间关键特征分析}
@@ -207,7 +207,29 @@
 \end{center}
 
 \subsection{计算时间预测模型}
+
+在本章中，用于预测每个神经网络层计算时间的多层感知器模型由五个全连接层组成，其中前四个全连接层为隐藏层，用于学习输入特征之间的关系，最后一个全连接层为输出层，用于学习隐藏层特征与输出之间的关系，每个全连接层执行如下操作：
+\begin{equation}
+    \label{tab:MLP-layer}
+    Y=W\cdot X+b,
+\end{equation}
+其中，$W$是全连接层的权重矩阵，$b$是偏置参数，$Y$是全连接层的输出数据。本章中全连接层的神经元数目分别为32、64、128和128，输出层神经元数目为1，为预测的计算时间。其中，每个隐藏层的输出会经过ReLU激活函数，其表达式如\autoref{tab:ReLU}所示，它保证了整个神经网络是非线性且稀疏的：
+
+\begin{equation}
+    \label{tab:ReLU}
+    ReLU\left( Y \right) =\begin{cases}
+        Y,if\,\,Y>0\\
+        0,if\,\,Y\leqslant 0\\
+    \end{cases}.
+\end{equation}
+
+在训练时，输出层经过ReLU激活函数之前会以20\%的概率对其执行dropout操作以减轻过拟合。构建的多层感知器模型如所示。
+
+
 \subsection{通信时间预测模型}\label{subsection_2_3_3}
+
+
+
 \subsection{计算与通信的并行性分析}
 
 \section{算力分析}

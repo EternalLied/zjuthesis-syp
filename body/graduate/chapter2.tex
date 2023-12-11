@@ -123,22 +123,22 @@
 
 分布式训练每次迭代的通信时间主要由GPU集群的通信配置决定，包括通信数据量、节点（GPU）之间的通信带宽、节点的数目、集群拓扑结构、分布式训练架构和连接GPU的物理链路类型。下面具体分析这些因素对通信时间的影响。
 
-一般而言，分布式训练的通信时间随通信数据量的增加而增大。不过其变化关系并不是线性的，因为真实的通信带宽并不是固定且等于最大通信带宽的，而是会随着通信数据量变化。本章将真实的通信带宽称为实时吞吐量。如\autoref{fig:Fig2-4}所示，在实际测量中，实时吞吐量与通信数据量的对数之间呈现类似Sigmoid函数的关系。
+一般而言，分布式训练的通信时间随通信数据量的增加而增大。不过其变化关系并不是线性的，因为真实的通信带宽并不是固定且等于最大通信带宽的，而是会随着通信数据量变化。本章将真实的通信带宽称为实时吞吐量。如\autoref{fig:Fig2-3}所示，在实际测量中，实时吞吐量与通信数据量的对数之间呈现类似Sigmoid函数的关系。
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter2/fig2-4-throughput.pdf}
-    \caption{\label{fig:Fig2-4}实时吞吐量随通信数据量的变化}
+    \includegraphics[width=0.7\linewidth]{figure/chapter2/fig2-3-throughput.pdf}
+    \caption{\label{fig:Fig2-3}实时吞吐量随通信数据量的变化}
 \end{figure}
 
 节点数目对通信时间的影响取决于分布式训练架构和集群的拓扑结构。在参数服务器（Parameter Server，简称PS）架构中，每个工作者节点需要将数据发送给参数服务器节点，因此通信时间会随着工作者节点数目的增加而增大，进而导致参数服务器节的通信开销成为性能瓶颈。在全归约（All-Reduce）架构中，以Ring All-Reduce算法为例（算法细节在\autoref{subsection_2_3_3}中），随着节点数目的增加，数据传输时间将先增加然后趋于稳定，从而实现数据传输时间几乎不依赖于节点数目，但由于Ring All-Reduce的实现需要数据在各节点间依次传递，因此通信时延将随着节点数目线性增加。这里的通信时延指数据传输时间之外的通信时间，包括排队延迟、通信协议开销等。在去中心化的分布式（Gossip）架构中，由于每个节点只与邻居节点进行通信，所以通信时间与拓扑结构密切相关，具体而言，每次迭代的通信时间取决于拓扑中节点的最大度。并且通常情况下，节点数目越多，拓扑越稠密，通信时间越大。
 
-在GPU之间进行通信时，不同类型的物理链路会导致不同的通信带宽，进而影响通信时间。在本章中，主要考虑如\autoref{fig:Fig2-3}所示的标准服务器架构中常见的三种物理链路类型：PIX、NODE和SYS。其中PIX指挂载在同一个PCIe Bridge（Switch）上的两个GPU之间的通信链路，相当于图中的GPU1到GPU2；NODE指单个非一致性内存访问节点（NUMA node）内经过Host Bridge PCIe总线的通信链路，相当于图中的GPU1到GPU3；SYS指通过QPI（PCIe+QPI总线）跨NUMA node间GPU通信的链路，相当于图中的GPU1到GPU5。对于其他类型的链路，例如跨服务器的链路、NVLink等，本章的分析和建模方法也同样适用，但是由于用于实验测试的系统的限制，本章的介绍中不涵盖其他类型的物理链路。
+在GPU之间进行通信时，不同类型的物理链路会导致不同的通信带宽，进而影响通信时间。在本章中，主要考虑如\autoref{fig:Fig2-4}所示的标准服务器架构中常见的三种物理链路类型：PIX、NODE和SYS。其中PIX指挂载在同一个PCIe Bridge（Switch）上的两个GPU之间的通信链路，相当于图中的GPU1到GPU2；NODE指单个非一致性内存访问节点（NUMA node）内经过Host Bridge PCIe总线的通信链路，相当于图中的GPU1到GPU3；SYS指通过QPI（PCIe+QPI总线）跨NUMA node间GPU通信的链路，相当于图中的GPU1到GPU5。对于其他类型的链路，例如跨服务器的链路、NVLink等，本章的分析和建模方法也同样适用，但是由于用于实验测试的系统的限制，本章的介绍中不涵盖其他类型的物理链路。
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/fig2-3-server_architecture.pdf}
-    \caption{\label{fig:Fig2-3}标准服务器架构}
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/fig2-4-server_architecture.pdf}
+    \caption{\label{fig:Fig2-4}标准服务器架构}
 \end{figure}
 
 
@@ -371,10 +371,253 @@
 \end{figure}
 
 \section{算力分析}
+
+本节对提出的面向一般拓扑的分布式深度学习训练时间预测方法（PreTopo）的有效性进行验证，并与现有的方法进行对比分析。所有实验都是在同一个硬件系统上完成的，该系统配备了2个Intel Xeon Gold 6226R处理器和8个NVIDIA GeForce RTX 2080 Ti，每个GPU有11GB显存。该硬件系统采用\autoref{fig:Fig2-4}所示的标准服务器架构。本节的实验使用pytorch实现，基于pytorch的distributed库进行通信。
+
 \subsection{数据准备}\label{subsection_2_4_1}
+
+为了获得用于训练多层感知器模型的基准测试数据，本节首先为每种类型的神经网络层构建一个对应的单层神经网络，用于测试计算时间。然后在每种类型的神经网络层的特征空间中进行随机采样，并且采样的特征空间足够大，以确保全面覆盖实际应用场景。其中卷积层、池化层、全连接层和批归一化层的特征空间采样范围见\autoref{tab:sample-convolutional-layer}、\autoref{tab:sample-pooling-layer}、\autoref{tab:sample-fully-connected-layer}和\autoref{tab:sample-bn-layer}。然后利用每次采样的特征配置相应的单层神经网络，测试其前向传播和反向传播的计算时间，并将每组特征以及对应的测量时间作为一个样本。对于每种类型的神经网络层，采样80000次构成基准测试数据集，并按照8：1：1的比例将其划分为训练集、测试集和验证集。
+
+另外，为了获得用于拟合单链路通信时间预测模型的数据，本节对使用$all\underline{~}reduce$和$broadcast$两种集合通信原语在\autoref{section2-2-3}中提到的三种物理链路上通信不同大小的数据所需的时间进行了测试。测试数据量范围为0.0004MB\~{}400MB（一百到一亿个32位浮点数），每种通信原语和物理链路的组合测试100个不同的数据量。
+
+在测试计算时间和通信时间之前，会先进行20次计算/通信操作以进行预热，然后测量100次计算/通信操作的平均执行时间作为建模所使用的数据。
+
+\begin{table}[!htbp]
+    \center
+    \caption{卷积层特征空间的采样范围}
+    \label{tab:sample-convolutional-layer}
+    \setlength{\tabcolsep}{7.5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.9}{
+        \begin{tabular}{|c|c|}
+          \hline
+          特征          & 采样范围\\ 
+          \hline
+          输入尺寸         &  1\~{}256 \\
+          \hline
+          批大小          &  1\~{}256 \\
+          \hline
+          输入通道数       &  1\~{}1024  \\
+          \hline
+          输出通道数       &  1\~{}1024 \\
+          \hline
+          卷积核大小       &  1\~{}7          \\
+          \hline
+          边界填充大小     &  0\~{}3 \\
+          \hline
+          卷积核步幅大小   &  1\~{}5            \\
+          \hline
+          是否使用偏置项          & True/False            \\
+          \hline
+          激活函数类型    &  none/relu/tanh/sigmiod           \\
+          \hline
+          优化器类型       & SGD/Adadelta/Adagrad/Adam/RMSProp             \\
+          \hline
+        \end{tabular}
+    }}
+\end{table}
+
+\begin{table}[!htbp]
+    \center
+    \caption{池化层特征空间的采样范围}
+    \label{tab:sample-pooling-layer}
+    \setlength{\tabcolsep}{5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.9}{
+        \begin{tabular}{|c|c|}
+          \hline
+          特征          & 采样范围\\ 
+          \hline
+          输入尺寸         &  1\~{}256 \\
+          \hline
+          批大小          &  1\~{}256 \\
+          \hline
+          通道数       &  1\~{}1024  \\
+          \hline
+          池化核大小       &  1\~{}7          \\
+          \hline
+          边界填充大小     &  0\~{}3 \\
+          \hline
+          池化核步幅大小   &  1\~{}5            \\
+          \hline
+          池化类型       & MaxPool2d/MaxPool1d/AvgPool2d/AvgPool1d             \\
+          \hline
+        \end{tabular}
+    }}
+\end{table}
+
+\begin{table}[!htbp]
+    \center
+    \caption{全连接层特征空间的采样范围}
+    \label{tab:sample-fully-connected-layer}
+    \setlength{\tabcolsep}{7.5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.9}{
+        \begin{tabular}{|c|c|}
+          \hline
+          特征          & 采样范围\\ 
+          \hline
+          批大小         &  1\~{}256 \\
+          \hline
+          输入维度         &  1\~{}4096 \\
+          \hline
+          输出维度          &  1\~{}4096 \\
+          \hline
+          是否使用偏置项     &  True/False \\
+          \hline
+          激活函数类型       &  none/relu/tanh/sigmoid            \\
+          \hline
+          优化器类型       & SGD/Adadelta/Adagrad/Adam/RMSProp             \\
+          \hline
+        \end{tabular}
+    }}
+\end{table}
+
+\begin{table}[!htbp]
+    \center
+    \caption{批归一化层特征空间的采样范围}
+    \label{tab:sample-bn-layer}
+    \setlength{\tabcolsep}{8mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.9}{
+        \begin{tabular}{|c|c|}
+            \hline
+            输入尺寸         &  1\~{}256 \\
+            \hline
+            批大小          &  1\~{}256 \\
+            \hline
+            通道数       &  1\~{}1024  \\
+          \hline
+          激活函数类型    &  none/relu/tanh/sigmiod           \\
+          \hline
+          优化器类型       & SGD/Adadelta/Adagrad/Adam/RMSProp             \\
+          \hline
+        \end{tabular}
+    }}
+\end{table}
+
+
 \subsection{实验设置与评价指标}
+
+在训练多层感知器模型时，优化器使用Adam，批大小设置为128，初始学习率设置为0.1，并分别在第40和80个训练周期时将学习率缩小10倍。本节选择VGG-16\cite{simonyan2014very}，ResNet-50\cite{he2016deep}，ResNet-101\cite{he2016deep}和GoogLeNet\cite{szegedy2015going}作为待预测的卷积神经网络，其中VGG-16由标准的卷积层、池化层和全连接堆叠而成，ResNet-50和ResNet-101由残差块组成，GoogLeNet由Inception模块组成。这些神经网络的基本组成单元都是本章所考虑的卷积层、池化层、全连接层和批归一化层。另外，本节选择环形拓扑\cite{nedic2018network}、树形拓扑\cite{iandola2016firecaffe}、分层拓扑\cite{trevisan2017lecture}、2D-Torus\cite{tanakaimagenet}和指数拓扑\cite{ying2021exponential}作为待预测的拓扑结构，并且在测试和预测时，前四种拓扑结构基于All-Reduce架构，指数拓扑则基于Gossip架构。
+
+为了衡量预测模型的性能，本节使用均方根误差（RMSE），平均绝对百分比误差（MAPE）和决定系数（$R^2$）作为评价指标。其中RMSE和MAPE表示预测值与真实值之间的偏差，这两个指标越小，说明预测模型的精度越高。RMSE和MAPE的计算公式如下：
+\begin{equation}
+    \label{tab:RMSE}
+    RMSE=\sqrt{\frac{1}{n_{sample}}\sum_{i=1}^{n_{sample}}{\left( \hat{y}_i-y_i \right) ^2}},
+\end{equation}
+
+\begin{equation}
+    \label{tab:MAPE}
+    MAPE=\frac{100\%}{n_{sample}}\sum_{i=1}^{n_{sample}}{\left| \small{\frac{\hat{y}_i-y_i}{y_i}} \right|},
+\end{equation}
+其中$n_{sample}$是样本数，$\hat{y}_i$是第$i$个样本的预测值，$y_i$是第$i$个样本的真实值。
+
+与RMSE和MAPE不同，$R^2$用于衡量一个模型对数据的拟合程度，取值范围在0到1之间，并且越接近1，说明模型对数据的拟合越好。其计算公式如下：
+\begin{equation}
+    \label{tab:R2}
+    R^2=\frac{SSR}{SST}=\frac{\sum_{i=1}^{n_{sample}}{\left( \hat{y}_i-\bar{y} \right) ^2}}{\sum_{i=1}^{n_{sample}}{\left( y_i-\bar{y} \right) ^2}},
+\end{equation}
+其中$SSR$被称为回归平方和，SST被称为总离差平方和，$\bar{y}$是所有样本真实值的平均值。
+
 \subsection{实验结果与分析}\label{subsection_2_4_3}
 
+下面将分别从计算时间预测、通信时间预测和迭代时间预测三个方面验证PreTopo的有效性。
+
+\textbf{1. 计算时间预测}
+
+首先对上述四种类型的神经网络层的预测结果进行评估，为了说明特征扩充对预测模型精度的提升，本节进行了消融实验——将PreTopo与没有进行特征扩充的MLP模型进行对比。由于池化层和批归一化层的预测精度较高，因此在建模时没有对池化层和批归一化层进行特征扩充。\autoref{tab:result_layer_type}展示了在验证集上得到的预测结果。可以看到，特征扩充提升了卷积层和全连接层的计算时间预测精度。另外，在四种类型的神经网络层中，卷积层表现出最大的预测误差，这主要归因于它较高的计算复杂度。因为深度学习框架针对卷积运算进行了优化，会根据矩阵大小的不同选择不同的算法实现卷积运算，从而增大MLP模型训练的难度，导致难以准确预测卷积层的计算时间。不过PreTopo的MAPE仍然保持在18\%以下，并且$R^2$可以达到0.9以上。对于常见的卷积配置，PreTopo的预测误差会低于表中的平均结果，这点从后面的实验结果中可以得到证实。
+
+\begin{table}[!htpb]
+    \center
+    \caption{不同类型神经网络层的计算时间预测结果}
+    \label{tab:result_layer_type}
+    \setlength{\tabcolsep}{4mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.9}{
+    \begin{tabular}{|c|c|ccc|}
+      \hline
+      层类型    &        预测方法      &     RMSE(ms)     &    MAPE(\%)    &     $R^2$ \\ 
+      \hline
+      \multirow{2}{*}{卷积层}     &     PreTopo     &  \textbf{5.610}  &  \textbf{17.90\%}    &    \textbf{0.904} \\
+                                                   &    MLP         &  6.850      &    19.90\%    &    0.858 \\ \hline
+      \multirow{1}{*}{池化层}               &  PreTopo     & 0.069      &  8.92\%    &   0.997 \\\hline
+      \multirow{2}{*}{全连接层}       &  PreTopo     &  \textbf{0.157}      &    \textbf{13.20\%}    &  \textbf{0.951} \\
+                                              &    MLP         &  0.187      &    14.6\%    &    0.946 \\ \hline
+      \multirow{1}{*}{批归一化层}         &  PreTopo     &  0.209      &   3.86\%    &   0.994 \\
+      \hline
+    \end{tabular}
+    }}
+\end{table}
+
+接下来对整个神经网络的计算时间预测结果进行评估。本节将PreTopo与其他两个方法进行比较：没有进行特征扩充的MLP模型和经典的计算时间预测方法Paleo。为了进行全面的比较，本节将每个节点的批大小从1增加到32，并将输入尺寸设置为 $32\times32\times3$和$224\times224\times3$（分别为Cifar10和ImageNet数据集的图像大小）。\autoref{tab:result_full_NN}比较了三种预测方法对VGG-16、ResNet-50、ResNet-100和GoogLeNet四种神经网络模型的计算时间的预测结果，表中的每个值为不同批大小的预测结果的平均值。可以发现，对于四种类型的CNN，PreTopo均实现了小于10ms的RMSE和小于15\%的MAPE，优于没有进行特征扩充的MLP模型和Paleo。
+
+\begin{table}[!htpb]
+    \center
+    \caption{不同神经网络模型的计算时间预测结果}
+    \label{tab:result_full_NN}
+    \setlength{\tabcolsep}{3mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.9}{
+    \begin{tabular}{|c|c|c|ccc|}
+      \hline
+      神经网络模型                 & 输入尺寸          & 预测方法 & RMSE(ms)              & MAPE(\%) &    $R^2$           \\ \hline
+      \multirow{6}{*}{VGG-16}    & \multirow{3}{*}{$32\times32\times3$}   & PreTopo          & \textbf{0.487}       & \textbf{4.43\%}   &    \textbf{0.960}           \\
+                                &                            & MLP            & 7.761                & 53.34\%  &      -              \\
+                                &                            & Paleo            & 3.769                & 35.44\%  &      -              \\ \cline{2-6} 
+                                & \multirow{3}{*}{$224\times224\times3$} & PreTopo          & \textbf{9.207}      & \textbf{7.74\%}   &    \textbf{0.978}           \\
+                                &                            & MLP            & 9.615                & 19.76\%  &      0.976              \\
+                                &                            & Paleo            & 27.764               & 22.61\%   &   0.803                 \\ \hline
+      \multirow{6}{*}{ResNet-50} & \multirow{3}{*}{$32\times32\times3$}   & PreTopo          & \textbf{2.268}        & \textbf{7.18\%}   &    \textbf{0.810}           \\
+                                  &                            & MLP            & 8.880                & 18.92\%  &      -              \\
+                                &                            & Paleo            & 23.181               & 76.41\%  &      -                   \\ \cline{2-6} 
+                                & \multirow{3}{*}{$224\times224\times3$} & PreTopo          & \textbf{5.334}      & \textbf{13.77\%}  &    \textbf{0.976}           \\
+                                &                            & MLP            & 9.850                & 16.53\%  &      0.917              \\
+                                &                            & Paleo            & 29.351               & 62.08\%  &    0.271                   \\ \hline
+      \multirow{6}{*}{ResNet-101} & \multirow{3}{*}{$32\times32\times3$}   & PreTopo          & \textbf{6.356}        & \textbf{13.48\%}   &    \textbf{0.206}           \\
+                                  &                            & MLP            & 22.521                & 29.30\%  &      -              \\
+                                &                            & Paleo            & 33.050               & 71.34\%  &      -                   \\ \cline{2-6} 
+                                & \multirow{3}{*}{$224\times224\times3$} & PreTopo          & \textbf{6.711}      & \textbf{6.42\%}  &    \textbf{0.984}           \\
+                                &                            & MLP            & 7.763                & 9.49\%  &      0.979              \\
+                                &                            & Paleo            & 45.650               & 59.86\%  &    0.290                   \\ \hline
+      \multirow{6}{*}{GoogLeNet} & \multirow{3}{*}{$32\times32\times3$}   & PreTopo          & \textbf{2.210}        & \textbf{4.76\%}   &    \textbf{0.038}           \\
+                                  &                            & MLP            &  2.466               & 5.31\%  &          -          \\
+                                &                            & Paleo            &      38.890          & 94.84\%  &         -                \\ \cline{2-6} 
+                                & \multirow{3}{*}{$224\times224\times3$} & PreTopo          & \textbf{3.860}      & \textbf{8.12\%}  &    \textbf{0.749}           \\
+                                &                            & MLP            &   4.383              & 8.57\%  &         0.677          \\
+                                &                            & Paleo            &     36.019           & 83.07\%  &         -              \\ \hline
+  
+    \end{tabular}
+    }}
+\end{table}
+
+\textbf{2. 通信时间预测}
+
+首先对单链路通信时间预测结果进行评估。在\autoref{subsection_2_4_1}中分别测试了使用$all\underline{~}reduce$和$broadcast$通信不同大小的数据所需的时间，接下来利用基于$all\underline{~}reduce$的单链路通信时间预测模型和基于$broadcast$的单链路通信时间预测模型对相应的数据进行拟合。由于PIX、NODE和SYS三种物理链路的带宽不同，因此本节为分别它们建立对应的单链路模型。对于基于$all\underline{~}reduce$的通信，本节将PreTopo与固定带宽的模型进行比较，而对于基于$broadcast$的通信，由于我们采用分段模型对Sigmoid模型进行了改进，因此本节还将PreTopo与未分段的Sigmoid模型进行了对比。实验结果如\autoref{tab:result_single_link_comm}所示，表中的每个值为不同通信数据量的预测结果的平均值。可以发现，PreTopo在不同物理链路上的MAPE不超过12\%，并且对于基于$all\underline{~}reduce$的通信，PreTopo优于固定带宽的模型45\%以上，对于基于$broadcast$的通信，PreTopo优于其他两种模型50\%以上。此外，PreTopo的RMSE小于0.7ms，$R^2$大于等于0.998，均优于其他模型。
+
+当通信数据大小达到某个阈值时，实时吞吐量变得大约等于理论上的恒定带宽。因此，上述所有预测模型在这种情况下表现出相似的性能。当通信数据很小时，实时吞吐量将变得小于理论恒定带宽，使得恒定带宽模型不适于精确预测。此外，在我们的实验中，我们发现，当通信数据大小小于0.14MB时，类sigmoid模型的预测性能会显著下降。由于大多数数据通信都大于此大小，因此在实践中可以忽略估计缺陷
+
+\begin{table}[!htpb]
+    \center
+    \caption{单链路通信时间预测结果}
+    \label{tab:result_single_link_comm}
+    \setlength{\tabcolsep}{3mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.9}{
+    \begin{tabular}{|c|c|c|ccc|}
+      \hline
+      通信原语         & 物理链路    & 预测方法          & RMSE(ms)              & MAPE(\%) & $R^2$ \\ \hline
+      \multirow{6}{*}{$all\underline{~}reduce$}    & \multirow{2}{*}{PIX}  & PreTopo & \textbf{0.514} &  \textbf{8.97\%}        &   \textbf{0.999}                   \\
+                                &                       & 固定带宽模型                 &   0.688             & 54.00\%     &  0.999              \\ \cline{2-6} 
+                                & \multirow{2}{*}{NODE} & PreTopo &   \textbf{0.172}             &  \textbf{8.32\%}      &   \textbf{0.999}                   \\
+                                &                       & 固定带宽模型                 &   0.330              & 59.41\%    &   0.999              \\ \cline{2-6} 
+                                & \multirow{2}{*}{SYS}  & PreTopo &   \textbf{0.253}              & \textbf{6.89\%}      &  \textbf{0.999}                    \\
+                                &                       & 固定带宽模型                 &   0.382             &  59.71\%        & 0.998                \\ \hline
+      \multirow{9}{*}{$broadcast$} & \multirow{3}{*}{PIX}  & PreTopo &   \textbf{0.226}         &  \textbf{11.06\%}     &  \textbf{0.999}                    \\
+                                &                       & 基于Sigmoid的模型               &  0.439              &  102.65\%   &    0.996             \\
+                                &                       & 固定带宽模型                 &  0.560              &  63.99\%   &    0.993             \\\cline{2-6} 
+                                & \multirow{3}{*}{NODE} & PreTopo &  \textbf{0.206}              &   \textbf{9.79\%}   &  \textbf{0.999}                    \\
+                                &                       & 基于Sigmoid的模型                &  0.293              &   74.49\%   & 0.998              \\ 
+                                &                       & 固定带宽模型                 &  0.407              &   65.23\%   & 0.996              \\ \cline{2-6} 
+                                & \multirow{3}{*}{SYS}  & PreTopo &  \textbf{0.316}              &  \textbf{9.21\%}    &  \textbf{0.998}                    \\
+                                &                       & 基于Sigmoid的模型                 &  0.378               & 80.94\%    &  0.997               \\ 
+                                &                       & 固定带宽模型                 &  0.348               & 65.51\%    &  0.997               \\ \hline
+    \end{tabular}
+    }}
+\end{table}
 
 \section{本章小结}
 

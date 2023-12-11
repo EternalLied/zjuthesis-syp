@@ -151,6 +151,7 @@
     \item 通信时间预测。首先分析实时吞吐量随通信数据量的变化并建立单链路通信时间预测模型。然后基于对分布式训练中常用的集合通信原语的执行机理的分析，结合单链路模型建立多GPU通信时间预测模型。最后通过分析在特定分布式训练架构上利用各种拓扑结构进行通信所需的通信次数以及每次参与通信的GPU集合，并利用已经建立的单链路模型和多GPU模型，建立适用于一般拓扑的通信时间预测模型。
     \item 计算与通信的并行性分析。在得到各神经网络层的计算时间和通信时间之后，PreTopo为集群中的每个节点和每条边建立对应的操作队列和设备时间，并根据分布式训练的执行流程依次将每个计算操作和通信操作加入到其操作队列中，然后更新相应的设备时间。最后基于每个操作开始执行和结束执行的设备时间提取关键路径，进而预测分布式训练的迭代时间。
 \end{itemize}
+\autoref{Algorithm-PreTopo}总结了PreTopo的执行流程。
 
 \begin{figure}[!htbp]   
     \centering
@@ -158,18 +159,17 @@
     \caption{\label{fig:Fig2-5}PreTopo框架图}
 \end{figure}
 
-\textcolor{red}{此处补充一个算法流程图}
 \begin{center}
 % \begin{minipage}{8.5cm}
 \begin{algorithm}[!htbp]
-      \caption{\textbf{PerfTop}: \underline{Perf}ormance prediction framework over general \underline{Top}ologies} 
+      \caption{PreTopo的执行流程} 
       % \small
       \label{Algorithm-PreTopo} 
         \begin{algorithmic}[1]
-        \REQUIRE{The depth of neural network $l$; The type of each neural network layer $layer_i, i\in{1,...,l}$; The set of features for each neural network layer $\boldsymbol{c}_{nn}^{layer_i}$; The set of hardware features of GPU $\boldsymbol{c}_{gpu}$; The set of communication features of the cluster $\boldsymbol{c}_{cluster}$}.
-        \ENSURE{The iteration time of distributed training $T_{iter}$}.
-        \FOR{each layer $i \in [1, l]$}
-            \STATE Calculate the expanded features of $layer_i$ using Eq.~\eqref{tab:features_fomula}
+        \REQUIRE{神经网络的层数$l$；各神经网络层的类型$layer_i, i\in{1,...,l}$；各神经网络层的特征$\boldsymbol{c}_{nn}^{layer_i}$；GPU的硬件特征$\boldsymbol{c}_{gpu}$；集群的通信特征$\boldsymbol{c}_{cluster}$}。
+        \ENSURE{分布式训练的迭代时间$T_{iter}$}。
+        \FOR{$i \in [1, l]$}
+            \STATE 基于\autoref{tab:features_fomula}计算第$i$个神经网络层的扩充特征：
             \begin{align*}
             \small
                 &mem_w=\begin{cases}
@@ -180,26 +180,23 @@
                 &m_{out}=\lfloor \frac{m_{in}+2p-k}{s} \rfloor +1,\\
                 &ops_{conv}=bm_{out}^2k^2c_{in}c_{out}, \hspace{0.2in} ops_{fc}=bd_{in}d_{out}.
             \end{align*}
-            
-            \STATE Predict computation time using the MLP model.
+            \STATE 使用多层感知器模型预测第$i$个神经网络层的计算时间。
         \ENDFOR
-        \STATE \textbf{end for}
-        \IF{data communication is realized by \texttt{distributed.} \texttt{all\underline{~}reduce}}
-        \STATE Predict the communication time using Equation
+        \IF{通信是基于$all\underline{~}reduce$进行的}
+        \STATE 基于\autoref{tab:multi_gpu_allreduce}预测通信时间：
         \begin{align*}
         \small
             t_{all\underline{~}reduce}^{cluster}=\left( m-1 \right) \cdot t_{all\underline{~}reduce}^{link}\left( \frac{2N}{m} \right),
         \end{align*}
         \ELSE
-        \STATE Obtain the number of communications $c$ and the set of communication links $links_i$ based on consensus protocol.
-        \STATE Predict the communication time using Equation
+        \STATE 根据分布式训练架构和拓扑结构分析一次迭代需要进行的通信次数$c$以及每次通信涉及的通信链路的集合$links_i$。
+        \STATE 基于\autoref{tab:topo_based_on_broadcast}预测通信时间：
         \begin{align*}
         \small
             t_{comm}=\sum_{i=1}^c{t_{broadcast}^{cluster}\left( n_i, links_i \right)},
         \end{align*}
         \ENDIF
-        \STATE \textbf{end if}
-        \STATE Extract the critical path and compute the iteration time.
+        \STATE 提取关键路径并计算迭代时间。
         \end{algorithmic}
 \end{algorithm}
 % \end{minipage}
@@ -314,22 +311,22 @@
 
 基于我们的分析方法，只要为每种类型的物理链路建立基于$all\underline{~}reduce$的单链路通信时间预测模型（物理链路类型通常为\autoref{section2-2-3}中提到的五种类型），即可得到在任意规模的GPU集群上使用$all\underline{~}reduce$进行通信所需的时间。
 
-与$all\underline{~}reduce$不同，基于$broadcast$的通信主要用于将一个节点的数据发送给其他节点。传统的$broadcast$操作是利用链式拓扑将待通信的数据从源节点依次发送给每个节点，因此通信时间会随着GPU的数目线性增加。为了提高通信效率，英伟达提出的NCCL（Nvidia Collective multi-GPU Communication Library）通信库对$broadcast$的通信模式进行了改进。如\autoref{fig:Fig2-9}所示，在开始通信之前，源节点将待通信的数据切分为$S$个数据块，然后从源节点开始依次将$S$个数据块发送给下一个节点。即在第$k$次通信时，第$i\left(\max \left( 2, k-S+2 \right) \leqslant i\leqslant \min \left( k+1, n-1 \right)\right)$个节点从第$i-1$个节点接收第$k+2-i$个数据块，并将第$k+1-i$个数据块发送给第$i+1$个节点，如此进行$S+n-2$次通信使得每个节点最终都接收到完整的数据。
-
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.5\linewidth]{figure/chapter2/fig2-9-broadcast.png}
+    \includegraphics[width=0.48\linewidth]{figure/chapter2/fig2-9-broadcast.pdf}
     \caption{\label{fig:Fig2-9}基于$broadcast$的通信流程}
 \end{figure}
+
+与$all\underline{~}reduce$不同，基于$broadcast$的通信主要用于将一个节点的数据发送给其他节点。传统的$broadcast$操作是利用链式拓扑将待通信的数据从源节点依次发送给每个节点，因此通信时间会随着GPU的数目线性增加。为了提高通信效率，英伟达提出的NCCL（Nvidia Collective multi-GPU Communication Library）通信库对$broadcast$的通信模式进行了改进。如\autoref{fig:Fig2-9}所示，在开始通信之前，源节点将待通信的数据切分为$S$个数据块，然后从源节点开始依次将$S$个数据块发送给下一个节点。即在第$k$次通信时，第$i\left(\max \left( 2, k-S+2 \right) \leqslant i\leqslant \min \left( k+1, n-1 \right)\right)$个节点从第$i-1$个节点接收第$k+2-i$个数据块，并将第$k+1-i$个数据块发送给第$i+1$个节点，如此进行$S+n-2$次通信使得每个节点最终都接收到完整的数据。
+
 
 基于上述broadcast的原理，我们建立如下多节点broadcast通信时间预测模型：
 \begin{equation}
     \label{tab:multi_gpu_broadcast}
-        t_{broadcast}^{cluster}=\left( S+n-2 \right) t_{broadcast}^{link}\left( \frac{N}{S} \right).
+    t_{broadcast}^{cluster}=\left( S+n-2 \right) t_{broadcast}^{link}\left( \frac{N}{S} \right).
 \end{equation}
 考虑到不同GPU之间可能经过不同的物理链路进行通信，例如\autoref{fig:Fig2-4}中有三种不同的物理链路，并且这三种链路对应着不同的通信带宽。因此，我们将\autoref{tab:multi_gpu_broadcast}进一步精细化为：
 \begin{equation}
-    \small
     \label{tab:multi_gpu_broadcast_refined}
     \begin{aligned}
         t_{broadcast}^{cluster}\left( n, links \right) =&\left( S-1 \right) \cdot t_{broadcast}^{link_j}\left( \frac{N}{S} \right)+\sum_{link_i\in links}{t_{broadcast}^{link_i}\left( \frac{N}{S} \right)}\\t_{broadcast}^{link_j}=&\underset{link_i\in links}{\max}t_{broadcast}^{link_i},
@@ -337,13 +334,21 @@
 \end{equation}
 其中$links=\left\{ link_1,..., link_{n-1} \right\}$是参与通信的所有物理链路的集合。
 
-\textbf{3. 一般拓扑上的集群通信时间预测模型}
+\textbf{3. 面向一般拓扑的集群通信时间预测模型}
 
-由于基于$all\underline{~}reduce$的通信采用固定的环形拓扑，因此在分布式深度学习中，各种通信拓扑上的训练通常是基于$broadcast$来实现通信。利用上一小结中建立的单链路通信时间预测模型和多GPU通信时间预测模型，参考项目结题文档
-
-然后讲Gossip架构和All-Reduce架构分别进行1次通信和多次通信。
+由于基于$all\underline{~}reduce$的通信采用固定的环形拓扑，因此在分布式深度学习中，通常基于$broadcast$来实现不同拓扑上的通信。为了预测不同拓扑上的集群通信时间，我们分析了在给定的通信拓扑上完成分布式训练一次迭代所需的通信次数和每次通信涉及的通信链路集合。具体而言，基于Gossip架构的分布式训练每次迭代只需通信一次，而基于All-Reduce架构的分布式训练需要执行多次通信以实现全局数据平均。另外，每次通信通信所需时间取决于与邻居通信最久的节点，因此可以通过对所有节点的通信时间取最大值得到。于是，集群通信时间可以由下式得到：
+\begin{equation}
+    \label{tab:topo_based_on_broadcast}
+    \begin{aligned}
+        t_{comm}&=\sum_{i=1}^c{t_{broadcast}^{cluster}\left( n_i,links_i \right)}\\
+        &=\sum_{i=1}^c{\underset{j\in \left\{ 1,...,n \right\}}{\max}\,\,t_{broadcast}^{cluster}\left( n_{i}^{j},links_{i}^{j} \right)},
+    \end{aligned}
+\end{equation}
+其中$c$是通信次数，$n_i$是参与第$i$次通信的节点数目，$links_i$是第$i$次通信涉及的通信链路的集合，$n_{i}^{j}$是节点$j$与其邻居中参与第$i$次通信的节点数目，$links_{i}^{j}$是节点$j$与其邻居参与第$i$次通信涉及的通信链路的集合。
 
 \subsection{计算与通信的并行性分析}
+
+
 
 \section{算力分析}
 \subsection{数据准备}\label{subsection_2_4_1}

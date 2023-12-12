@@ -5,7 +5,7 @@
 
 为了分析性能瓶颈，需要获得分布式训练每一环节的执行时间。考虑到在各种规模的GPU集群上实际部署分布式深度学习任务需要较高的成本，直接测量执行时间变得不可行。因此，预测分布式训练所需时间成为一种有效的解决方案。通过预测的方式，可以快速且低成本地分析性能瓶颈，进而确定一个相对高效的GPU集群规模用于部署分布式深度学习任务。
 
-根据分布式训练的执行流程，分布式训练时间受到神经网络结构、GPU集群的拓扑结构、网络通信带宽等众多特征的影响，这些特征与训练时间之间往往呈现复杂的非线性关系，并且某些特征之间还存在耦合关系，从而大大增加建立准确的训练时间预测模型的难度。现有的方法虽然能够预测给定条件下的分布式训练时间，但是大都基于简单拓扑（星形拓扑或环形拓扑），并且其中一些方法还存在通信时间预测模型过于简单和没有考虑计算与通信之间耦合关系的问题。
+根据分布式训练的执行流程，分布式训练时间受到神经网络结构、GPU集群的拓扑结构、网络通信带宽等众多特征的影响，这些特征与训练时间之间往往呈现复杂的非线性关系，并且某些特征之间还存在耦合关系，从而大大增加建立准确的训练时间预测模型的难度。现有的方法虽然能够预测给定条件下的分布式训练时间，但是都是基于简单拓扑（星形拓扑或环形拓扑），并且其中一些方法还存在通信时间预测模型过于简单和没有考虑计算与通信之间耦合关系的问题。
 
 因此，针对上述问题，本章提出了一种预测一般拓扑上分布式深度学习任务训练时间的方法。首先，对训练时间进行建模并详细分析了影响分布式深度学习训练时间的特征。然后，分别建立了基于MLP的计算时间预测模型和基于机理分析的通信时间预测模型。其中在计算时间预测部分，本章通过分析神经网络的计算原理引入了额外的特征，进一步提高了预测精度，另外还建立了不同神经网络层的基准测试数据集用于训练对应的MLP模型。在通信时间预测部分，本章通过分析深度学习框架中集合通信原语的执行机理和拓扑结构的通信特征建立了细粒度的通信时间预测模型，该模型适用于各种参数同步拓扑上的通信时间预测。为了提高预测精度，本章还通过分析计算与通信的并行关系提取了分布式训练的关键路径，用于预测训练时间。最后，通过与真实GPU集群上测试的分布式训练卷积神经网络模型所需训练时间的比较验证了本章提出方法的有效性。
 
@@ -183,7 +183,7 @@
             \STATE 使用多层感知器模型预测第$i$个神经网络层的计算时间。
         \ENDFOR
         \IF{通信是基于$all\underline{~}reduce$进行的}
-        \STATE 基于\autoref{tab:multi_gpu_allreduce}预测通信时间：
+        \STATE 基于\autoref{tab:multi_gpu_allreduce_based_multiGPU}预测通信时间：
         \begin{align*}
         \small
             t_{all\underline{~}reduce}^{cluster}=\left( m-1 \right) \cdot t_{all\underline{~}reduce}^{link}\left( \frac{2N}{m} \right),
@@ -307,9 +307,9 @@
     \label{tab:multi_gpu_allreduce_based_multiGPU}
         t_{all\underline{~}reduce}^{cluster}=\frac{m-1}{s-1}\cdot t_s\left( \frac{sN}{m} \right),
 \end{equation}
-其中$s$是建模所使用的GPU数目。\autoref{subsection_2_4_3}中对\autoref{tab:multi_gpu_allreduce}和\autoref{tab:multi_gpu_allreduce_based_multiGPU}的预测结果进行了对比分析。
+其中$s$是建模所使用的GPU数目，\autoref{tab:multi_gpu_allreduce}可以看作是$s=2$的特例。
 
-基于上述分析方法，只要为每种类型的物理链路建立基于$all\underline{~}reduce$的单链路通信时间预测模型（物理链路类型通常为\autoref{section2-2-3}中提到的五种类型），即可得到在任意规模的GPU集群上使用$all\underline{~}reduce$进行通信所需的时间。
+基于上述分析方法，只要为每种类型的物理链路建立基于$all\underline{~}reduce$的单链路通信时间预测模型或者在使用\autoref{tab:multi_gpu_allreduce_based_multiGPU}建立预测模型时，使用的小规模GPU集群中包含所有类型的物理链路（物理链路类型通常为\autoref{section2-2-3}中提到的五种类型），即可预测在任意规模的GPU集群上使用$all\underline{~}reduce$进行通信所需的时间。
 
 \begin{figure}[!htbp]   
     \centering
@@ -524,6 +524,7 @@
 
 首先对上述四种类型的神经网络层的预测结果进行评估，为了说明特征扩充对预测模型精度的提升，本节进行了消融实验——将PreTopo与没有进行特征扩充的MLP模型进行对比。由于池化层和批归一化层的预测精度较高，因此在建模时没有对池化层和批归一化层进行特征扩充。\autoref{tab:result_layer_type}展示了在验证集上得到的预测结果。可以看到，特征扩充提升了卷积层和全连接层的计算时间预测精度。另外，在四种类型的神经网络层中，卷积层表现出最大的预测误差，这主要归因于它较高的计算复杂度。因为深度学习框架针对卷积运算进行了优化，会根据矩阵大小的不同选择不同的算法实现卷积运算，从而增大MLP模型训练的难度，导致难以准确预测卷积层的计算时间。不过PreTopo的MAPE仍然保持在18\%以下，并且$R^2$可以达到0.9以上。对于常见的卷积配置，PreTopo的预测误差会低于表中的平均结果，这点从后面的实验结果中可以得到证实。
 
+\renewcommand\arraystretch{0.8}
 \begin{table}[!htpb]
     \center
     \caption{不同类型神经网络层的计算时间预测结果}
@@ -536,10 +537,10 @@
       \hline
       \multirow{2}{*}{卷积层}     &     PreTopo     &  \textbf{5.610}  &  \textbf{17.90\%}    &    \textbf{0.904} \\
                                                    &    MLP         &  6.850      &    19.90\%    &    0.858 \\ \hline
-      \multirow{1}{*}{池化层}               &  PreTopo     & 0.069      &  8.92\%    &   0.997 \\\hline
+      池化层               &  PreTopo     & 0.069      &  8.92\%    &   0.997 \\\hline
       \multirow{2}{*}{全连接层}       &  PreTopo     &  \textbf{0.157}      &    \textbf{13.20\%}    &  \textbf{0.951} \\
                                               &    MLP         &  0.187      &    14.6\%    &    0.946 \\ \hline
-      \multirow{1}{*}{批归一化层}         &  PreTopo     &  0.209      &   3.86\%    &   0.994 \\
+      批归一化层         &  PreTopo     &  0.209      &   3.86\%    &   0.994 \\
       \hline
     \end{tabular}
     }}
@@ -587,9 +588,11 @@
 
 \textbf{2. 通信时间预测}
 
+1）单链路通信时间预测
+
 首先对单链路通信时间预测结果进行评估。在\autoref{subsection_2_4_1}中分别测试了使用$all\underline{~}reduce$和$broadcast$通信不同大小的数据所需的时间，接下来利用基于$all\underline{~}reduce$的单链路通信时间预测模型和基于$broadcast$的单链路通信时间预测模型对相应的数据进行拟合。由于PIX、NODE和SYS三种物理链路的带宽不同，因此本节为分别它们建立对应的单链路模型。对于基于$all\underline{~}reduce$的通信，本节将PreTopo与固定带宽的模型进行比较，而对于基于$broadcast$的通信，由于我们采用分段模型对Sigmoid模型进行了改进，因此本节还将PreTopo与未分段的Sigmoid模型进行了对比。实验结果如\autoref{tab:result_single_link_comm}所示，表中的每个值为不同通信数据量的预测结果的平均值。可以发现，PreTopo在不同物理链路上的MAPE不超过12\%，并且对于基于$all\underline{~}reduce$的通信，PreTopo优于固定带宽的模型45\%以上，对于基于$broadcast$的通信，PreTopo优于其他两种模型50\%以上。此外，PreTopo的RMSE小于0.7ms，$R^2$大于等于0.998，均优于其他模型。
 
-当通信数据大小达到某个阈值时，实时吞吐量变得大约等于理论上的恒定带宽。因此，上述所有预测模型在这种情况下表现出相似的性能。当通信数据很小时，实时吞吐量将变得小于理论恒定带宽，使得恒定带宽模型不适于精确预测。此外，在我们的实验中，我们发现，当通信数据大小小于0.14MB时，类sigmoid模型的预测性能会显著下降。由于大多数数据通信都大于此大小，因此在实践中可以忽略估计缺陷
+根据测试结果，当通信数据量足够大时，实时吞吐量近似等于链路的最大带宽。因此，上述所有预测模型在这种情况下表现出相似的性能。当通信数据量减小时，实时吞吐量将变得小于链路的最大带宽，使得固定带宽的模型无法准确预测通信时间。此外，在基于$broadcast$进行通信并且通信数据量小于0.14MB时，基于Sigmoid的模型的预测性能会显著下降。综上所述，PreTopo在单链路通信时间预测上优于其他两种方法。
 
 \begin{table}[!htpb]
     \center
@@ -601,24 +604,100 @@
       \hline
       通信原语         & 物理链路    & 预测方法          & RMSE(ms)              & MAPE(\%) & $R^2$ \\ \hline
       \multirow{6}{*}{$all\underline{~}reduce$}    & \multirow{2}{*}{PIX}  & PreTopo & \textbf{0.514} &  \textbf{8.97\%}        &   \textbf{0.999}                   \\
-                                &                       & 固定带宽模型                 &   0.688             & 54.00\%     &  0.999              \\ \cline{2-6} 
+                                &                       & 固定带宽的模型                 &   0.688             & 54.00\%     &  0.999              \\ \cline{2-6} 
                                 & \multirow{2}{*}{NODE} & PreTopo &   \textbf{0.172}             &  \textbf{8.32\%}      &   \textbf{0.999}                   \\
-                                &                       & 固定带宽模型                 &   0.330              & 59.41\%    &   0.999              \\ \cline{2-6} 
+                                &                       & 固定带宽的模型                 &   0.330              & 59.41\%    &   0.999              \\ \cline{2-6} 
                                 & \multirow{2}{*}{SYS}  & PreTopo &   \textbf{0.253}              & \textbf{6.89\%}      &  \textbf{0.999}                    \\
-                                &                       & 固定带宽模型                 &   0.382             &  59.71\%        & 0.998                \\ \hline
+                                &                       & 固定带宽的模型                 &   0.382             &  59.71\%        & 0.998                \\ \hline
       \multirow{9}{*}{$broadcast$} & \multirow{3}{*}{PIX}  & PreTopo &   \textbf{0.226}         &  \textbf{11.06\%}     &  \textbf{0.999}                    \\
                                 &                       & 基于Sigmoid的模型               &  0.439              &  102.65\%   &    0.996             \\
-                                &                       & 固定带宽模型                 &  0.560              &  63.99\%   &    0.993             \\\cline{2-6} 
+                                &                       & 固定带宽的模型                 &  0.560              &  63.99\%   &    0.993             \\\cline{2-6} 
                                 & \multirow{3}{*}{NODE} & PreTopo &  \textbf{0.206}              &   \textbf{9.79\%}   &  \textbf{0.999}                    \\
                                 &                       & 基于Sigmoid的模型                &  0.293              &   74.49\%   & 0.998              \\ 
-                                &                       & 固定带宽模型                 &  0.407              &   65.23\%   & 0.996              \\ \cline{2-6} 
+                                &                       & 固定带宽的模型                 &  0.407              &   65.23\%   & 0.996              \\ \cline{2-6} 
                                 & \multirow{3}{*}{SYS}  & PreTopo &  \textbf{0.316}              &  \textbf{9.21\%}    &  \textbf{0.998}                    \\
                                 &                       & 基于Sigmoid的模型                 &  0.378               & 80.94\%    &  0.997               \\ 
-                                &                       & 固定带宽模型                 &  0.348               & 65.51\%    &  0.997               \\ \hline
+                                &                       & 固定带宽的模型                 &  0.348               & 65.51\%    &  0.997               \\ \hline
     \end{tabular}
     }}
 \end{table}
 
+2）多GPU通信时间预测
+
+接下来对多GPU通信时间预测结果进行评估。对于$all\underline{~}reduce$，本节利用\autoref{tab:multi_gpu_allreduce_based_multiGPU}对8个GPU上的通信时间进行预测，分别设置$s=2$、$s=5$和$s=8$。实验结果如\autoref{fig:Fig2-11}所示。可以看到，$s=8$时，预测的通信时间与真实测量时间基本一致，这是因为建立预测模型使用的节点数目与待预测的节点数目相同，此时模型参数由真实测量数据拟合得到。$s=5$时，本节选择的5个GPU为GPU1\~{}GPU5，它们之间基于$all\underline{~}reduce$进行通信时会使用硬件系统中的三种物理链路，因此$s=5$时同样可以比较准确地预测通信时间。$s=2$时，预测模型基于单链路预测模型得到，因此预测误差相对较大，不过仍然可以比较准确地预测出通信时间的变化趋势。上述实验结果验证了\autoref{subsection_2_3_3}中对规模扩展性的分析。
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.65\linewidth]{figure/chapter2/fig2-11-allreduce_pred_by_different_nodes.pdf}
+    \caption{\label{fig:Fig2-11}基于$all\underline{~}reduce$的8个GPU上的通信时间预测结果}
+\end{figure}
+
+对于$broadcast$，本节将PreTopo与基于Sigmoid的模型和固定带宽的模型进行比较。考虑到现有的方法没有对集合通信原语进行分析，因此本节对比的基于Sigmoid的模型和固定带宽的模型同样基于\autoref{tab:multi_gpu_broadcast_refined}，不过将其中的单链路模型替换为对应的基于Sigmoid的模型和固定带宽的模型。\autoref{fig:Fig2-12}展示了三种方法对不同数目GPU的通信时间的预测结果，其中MAPE的值为不同通信数据量的预测结果的平均值。可以看到PreTopo的预测精度分别优于基于Sigmoid的模型和固定带宽的模型12.59\%以上和2.17\%以上。另外，三种方法的MAPE随着GPU数量的增加而逐渐增加，这主要是由于在每次通信之前基于GPU数量的数据分块机制。GPU数目越多，每个数据块的数据量越小，而单链路模型在数据量较小时容易产生较大的MAPE，从而使得基于\autoref{tab:multi_gpu_broadcast_refined}的多GPU通信时间预测模型的MAPE增加。在分布式深度学习中，为了降低通信开销，每个节点的邻居数目通常不会过多，因此PreTopo可以保持较高的预测精度。
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.65\linewidth]{figure/chapter2/fig2-12-error_multigpu_broadcast.pdf}
+    \caption{\label{fig:Fig2-12}基于$broadcast$的多GPU通信时间预测结果}
+\end{figure}
+
+3）一般拓扑上的通信时间预测
+
+进一步地，对PreTopo在不同拓扑上的通信时间预测结果进行评估。本节选择\autoref{fig:Fig2-13}所示的五种拓扑作为待预测的拓扑结构，其中前四种拓扑基于All-Reduce架构，最后一种拓扑基于Gossip架构。实验结果如\autoref{fig:Fig2-14}所示，其中MAPE的值为不同通信数据量的预测结果的平均值。可以看到，PreTopo在五种拓扑上的MAPE都小于15\%，优于基于Sigmoid的模型和固定带宽的模型。由此验证了PreTopo对于预测一般拓扑上的通信时间的有效性。
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[环形拓扑]{
+        \includegraphics[width=0.18\linewidth]{figure/chapter2/fig2-13-1-different-topo.pdf}
+    }
+    \subfigure[树形拓扑]{
+        \includegraphics[width=0.18\linewidth]{figure/chapter2/fig2-13-2-different-topo.pdf}
+    }
+    \subfigure[分层拓扑]{
+        \includegraphics[width=0.18\linewidth]{figure/chapter2/fig2-13-3-different-topo.pdf}
+    }
+    \subfigure[2D-Torus]{
+        \includegraphics[width=0.18\linewidth]{figure/chapter2/fig2-13-4-different-topo.pdf}
+    }
+    \subfigure[指数拓扑]{
+        \includegraphics[width=0.18\linewidth]{figure/chapter2/fig2-13-5-different-topo.pdf}
+    }
+    \caption{基于$broadcast$实现的不同通信拓扑}
+    \label{fig:Fig2-13}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.65\linewidth]{figure/chapter2/fig2-14-error_topo_comm.pdf}
+    \caption{\label{fig:Fig2-14}不同拓扑上的通信时间预测结果}
+\end{figure}
+
+\textbf{3. 迭代时间预测}
+
+为了验证PreTopo对于预测一般拓扑上分布式深度学习训练时间的有效性，本节选择ResNet-50作为待预测的神经网络模型，将输入尺寸设置为224×224×3，优化算法采用SGD算法，分别测试基于Ring All-Reduce算法进行分布式训练和在上述五种拓扑上进行分布式训练所需的迭代时间，并使用PreTopo对迭代时间进行预测。
+
+首先，基于Ring All-Reduce算法进行分布式训练，并对迭代时间预测结果进行评估。设置每个节点的批大小从1变化到32（8个节点的总批大小从8变化到256），分别对计算与通信有并行和无并行两种场景进行预测，得到如\autoref{fig:Fig2-15}所示的实验结果。由于计算和通信的并行执行提高了分布式训练的效率，因此并行执行的迭代时间少于没有并行执行的迭代时间。此外，对于这两种场景，PreTopo均能够比较准确地预测迭代时间，这主要是因为PreTopo对计算和通信的并行关系进行了细粒度的分析。
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.65\linewidth]{figure/chapter2/fig2-15-pred_result_ring_overlap.pdf}
+    \caption{\label{fig:Fig2-15}基于Ring All-Reduce算法的分布式训练迭代时间预测结果}
+\end{figure}
+
+接下来，在上述五种拓扑上进行分布式训练（无计算与通信的并行执行），并对迭代时间预测结果进行评估。由于现有的训练时间预测方法均不适用于一般拓扑，因此本节将Paleo与固定带宽的通信时间预测模型结合，作为本节的对比方法。实验结果如\autoref{fig:Fig2-16}所示，其中MAPE的值为不同批大小的预测结果的平均值。可以看到，对于给定的五种拓扑，PreTopo的MAPE分别为4.84\%，2.40\%，9.28\%，13.26\%和7.47\%，均小于15\%，并且优于对比方法大约10\%。
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.65\linewidth]{figure/chapter2/fig2-16-error_dist_time.pdf}
+    \caption{\label{fig:Fig2-16}不同拓扑上的分布式训练迭代时间预测结果}
+\end{figure}
+
+% 以上所有实验结果证明了本章提出的PreTopo对于预测分布式深度学习训练时间的有效性。
+
 \section{本章小结}
+
+在分布式深度学习领域，现有的训练时间预测方法都是基于简单的星形拓扑或环形拓扑。本章提出了一种新的训练时间预测方法，能够实现对一般拓扑上的分布式深度学习训练时间的准确预测。该方法将分布式训练时间分解为计算时间和通信时间，并分别建立了基于MLP的计算时间预测模型和基于机理分析的通信时间预测模型。为了提高计算时间预测的精度，通过分析各神经网络层的执行机理对特征进行了扩充。对于通信预测，通过分析集合通信原语的执行机理和不同拓扑的通信特征建立了细粒度的通信时间预测模型。此外，通过计算与通信的并行关系分析进一步精细化了预测模型。在实际分布式深度学习场景的验证实验表明，本章提出的预测方法优于现有的方法，能够有效预测不同拓扑上的分布式深度学习训练时间。
+
+本章的工作可用于分析分布式深度学习中的性能瓶颈，并衡量不同规模GPU集群上的训练效率，从而有助于优化分布式深度学习的训练时间。
+
 
 

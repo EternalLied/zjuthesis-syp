@@ -95,7 +95,23 @@
 
 \subsection{同构带宽下的拓扑优化问题}
 
+在实际分布式深度学习场景中，拓扑的设计需要考虑通信开销，以实现一致性速度和每次迭代所需通信时间的权衡。本小节考虑同构带宽场景下的通信开销，对\autoref{tab:LA_optimization_problem}描述的优化问题进行改进，以设计稀疏的参数同步拓扑。其中同步带宽指集群中每个节点的可用带宽相同。
 
+为了保证拓扑的稀疏性，对优化问题引入边的数目的约束。此外，为了同时对拓扑结构和权重矩阵进行优化，将底层拓扑结构设置为全连接拓扑，此时$\mathcal{S}$为实数域上所有$n$维权重矩阵的集合，因此约束条件$W\in \mathcal{S}$可以去掉，进而得到如下优化问题形式：
+\begin{equation}
+    \label{tab:equ-3-12}
+    \begin{matrix}
+        \min&		\max \left\{ \left| \lambda _2\left( W \right) \right|,\left| \lambda _n\left( W \right) \right| \right\}\\
+        s.t.&		\begin{array}{c}
+        W=W^T, \ W\mathbf{1}=\mathbf{1}\\
+        \mathbf{g}\ge 0, \ \mathbf{Card}\left( \mathbf{g} \right) \le r\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+其中$\mathbf{g}\in \mathbb{R}^m$是拓扑中边的权重，$m=\frac{n\left( n-1 \right)}{2}$，$\mathbf{Card}$表示向量中不为0的元素的数量。Gao等人\cite{gao2011cardinality}将形如\autoref{tab:equ-3-12}的优化问题称为基于基数约束的优化问题（Cardinality Constrained Optimization Problems，简称CCOPs）。
+
+基于拉普拉斯矩阵对3-12进行转换，
+由于矩阵特征值的求解十分复杂，因此引入辅助变量将优化问题转换为LMI问题
 
 \subsection{异构带宽下的拓扑优化问题}
 

@@ -1,14 +1,103 @@
 \chapter{面向高效通信的参数同步拓扑优化}
 \section{引言}
 
-在分析了分布式深度学习的性能瓶颈之后，优化性能瓶颈成为需要解决的关键问题，即优化分布式训练的通信过程，从而缩短训练时间。在分布式深度学习中，参数同步拓扑决定了哪些GPU之间可以进行通信，因而对训练时间有着重要的影响。具体而言，参数同步拓扑从两个方面影响分布式深度学习的训练时间。一方面，参数同步拓扑的度决定了每次迭代所需的通信时间，此处拓扑的度指拓扑中节点的邻居数。在基于Gossip架构的同步算法中，各节点同时与邻居节点进行通信，当各节点的可用带宽相同时，邻居数目最多的节点的通信时间即为每次迭代所需的通信时间。另一方面，
+在分析了分布式深度学习的性能瓶颈之后，优化性能瓶颈成为需要解决的关键问题，即优化分布式训练的通信过程，从而缩短训练时间。在分布式深度学习中，参数同步拓扑决定了哪些GPU之间可以进行通信，因而对训练时间有着重要的影响。具体而言，参数同步拓扑从两个方面影响分布式深度学习的训练时间。一方面，参数同步拓扑的度决定了每次迭代所需的通信时间，此处拓扑的度指拓扑中节点的邻居数。在基于Gossip架构的同步算法中，各节点同时与邻居节点进行通信，当各节点的可用带宽相同时，邻居数目最多的节点的通信时间即为每次迭代所需的通信时间。另一方面，参数同步拓扑的权重矩阵和连通性决定了一致性的速度，进而影响分布式训练的迭代复杂度。在数据并行的分布式训练中，由于每个节点利用不同的本地数据集训练模型，因此各节点的模型参数不同。为了实现与单机训练相同的效果，需要对参数同步拓扑的权重矩阵进行设计以保证模型参数能够收敛到一致，并且收敛的速度取决于权重矩阵的选取。另外，拓扑的连通性决定了数据的融合速度，因此一致性速度也取决于拓扑的连通性。通常情况下，一致性速度越快，迭代复杂度越低，即算法收敛所需的迭代次数越少。为了缩短分布式深度学习的训练时间，需要在减少每次迭代所需通信时间的同时，尽可能地加快一致性速度，因此研究参数同步拓扑的优化至关重要。
 
-考虑到近年来对基于Gossip架构的分布式训练算法的广泛研究以及Gossip架构上拓扑设计的灵活性，本章研究基于Gossip架构的参数同步拓扑优化方法，以实现高效通信。
+一般而言，参数同步拓扑对每次迭代所需通信时间和一致性速度的作用相反。即在稀疏的拓扑中，节点的度较低而连通性较差，使得每次迭代的通信时间较短，但是一致性速度较慢，反之同理。因此，在参数同步拓扑的设计时，需要权衡对二者的影响，这使得设计高效的参数同步拓扑的难度大大增加。在现有的关于参数同步拓扑设计的方法中，大多数采用直接设计的方式得到参数同步拓扑，无法保证其权重矩阵的最优性，而基于优化问题求解的方法往往通过简化优化目标或求解过程来得到一个局部空间内的最优解，并且其中一些优化问题的设计存在不适用于分布式深度学习场景和没有考虑通信开销的问题。
+
+因此，针对上述问题，同时考虑到近年来对基于Gossip架构的分布式训练算法的广泛研究以及Gossip架构上拓扑设计的灵活性，本章基于Gossip架构提出了一种面向高效通信的参数同步拓扑优化方法，实现同时优化拓扑结构和权重矩阵。首先，以拓扑的代数连通性为优化目标，分别对同构带宽场景和异构带宽场景下的参数同步拓扑优化问题进行设计，并且设计的优化问题能够保证带宽的最优分配。然后提出基于ADMM算法和模拟退火算法的优化问题求解框架，其中基于模拟退火算法生成的拓扑结构作为ADMM算法求解优化问题的初始条件。最后，将求解得到的参数同步拓扑分别应用到一致性问题和分布式深度学习中，以验证本章提出方法的有效性。
+
+本章其他小结的内容安排如下：第3.2节介绍了典型的线性平均一致问题并分别描述了同构带宽和异构带宽场景下的拓扑优化问题；第3.3节介绍了本章提出的参数同步拓扑优化问题求解框架；第3.4节通过不同场景下的实验对本章所提出方法的效果进行验证分析；第3.5节对本章内容进行了总结。
 
 \section{问题描述}
 \subsection{典型线性平均一致问题}
-\subsection{基数约束下的拓扑优化问题（同构带宽）}
-\subsection{带宽约束下的拓扑优化问题（异构带宽）}
+
+给定一个由$n$个节点和$e$条边组成的拓扑图$\mathcal{G} \left( \mathcal{N} ,\mathcal{E} \right) $，其节点集为$\mathcal{N}$，边集为$\mathcal{E}$，其中每条边$\left\{ i,j \right\} \in \mathcal{E}$是无向边，每个节点的邻居由$\mathcal{N} _i=\left\{ j|\left\{ i,j \right\} \in \mathcal{E} \right\}$表示。拓扑中的每个节点维持一个初始数据$\boldsymbol{x}_i\left( 0 \right) \in \mathbb{R}^p$（行向量，本章中除特别强调为行向量的变量，其余均为列向量），例如神经网络的模型参数，并且拓扑中的每个节点可以和邻居节点进行通信。
+
+线性平均一致是在上述给定条件下，通过\autoref{tab:LA_problem_node}的迭代过程使得每个节点的数据最终都收敛到所有节点初始数据的平均值$\frac{1}{n}\sum_{i=1}^n{\boldsymbol{x}_i\left( 0 \right)}$：
+\begin{equation}
+    \label{tab:LA_problem_node}
+    \boldsymbol{x}_i\left( t+1 \right) =W_{ii}\boldsymbol{x}_i\left( t \right) +\sum_{j\in \mathcal{N} _i}{W_{ij}\boldsymbol{x}_j\left( t \right)},\ \ \ i=1,...,n,
+\end{equation}
+其中$t=0,1,2,...$是离散时间序列，表示迭代次数，$W_{ij}$是节点$i$和节点$j$之间的边$\left\{ i,j \right\}$的权重，当$j\notin \mathcal{N} _i$时，$W_{ij}$为0。令$\boldsymbol{x}\left( t \right) =\left( \boldsymbol{x}_1\left( t \right) ,...,\boldsymbol{x}_n\left( t \right) \right)^T$表示由$n$个节点的数据组成的矩阵，则\autoref{tab:LA_problem_node}可以重新表述为：
+\begin{equation}
+    \label{tab:LA_problem_nodes}
+    \begin{aligned}
+        \boldsymbol{x}\left( t+1 \right) =W\boldsymbol{x}\left( t \right) , \ W\in \mathcal{S},
+    \end{aligned}
+\end{equation}
+其中$W$是权重矩阵，$\mathcal{S} =\left\{ W\in \mathbb{R} ^{n\times n}|W_{ij}=0 \  \mathrm{if} \left\{ i,j \right\} \notin \mathcal{E} \ \mathrm{and} \  i\ne j \right\}$是底层拓扑结构对权重矩阵的约束。\autoref{tab:LA_problem_nodes}与经典的分布式梯度下降算法DGD\cite{nedic2009distributed}（算法细节见\autoref{subsection-4-2-1}）只相差一个梯度搜索项，因此可以看作是DGD的通信过程，\autoref{fig:Fig3-1}展示了5个节点上的线性平均一致问题的一次迭代的通信过程。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.55\linewidth]{figure/chapter3/fig3-1-LA-procedure.pdf}
+    \caption{\label{fig:Fig3-1}线性平均一致问题的通信过程}
+\end{figure}
+
+为了实现线性平均一致，即$\underset{t\rightarrow \infty}{\lim}\boldsymbol{x}\left( t \right) =\bar{\boldsymbol{x}}=\frac{1}{n}\sum_{i=1}^n{\boldsymbol{x}_i\left( 0 \right)}$，$W$需要满足如下充要条件\cite{xiao2004fast}：
+\begin{equation}
+    \label{tab:row_random}
+    \mathbf{1}^TW=\mathbf{1}^T,
+\end{equation}
+\begin{equation}
+    \label{tab:column_random}
+    W\mathbf{1}=\mathbf{1},
+\end{equation}
+\begin{equation}
+    \label{tab:spectral_radius}
+    \rho \left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) <1,
+\end{equation}
+其中$\mathbf{1}\in \mathbb{R}^n$为全1列向量，$\rho$表示矩阵的谱半径，\autoref{tab:row_random}和\autoref{tab:column_random}被称为双随机约束。
+
+在满足上述条件的情况下，线性平均一致问题的一致性收敛速度由渐进收敛因子表示：
+\begin{equation}
+    \label{tab:asymptotic_convergence_factor}
+    r_{\mathrm{asym}}(W)=\mathop {\mathrm{sup}} \limits_{\boldsymbol{x}(0)\ne \bar{\boldsymbol{x}}}\lim_{t\rightarrow \infty} \left( \frac{\parallel \boldsymbol{x}(t)-\bar{\boldsymbol{x}}\parallel _2}{\parallel \boldsymbol{x}(0)-\bar{\boldsymbol{x}}\parallel _2} \right) ^{1/t}.
+\end{equation}
+由$W$的双随机性，可以得到：
+\begin{equation}
+\begin{aligned}
+    \boldsymbol{x}(t+1)-\bar{\boldsymbol{x}}&=\left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) \boldsymbol{x}\left( t \right) 
+\\
+&=\left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) \left( \boldsymbol{x}\left( t \right) -\bar{\boldsymbol{x}} \right) ,
+\end{aligned}
+\end{equation}
+于是\autoref{tab:asymptotic_convergence_factor}可以表示为：
+\begin{equation}
+\label{tab:asymptotic_convergence_factor_new}
+\begin{aligned}
+        r_{\mathrm{asym}}(W)&=\lim_{t\rightarrow \infty} {\left\| \left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) ^t \right\| _2}^{1/t}
+        \\
+        &=\rho \left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right).
+\end{aligned}
+\end{equation}
+由\autoref{tab:row_random}，\autoref{tab:column_random}和\autoref{tab:spectral_radius}可知，$W$的特征值满足：
+\begin{equation}
+    1=\lambda _1\left( W \right) >\lambda _2\left( W \right) \geqslant ...\geqslant \lambda _n\left( W \right) >-1,
+\end{equation}
+于是\autoref{tab:asymptotic_convergence_factor_new}可以进一步表示为：
+\begin{equation}
+\label{tab:asymptotic_convergence_factor_newest}
+    r_{\mathrm{asym}}(W)=\max \left\{ \left| \lambda _2\left( W \right) \right|,\left| \lambda _n\left( W \right) \right| \right\}.
+\end{equation}
+
+因此，线性平均一致问题的一致性收敛速度由权重矩阵的第二大特征值和最小特征值决定。基于以上介绍，以一致性速度为优化目标的权重矩阵优化问题可以描述为如下形式：
+\begin{equation}
+    \label{tab:LA_optimization_problem}
+    \begin{matrix}
+        \min&		\max \left\{ \left| \lambda _2\left( W \right) \right|,\left| \lambda _n\left( W \right) \right| \right\}\\
+        s.t.&		W\in \mathcal{S} , \ W=W^T, \ W\mathbf{1}=\mathbf{1}\\
+    \end{matrix}
+\end{equation}
+
+
+上述线性平均一致问题即为分布式深度学习中研究的一致性协议，通过求解\autoref{tab:LA_optimization_problem}得到的拓扑可以作为参数同步拓扑，用于分布式深度学习的训练。
+
+\subsection{同构带宽下的拓扑优化问题}
+
+
+
+\subsection{异构带宽下的拓扑优化问题}
 
 \section{参数同步拓扑优化问题求解框架}
 \subsection{基于ADMM的拓扑优化问题求解方法}

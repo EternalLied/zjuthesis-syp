@@ -5,7 +5,7 @@
 
 一般而言，参数同步拓扑对每次迭代所需通信时间和一致性速度的作用相反。即在稀疏的拓扑中，节点的度较低而连通性较差，使得每次迭代的通信时间较短，但是一致性速度较慢，反之同理。因此，在参数同步拓扑的设计时，需要权衡对二者的影响，这使得设计高效的参数同步拓扑的难度大大增加。在现有的关于参数同步拓扑设计的方法中，大多数采用直接设计的方式得到参数同步拓扑，无法保证其权重矩阵的最优性，而基于优化问题求解的方法往往通过简化优化目标或求解过程来得到一个局部空间内的最优解，并且其中一些优化问题的设计存在不适用于分布式深度学习场景和没有考虑通信开销的问题。
 
-因此，针对上述问题，同时考虑到近年来对基于Gossip架构的分布式训练算法的广泛研究以及Gossip架构上拓扑设计的灵活性，本章基于Gossip架构提出了一种面向高效通信的参数同步拓扑优化方法，实现同时优化拓扑结构和权重矩阵。首先，以拓扑的代数连通性为优化目标，分别对同构带宽场景和异构带宽场景下的参数同步拓扑优化问题进行设计，并且设计的优化问题能够保证带宽的最优分配。然后提出基于ADMM算法和模拟退火算法的优化问题求解框架，其中基于模拟退火算法生成的拓扑结构作为ADMM算法求解优化问题的初始条件。最后，将求解得到的参数同步拓扑分别应用到一致性问题和分布式深度学习中，以验证本章提出方法的有效性。
+因此，针对上述问题，同时考虑到近年来对基于Gossip架构的分布式训练算法的广泛研究以及Gossip架构上拓扑设计的灵活性，本章基于Gossip架构提出了一种面向高效通信的参数同步拓扑优化方法，实现同时优化拓扑结构和权重矩阵。首先，以拓扑的一致性速度为优化目标，分别对同构带宽场景和异构带宽场景下的参数同步拓扑优化问题进行设计，并且设计的优化问题能够保证带宽的最优分配。然后提出基于ADMM算法和模拟退火算法的优化问题求解框架，其中基于模拟退火算法生成的拓扑结构作为ADMM算法求解优化问题的初始条件。最后，将求解得到的参数同步拓扑分别应用到一致性问题和分布式深度学习中，以验证本章提出方法的有效性。
 
 本章其他小结的内容安排如下：第3.2节介绍了典型的线性平均一致问题并分别描述了同构带宽和异构带宽场景下的拓扑优化问题；第3.3节介绍了本章提出的参数同步拓扑优化问题求解框架；第3.4节通过不同场景下的实验对本章所提出方法的效果进行验证分析；第3.5节对本章内容进行了总结。
 
@@ -49,12 +49,12 @@
 \end{equation}
 其中$\mathbf{1}\in \mathbb{R}^n$为全1列向量，$\rho$表示矩阵的谱半径，\autoref{tab:row_random}和\autoref{tab:column_random}被称为双随机约束。
 
-在满足上述条件的情况下，线性平均一致问题的一致性收敛速度由渐进收敛因子表示：
+在满足上述条件的情况下，线性平均一致问题的一致性速度由渐进收敛因子表示：
 \begin{equation}
     \label{tab:asymptotic_convergence_factor}
     r_{\mathrm{asym}}(W)=\mathop {\mathrm{sup}} \limits_{\boldsymbol{x}(0)\ne \bar{\boldsymbol{x}}}\lim_{t\rightarrow \infty} \left( \frac{\parallel \boldsymbol{x}(t)-\bar{\boldsymbol{x}}\parallel _2}{\parallel \boldsymbol{x}(0)-\bar{\boldsymbol{x}}\parallel _2} \right) ^{1/t}.
 \end{equation}
-由$W$的双随机性，可以得到：
+渐进收敛因子越小，说明一致性速度越快。由$W$的双随机性，可以得到：
 \begin{equation}
 \begin{aligned}
     \boldsymbol{x}(t+1)-\bar{\boldsymbol{x}}&=\left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) \boldsymbol{x}\left( t \right) 
@@ -81,7 +81,7 @@
     r_{\mathrm{asym}}(W)=\max \left\{ \left| \lambda _2\left( W \right) \right|,\left| \lambda _n\left( W \right) \right| \right\}.
 \end{equation}
 
-因此，线性平均一致问题的一致性收敛速度由权重矩阵的第二大特征值和最小特征值决定。基于以上介绍，以一致性速度为优化目标的权重矩阵优化问题可以描述为如下形式：
+因此，线性平均一致问题的一致性速度由权重矩阵的第二大特征值和最小特征值决定。基于以上介绍，以一致性速度为优化目标的权重矩阵优化问题可以描述为如下形式：
 \begin{equation}
     \label{tab:LA_optimization_problem}
     \begin{matrix}
@@ -101,14 +101,14 @@
 \begin{equation}
     \label{tab:equ-3-12}
     \begin{matrix}
-        \min&		\max \left\{ \left| \lambda _2\left( W \right) \right|,\left| \lambda _n\left( W \right) \right| \right\}\\
+        \underset{\mathbf{g}}{\min}&		\max \left\{ \left| \lambda _2\left( W \right) \right|,\left| \lambda _n\left( W \right) \right| \right\}\\
         s.t.&		\begin{array}{c}
         W=W^T, \ W\mathbf{1}=\mathbf{1},\\
         \mathbf{g}\ge 0, \ \mathbf{Card}\left( \mathbf{g} \right) \le r,\\
     \end{array}\\
     \end{matrix}
 \end{equation}
-其中$\mathbf{g}\in \mathbb{R}^e$是拓扑中边的权重，$e=\frac{n\left( n-1 \right)}{2}$，$\mathbf{Card}$表示向量中不为0的元素的数量。Gao等人\cite{gao2011cardinality}将形如\autoref{tab:equ-3-12}的优化问题称为基于基数约束的优化问题（Cardinality Constrained Optimization Problems，简称CCOPs）。
+其中$\mathbf{g}\in \mathbb{R}^e$是拓扑中边的权重，$e=\frac{n\left( n-1 \right)}{2}$，$\mathbf{Card}$表示向量中不为0的元素的数量，$r$是对边的数目的约束。Gao等人\cite{gao2011cardinality}将形如\autoref{tab:equ-3-12}的优化问题称为基于基数约束的优化问题（Cardinality Constrained Optimization Problems，简称CCOPs）。
 
 为了降低问题的求解难度，首先基于拓扑图的拉普拉斯矩阵对\autoref{tab:equ-3-12}进行转换。根据拉普拉斯矩阵$L$与权重矩阵$W$的关系以及拓扑的对称性，可以得到：
 \begin{equation}
@@ -138,13 +138,181 @@
 \begin{equation}
     \label{tab:equ-3-16}
     \begin{matrix}
-        \min&		\max \left\{ \left| 1-\lambda _{n-1}\left( L \right) \right|,\left| 1-\lambda _1\left( L \right) \right| \right\}\\
+        \underset{\mathbf{g}}{\min}&		\max \left\{ \left| 1-\lambda _{n-1}\left( L \right) \right|,\left| 1-\lambda _1\left( L \right) \right| \right\}\\
         s.t.&		\mathbf{g}\ge 0,\ \mathbf{Card}\left( \mathbf{g} \right) \le r,\\
     \end{matrix}.
 \end{equation}
-由于矩阵特征值的求解十分复杂，因此引入辅助变量将优化问题转换为LMI问题
+
+由于\autoref{tab:equ-3-16}中拉普拉斯矩阵的特征值不是优化变量$\mathbf{g}$的显示函数，并且求解带优化变量的矩阵特征值十分复杂，因此本节基于如下引理对优化问题进行转换：
+
+\textbf{\fangsong 引理1：} 对于一个给定的拉普拉斯矩阵$L$，其特征值满足\autoref{tab:equ-3-15}，如果$\alpha \geqslant \lambda _{n-1}\left( L \right)$，则$L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succcurlyeq \lambda _{n-1}\left( L \right) I$。
+
+证明：
+
+根据拉普拉斯矩阵的定义式可知，$L$的最小特征值$\lambda _n\left( L \right)=0$对应的特征向量为$\mathbf{1}$。于是，定义正交阵$P=\left( \boldsymbol{p}_1,\boldsymbol{p}_2,...,\boldsymbol{p}_{n-1},\mathbf{1}/\sqrt{n} \right)$，其中每个列向量为单位向量，并且满足${\boldsymbol{p}_i}^T\mathbf{1}=0\left( i=1,2,...,n-1 \right) $和${\boldsymbol{p}_i}^T\boldsymbol{p}_j=0\left( i\ne j \right) $，可以得到：
+\begin{equation}
+    \label{tab:equ-3-17}
+    L\sim P^TLP\sim P^T\left( \begin{matrix}
+        \lambda _1\left( L \right)&		0&		0\\
+        0&		\ddots&		0\\
+        0&		0&		\lambda _n\left( L \right)\\
+    \end{matrix} \right) P,
+\end{equation}
+其中$\sim$表示矩阵相似。
+
+很显然，$\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}$有一个特征值等于$\alpha$，其对应的特征向量为$\mathbf{1}$，并且其余特征值均为0。假设$\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}$的$n$个特征向量为$P=\left( \boldsymbol{p}_1,\boldsymbol{p}_2,...,\boldsymbol{p}_{n-1},\mathbf{1}/\sqrt{n} \right) $，可以得到：
+\begin{equation}
+    \label{tab:equ-3-18}
+    P^T\left( L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n} \right) P\sim P^T\left( \begin{matrix}
+        \lambda _1\left( L \right)&		0&		0\\
+        0&		\ddots&		0\\
+        0&		0&		\lambda _n\left( L \right) +\alpha\\
+    \end{matrix} \right) P.
+\end{equation}
+因此，$L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succcurlyeq \lambda _{n-1}\left( L \right) I$当且仅当$\alpha \geqslant \lambda _{n-1}\left( L \right)$。
+
+基于引理1，通过引入辅助变量$\tilde{\lambda}$，可以将特征值的求解转换为线性矩阵不等式（Linear Matrix Inequality，简称LMI）约束，进而将\autoref{tab:equ-3-16}转换为如下形式的优化问题：
+\begin{equation}
+    \label{tab:equ-3-19}
+    \begin{matrix}
+        \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
+        s.t.&		\begin{array}{c}
+        \mathbf{g}\ge 0,\tilde{\lambda}>0,\mathbf{Card}\left( \mathbf{g} \right) \le r,\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda}\mathbf{I},\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right) \mathbf{I},\\
+        \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+其中$\mathrm{diag}$表示矩阵对角线元素组成的列向量。关于拉普拉斯矩阵的两个LMI约束能够保证$\lambda _{n-1}\left( L \right)$和$\lambda _1\left( L \right)$同时向1靠近，从而实现最小化渐进收敛因子，即最大化一致性速度。最后一个不等式约束是为了保证最终得到的权重矩阵中所有元素都不小于0，因为通常情况下，分布式深度学习中用于参数同步的权重不为负数。
+
+\autoref{tab:equ-3-19}即为同构带宽下的拓扑优化问题，由于引入了对边的数目的约束以保证拓扑的稀疏性，因此通过求解该问题得到的权重矩阵能够比较好地权衡一致性速度和每次迭代所需通信时间。
 
 \subsection{异构带宽下的拓扑优化问题}
+
+同构带宽场景是比较理想的场景，因为在实际分布式深度学习任务的训练中，由于系统硬件条件的限制或者其他训练任务的影响，可用带宽往往是异构的。本小节针对节点带宽异构、服务器内部链路带宽异构和服务器间交换机端口带宽异构三种带宽异构场景下的拓扑优化问题进行设计，通过保证带宽的最优分配，实现一致性速度和每次迭代所需通信时间的权衡。
+
+下面首先提出一种带宽分配策略，根据节点（或者链路、端口，后面将以节点为例进行说明，并在必要时区分节点、链路和端口）的带宽，为每个节点分配指定数目的边，以保证每条边上的可用带宽尽可能大。给定$n$个节点的带宽为$\boldsymbol{b}=\left( b_1,...,b_n \right)^T$，待分配带宽的边的数目为$r$，每个节点上边的数目的上限为$\bar{\boldsymbol{e}}=\left( \bar{e}_1,...,\bar{e}_n \right)^T$，令每个节点上边的数目为$\boldsymbol{e}=\left( e_1,...,e_n \right)^T$，单位带宽为$b_{unit}$，根据以下步骤分配每条边的带宽：
+\begin{itemize}
+    \item[1）] 初始化单位带宽和每个节点上边的数目：
+    \begin{equation}
+        \begin{aligned}
+        \label{tab:equ-3-20}
+        b_{unit}&=\underset{i\in \left\{ 1,...,n \right\}}{\min}\,\,b_i,
+        \\
+        e_i&=\min \left( \lfloor \frac{b_i}{b_{unit}} \rfloor ,\bar{e}_i \right) ,\ i=1,...,n.
+        \end{aligned}
+    \end{equation}
+    \item[2）] 计算总边数：
+    \begin{equation}
+        \begin{aligned}
+        \label{tab:equ-3-21}
+        \mathrm{edge}\_\mathrm{count}=\left\{ \begin{matrix}
+            \frac{1}{2}\sum_{i=1}^n{e_i}&		\text{给定的带宽为节点}/\text{端口的带宽}\\
+            \sum_{i=1}^n{e_i}&		\text{给定的带宽为链路的带宽}\\
+        \end{matrix}. \right.
+        \end{aligned}
+    \end{equation}
+    \item[3）] 如果总边数小于$r$，则计算新的单位带宽，并更新每个节点上边的数目：
+    \begin{equation}
+        \begin{aligned}
+        \label{tab:equ-3-22}
+        b_{unit}&=\underset{i\in \left\{ 1,...,n \right\}}{\max}\,\,\frac{b_i}{e_i+1},\\
+        e_i&=\min \left( \lfloor \frac{b_i}{b_{unit}} \rfloor ,\bar{e}_i \right) ,\ i=1,...,n,
+        \end{aligned}
+    \end{equation}
+    回到步骤2）。
+    \item[4）] 如果总边数大于等于$r$，则不断将边数最多的节点上边的数目减1，并利用\autoref{tab:equ-3-21}计算总边数，直到总边数等于$r$。
+    
+\end{itemize}
+
+步骤4）的作用是保证总边数符合给定的条件，同时使不同节点上边的数目尽可能均匀。上述带宽分配策略能够保证最终每条边上的可用带宽是最优的。基于该分配策略，接下来分别对三种带宽异构场景下的拓扑优化问题进行设计。
+
+\textbf{1. 节点带宽异构}
+
+在该场景下，每个节点具有不同的可用带宽。假设节点数为$n$，节点的可用带宽为$\boldsymbol{b}=\left( b_1,...,b_n \right)^T$。根据上述带宽分配策略，可以得到每个节点上分配的边的数目$\boldsymbol{e}=\left( e_1,...,e_n \right)^T$。由于节点上的边数等于节点的度，于是定义节点的度$\boldsymbol{d}=\left( d_1,...,d_n \right)^T,\ d_i=e_i,\ i=1,...,n$。进而可以得到对节点度的约束：
+\begin{equation}
+    \begin{aligned}
+    \label{tab:equ-3-23}
+    \mathbf{card}\left( \boldsymbol{m}_i\mathbf{g} \right) &=d_i,\ i=1,...,n,
+    \\
+    \boldsymbol{m}_i&=\mathrm{abs}\left( A_{i,:} \right) ,
+    \end{aligned}
+\end{equation}
+其中$\boldsymbol{m}_i\in \mathbb{R} ^{e}$是节点$i$上的边的掩码向量，$A_{i,:}$是\autoref{tab:equ-3-14}中定义的关联矩阵的第$i$行，$\mathrm{abs}$表示对每个元素取绝对值。
+
+将对节点度的约束引入到\autoref{tab:equ-3-19}中，同时去掉对边的数目的约束，可以得到:
+\begin{equation}
+    \label{tab:equ-3-24}
+    \begin{matrix}
+        \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
+        s.t.&		\begin{array}{c}
+        \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
+        \mathbf{card}\left( \boldsymbol{m}_i\mathbf{g} \right) =d_i, i=1,...,n,\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda}\mathbf{I},\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right) \mathbf{I},\\
+        \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+考虑到约束条件中有$n$个基数约束，不易于求解，于是引入整数变量对优化问题进行改进，得到如下形式：
+\begin{equation}
+    \label{tab:equ-3-25}
+    \begin{matrix}
+        \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
+        s.t.&		\begin{array}{c}
+        \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
+        \mathbf{z}\in \left\{ 0,1 \right\} ^e,\mathbf{g}\leqslant \mathbf{z},M\mathbf{z}=\boldsymbol{d},\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda}\mathbf{I},\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right) \mathbf{I},\\
+        \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+其中$\mathbf{z}$是引入的整数变量，用于标识每条边是否存在，$M=\mathrm{abs}\left( A\right)$是掩码矩阵。求解该优化问题即可得到节点带宽异构场景下的参数同步拓扑。
+
+\textbf{2. 服务器内部链路带宽异构}
+
+该场景指\autoref{fig:Fig2-4}所示的标准服务器架构中，三种类型的物理链路具有不同的可用带宽，假设分别为$b_{PIX}$，$b_{NODE}$和$b_{SYS}$。根据服务器架构的特点，三种物理链路上边的数目的上限分别为1，4和16。于是基于本节的带宽分配策略，可以得到三种类型的物理链路上分配的边的数目$e_{PIX}$，$e_{NODE}$和$e_{SYS}$。将\autoref{tab:equ-3-25}中对节点度的约束改为对物理链路上边的数目的约束，即可得到服务器内部链路带宽异构场景下的优化问题：
+\begin{equation}
+    \label{tab:equ-3-26}
+    \begin{matrix}
+        \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
+        s.t.&		\begin{array}{c}
+        \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
+        \mathbf{z}\in \left\{ 0,1 \right\} ^e,\mathbf{g}\leqslant \mathbf{z},M\mathbf{z}=\boldsymbol{e},\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda}\mathbf{I},\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right) \mathbf{I},\\
+        \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+其中$\boldsymbol{e}=\left( e_{PIX},e_{PIX},e_{PIX},e_{PIX},e_{NODE},e_{NODE},e_{SYS} \right) ^T$，掩码矩阵$M$的定义如下：
+\begin{equation}
+    \begin{aligned}
+    \label{tab:equ-3-27}
+    M=\left( \begin{array}{c}
+        \mathbf{m}_{PIX1}\\
+        \mathbf{m}_{PIX2}\\
+        \mathbf{m}_{PIX3}\\
+        \mathbf{m}_{PIX4}\\
+        \mathbf{m}_{NODE1}\\
+        \mathbf{m}_{NODE2}\\
+        \mathbf{m}_{SYS}\\
+    \end{array} \right) =\left( \begin{matrix}
+            1000000000000000000000000000\\
+            0000000000000100000000000000\\
+            0000000000000000000000100000\\
+            0000000000000000000000000001\\
+            0110000110000000000000000000\\
+            0000000000000000000000011110\\
+            0001111001111011111111000000\\
+    \end{matrix} \right)
+    \end{aligned}
+\end{equation}
+
+\textbf{3. 服务器间交换机端口带宽异构}
+
 
 \section{参数同步拓扑优化问题求解框架}
 \subsection{基于ADMM的拓扑优化问题求解方法}

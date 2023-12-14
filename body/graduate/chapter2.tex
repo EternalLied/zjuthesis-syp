@@ -163,7 +163,7 @@
 % \begin{minipage}{8.5cm}
 \begin{algorithm}[!htbp]
       \caption{PreTopo的执行流程} 
-      % \small
+    %   \small
       \label{Algorithm-PreTopo} 
         \begin{algorithmic}[1]
         \REQUIRE{神经网络的层数$l$；各神经网络层的类型$layer_i, i\in{1,...,l}$；各神经网络层的特征$\boldsymbol{c}_{nn}^{layer_i}$；GPU的硬件特征$\boldsymbol{c}_{gpu}$；集群的通信特征$\boldsymbol{c}_{cluster}$}。
@@ -171,7 +171,7 @@
         \FOR{$i \in [1, l]$}
             \STATE 基于\autoref{tab:features_fomula}计算第$i$个神经网络层的扩充特征：
             \begin{align*}
-            \small
+            %\small
                 &mem_w=\begin{cases}
                     k^2c_{in}c_{out}+c_{out},&bias=1\\
                     k^2c_{in}c_{out},&bias=0\\
@@ -185,14 +185,14 @@
         \IF{通信是基于$all\underline{~}reduce$进行的}
         \STATE 基于\autoref{tab:multi_gpu_allreduce_based_multiGPU}预测通信时间：
         \begin{align*}
-        \small
+        %\small
             t_{all\underline{~}reduce}^{cluster}=\left( m-1 \right) \cdot t_{all\underline{~}reduce}^{link}\left( \frac{2N}{m} \right),
         \end{align*}
         \ELSE
         \STATE 根据分布式训练架构和拓扑结构分析一次迭代需要进行的通信次数$c$以及每次通信涉及的通信链路的集合$links_i$。
         \STATE 基于\autoref{tab:topo_based_on_broadcast}预测通信时间：
         \begin{align*}
-        \small
+        %\small
             t_{comm}=\sum_{i=1}^c{t_{broadcast}^{cluster}\left( n_i, links_i \right)},
         \end{align*}
         \ENDIF
@@ -505,7 +505,7 @@
 
 \begin{equation}
     \label{tab:MAPE}
-    MAPE=\frac{100\%}{n_{sample}}\sum_{i=1}^{n_{sample}}{\left| \small{\frac{\hat{y}_i-y_i}{y_i}} \right|},
+    MAPE=\frac{100\%}{n_{sample}}\sum_{i=1}^{n_{sample}}{\left| \frac{\hat{y}_i-y_i}{y_i} \right|},
 \end{equation}
 其中$n_{sample}$是样本数，$\hat{y}_i$是第$i$个样本的预测值，$y_i$是第$i$个样本的真实值。
 

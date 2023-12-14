@@ -590,7 +590,7 @@
 
 1）单链路通信时间预测
 
-首先对单链路通信时间预测结果进行评估。在\autoref{subsection_2_4_1}中分别测试了使用$all\underline{~}reduce$和$broadcast$通信不同大小的数据所需的时间，接下来利用基于$all\underline{~}reduce$的单链路通信时间预测模型和基于$broadcast$的单链路通信时间预测模型对相应的数据进行拟合。由于PIX、NODE和SYS三种物理链路的带宽不同，因此本节为分别它们建立对应的单链路模型。对于基于$all\underline{~}reduce$的通信，本节将PreTopo与固定带宽的模型进行比较，而对于基于$broadcast$的通信，由于我们采用分段模型对Sigmoid模型进行了改进，因此本节还将PreTopo与未分段的Sigmoid模型进行了对比。实验结果如\autoref{tab:result_single_link_comm}所示，表中的每个值为不同通信数据量的预测结果的平均值。可以发现，PreTopo在不同物理链路上的MAPE不超过12\%，并且对于基于$all\underline{~}reduce$的通信，PreTopo优于固定带宽的模型45\%以上，对于基于$broadcast$的通信，PreTopo优于其他两种模型50\%以上。此外，PreTopo的RMSE小于0.7ms，$R^2$大于等于0.998，均优于其他模型。
+首先对单链路通信时间预测结果进行评估。在\autoref{subsection_2_4_1}中分别测试了使用两种集合通信原语通信不同大小的数据所需的时间，接下来利用基于$all\underline{~}reduce$的单链路通信时间预测模型和基于$broadcast$的单链路通信时间预测模型对相应的数据进行拟合。由于PIX、NODE和SYS三种物理链路的带宽不同，因此本节为分别它们建立对应的单链路模型。对于基于$all\underline{~}reduce$的通信，本节将PreTopo与固定带宽的模型进行比较，而对于基于$broadcast$的通信，由于我们采用分段模型对Sigmoid模型进行了改进，因此本节还将PreTopo与未分段的Sigmoid模型进行了对比。实验结果如\autoref{tab:result_single_link_comm}所示，表中的每个值为不同通信数据量的预测结果的平均值。可以发现，PreTopo在不同物理链路上的MAPE不超过12\%，并且对于基于$all\underline{~}reduce$的通信，PreTopo优于固定带宽的模型45\%以上，对于基于$broadcast$的通信，PreTopo优于其他两种模型50\%以上。此外，PreTopo的RMSE小于0.7ms，$R^2$大于等于0.998，均优于其他模型。
 
 根据测试结果，当通信数据量足够大时，实时吞吐量近似等于链路的最大带宽。因此，上述所有预测模型在这种情况下表现出相似的性能。当通信数据量减小时，实时吞吐量将变得小于链路的最大带宽，使得固定带宽的模型无法准确预测通信时间。此外，在基于$broadcast$进行通信并且通信数据量小于0.14MB时，基于Sigmoid的模型的预测性能会显著下降。综上所述，PreTopo在单链路通信时间预测上优于其他两种方法。
 
@@ -642,7 +642,7 @@
 
 3）一般拓扑上的通信时间预测
 
-进一步地，对PreTopo在不同拓扑上的通信时间预测结果进行评估。本节选择\autoref{fig:Fig2-13}所示的五种拓扑作为待预测的拓扑结构，其中前四种拓扑基于All-Reduce架构，最后一种拓扑基于Gossip架构。实验结果如\autoref{fig:Fig2-14}所示，其中MAPE的值为不同通信数据量的预测结果的平均值。可以看到，PreTopo在五种拓扑上的MAPE都小于15\%，优于基于Sigmoid的模型和固定带宽的模型。由此验证了PreTopo对于预测一般拓扑上的通信时间的有效性。
+进一步地，对PreTopo在不同拓扑上的通信时间预测结果进行评估。本节选择\autoref{fig:Fig2-13} 所示的五种拓扑作为待预测的拓扑结构，其中前四种拓扑基于All-Reduce架构，最后一种拓扑基于Gossip架构。实验结果如\autoref{fig:Fig2-14}所示，其中MAPE的值为不同通信数据量的预测结果的平均值。可以看到，PreTopo在五种拓扑上的MAPE都小于15\%，优于基于Sigmoid的模型和固定带宽的模型。由此验证了PreTopo对于预测一般拓扑上的通信时间的有效性。
 
 \begin{figure}[!htbp]
     \centering

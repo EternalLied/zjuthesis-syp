@@ -86,7 +86,7 @@
     \label{tab:LA_optimization_problem}
     \begin{matrix}
         \min&		\max \left\{ \left| \lambda _2\left( W \right) \right|,\left| \lambda _n\left( W \right) \right| \right\}\\
-        s.t.&		W\in \mathcal{S} , \ W=W^T, \ W\mathbf{1}=\mathbf{1}\\
+        s.t.&		W\in \mathcal{S} , \ W=W^T, \ W\mathbf{1}=\mathbf{1}.\\
     \end{matrix}
 \end{equation}
 
@@ -103,21 +103,45 @@
     \begin{matrix}
         \min&		\max \left\{ \left| \lambda _2\left( W \right) \right|,\left| \lambda _n\left( W \right) \right| \right\}\\
         s.t.&		\begin{array}{c}
-        W=W^T, \ W\mathbf{1}=\mathbf{1}\\
-        \mathbf{g}\ge 0, \ \mathbf{Card}\left( \mathbf{g} \right) \le r\\
+        W=W^T, \ W\mathbf{1}=\mathbf{1},\\
+        \mathbf{g}\ge 0, \ \mathbf{Card}\left( \mathbf{g} \right) \le r,\\
     \end{array}\\
     \end{matrix}
 \end{equation}
-其中$\mathbf{g}\in \mathbb{R}^m$是拓扑中边的权重，$m=\frac{n\left( n-1 \right)}{2}$，$\mathbf{Card}$表示向量中不为0的元素的数量。Gao等人\cite{gao2011cardinality}将形如\autoref{tab:equ-3-12}的优化问题称为基于基数约束的优化问题（Cardinality Constrained Optimization Problems，简称CCOPs）。
+其中$\mathbf{g}\in \mathbb{R}^e$是拓扑中边的权重，$e=\frac{n\left( n-1 \right)}{2}$，$\mathbf{Card}$表示向量中不为0的元素的数量。Gao等人\cite{gao2011cardinality}将形如\autoref{tab:equ-3-12}的优化问题称为基于基数约束的优化问题（Cardinality Constrained Optimization Problems，简称CCOPs）。
 
 为了降低问题的求解难度，首先基于拓扑图的拉普拉斯矩阵对\autoref{tab:equ-3-12}进行转换。根据拉普拉斯矩阵$L$与权重矩阵$W$的关系以及拓扑的对称性，可以得到：
 \begin{equation}
     \label{tab:equ-3-13}
-    W=I-L=I-A\mathbf{diag}\left( \mathbf{g} \right) A^T
+    W=I-L=I-A\mathbf{diag}\left( \mathbf{g} \right) A^T,
 \end{equation}
-其中，
-
-
+其中，$I$是单位阵，$A\in \mathbb{R} ^{n\times m}$是关联矩阵，表示节点和边之间的关系，其定义如下：
+\begin{equation}
+    \label{tab:equ-3-14}
+    A_{il}=\left\{ \begin{matrix}
+        1&		\mathrm{if}\ \mathrm{edge}\ l\,\,\mathrm{starts}\ \mathrm{from}\ \mathrm{node}\ i,\\
+        \begin{array}{c}
+        -1\\
+        0\\
+    \end{array}&		\begin{array}{c}
+        \mathrm{if}\ \mathrm{edge}\ l\,\,\mathrm{ends}\ \mathrm{from}\ \mathrm{node}\ i,\\
+        \mathrm{otherwise}.\\
+    \end{array}\\
+    \end{matrix} \right.
+\end{equation}
+对于本章研究的无向拓扑，其每条边的方向任意给定即可，得到的关联矩阵不变。由上述关联矩阵$A$的定义可知，其每一列元素的和为0，因此由\autoref{tab:equ-3-13}定义的$W$自动满足对称性和双随机性。并且$L$的特征值满足：
+\begin{equation}
+    \label{tab:equ-3-15}
+    0=\lambda _n\left( L \right) <\lambda _{n-1}\left( L \right) \leqslant ...\leqslant \lambda _1\left( L \right) <2.
+\end{equation}
+于是，\autoref{tab:equ-3-12}可以转换为：
+\begin{equation}
+    \label{tab:equ-3-16}
+    \begin{matrix}
+        \min&		\max \left\{ \left| 1-\lambda _{n-1}\left( L \right) \right|,\left| 1-\lambda _1\left( L \right) \right| \right\}\\
+        s.t.&		\mathbf{g}\ge 0,\ \mathbf{Card}\left( \mathbf{g} \right) \le r,\\
+    \end{matrix}.
+\end{equation}
 由于矩阵特征值的求解十分复杂，因此引入辅助变量将优化问题转换为LMI问题
 
 \subsection{异构带宽下的拓扑优化问题}

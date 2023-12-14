@@ -110,7 +110,14 @@
 \end{equation}
 其中$\mathbf{g}\in \mathbb{R}^m$是拓扑中边的权重，$m=\frac{n\left( n-1 \right)}{2}$，$\mathbf{Card}$表示向量中不为0的元素的数量。Gao等人\cite{gao2011cardinality}将形如\autoref{tab:equ-3-12}的优化问题称为基于基数约束的优化问题（Cardinality Constrained Optimization Problems，简称CCOPs）。
 
-基于拉普拉斯矩阵对3-12进行转换，
+为了降低问题的求解难度，首先基于拓扑图的拉普拉斯矩阵对\autoref{tab:equ-3-12}进行转换。根据拉普拉斯矩阵$L$与权重矩阵$W$的关系以及拓扑的对称性，可以得到：
+\begin{equation}
+    \label{tab:equ-3-13}
+    W=I-L=I-A\mathbf{diag}\left( \mathbf{g} \right) A^T
+\end{equation}
+其中，
+
+
 由于矩阵特征值的求解十分复杂，因此引入辅助变量将优化问题转换为LMI问题
 
 \subsection{异构带宽下的拓扑优化问题}

@@ -93,7 +93,7 @@
 
 上述线性平均一致问题即为分布式深度学习中研究的一致性协议，通过求解\autoref{tab:LA_optimization_problem}得到的拓扑可以作为参数同步拓扑，用于分布式深度学习的训练。
 
-\subsection{同构带宽下的拓扑优化问题}
+\subsection{同构带宽下的拓扑优化问题}\label{subsection3-2-2}
 
 在实际分布式深度学习场景中，拓扑的设计需要考虑通信开销，以实现一致性速度和每次迭代所需通信时间的权衡。本小节考虑同构带宽场景下的通信开销，对\autoref{tab:LA_optimization_problem}描述的优化问题进行改进，以设计稀疏的参数同步拓扑。其中同步带宽指集群中每个节点的可用带宽相同。
 
@@ -108,7 +108,7 @@
     \end{array}\\
     \end{matrix}
 \end{equation}
-其中$\mathbf{g}\in \mathbb{R}^e$是拓扑中边的权重，$e=\frac{n\left( n-1 \right)}{2}$，$\mathbf{Card}$表示向量中不为0的元素的数量，$r$是对边的数目的约束。Gao等人\cite{gao2011cardinality}将形如\autoref{tab:equ-3-12}的优化问题称为基于基数约束的优化问题（Cardinality Constrained Optimization Problems，简称CCOPs）。
+其中$\mathbf{g}\in \mathbb{R}^e$是拓扑中边的权重，$e=\frac{n\left( n-1 \right)}{2}$，$\mathbf{Card}$表示向量中不为0的元素的数量，$r\le e\in \mathbb{N}$是对边的数目的约束。Gao等人\cite{gao2011cardinality}将形如\autoref{tab:equ-3-12}的优化问题称为基于基数约束的优化问题（Cardinality Constrained Optimization Problems，简称CCOPs）。
 
 为了降低问题的求解难度，首先基于拓扑图的拉普拉斯矩阵对\autoref{tab:equ-3-12}进行转换。根据拉普拉斯矩阵$L$与权重矩阵$W$的关系以及拓扑的对称性，可以得到：
 \begin{equation}
@@ -188,7 +188,7 @@
 
 \autoref{tab:equ-3-19}即为同构带宽下的拓扑优化问题，由于引入了对边的数目的约束以保证拓扑的稀疏性，因此通过求解该问题得到的权重矩阵能够比较好地权衡一致性速度和每次迭代所需通信时间。
 
-\subsection{异构带宽下的拓扑优化问题}
+\subsection{异构带宽下的拓扑优化问题}\label{subsection3-2-3}
 
 同构带宽场景是比较理想的场景，因为在实际分布式深度学习任务的训练中，由于系统硬件条件的限制或者其他训练任务的影响，可用带宽往往是异构的。本小节针对节点带宽异构、服务器内部链路带宽异构和服务器间交换机端口带宽异构三种带宽异构场景下的拓扑优化问题进行设计，通过保证带宽的最优分配，实现一致性速度和每次迭代所需通信时间的权衡。
 
@@ -287,18 +287,18 @@
     \end{array}\\
     \end{matrix}
 \end{equation}
-其中$\boldsymbol{e}=\left( e_{PIX},e_{PIX},e_{PIX},e_{PIX},e_{NODE},e_{NODE},e_{SYS} \right) ^T$，掩码矩阵$M$的定义如下：
+其中$\boldsymbol{e}=\left( e_{PIX1},e_{PIX2},e_{PIX3},e_{PIX4},e_{NODE1},e_{NODE2},e_{SYS} \right) ^T$为服务器内所有物理链路上边的数目，掩码矩阵$M$的定义如下：
 \begin{equation}
     \begin{aligned}
     \label{tab:equ-3-27}
     M=\left( \begin{array}{c}
-        \mathbf{m}_{PIX1}\\
-        \mathbf{m}_{PIX2}\\
-        \mathbf{m}_{PIX3}\\
-        \mathbf{m}_{PIX4}\\
-        \mathbf{m}_{NODE1}\\
-        \mathbf{m}_{NODE2}\\
-        \mathbf{m}_{SYS}\\
+        \boldsymbol{m}_{PIX1}\\
+        \boldsymbol{m}_{PIX2}\\
+        \boldsymbol{m}_{PIX3}\\
+        \boldsymbol{m}_{PIX4}\\
+        \boldsymbol{m}_{NODE1}\\
+        \boldsymbol{m}_{NODE2}\\
+        \boldsymbol{m}_{SYS}\\
     \end{array} \right) =\left( \begin{matrix}
             1000000000000000000000000000\\
             0000000000000100000000000000\\
@@ -310,13 +310,123 @@
     \end{matrix} \right)
     \end{aligned}
 \end{equation}
+求解\autoref{tab:equ-3-26}表示的优化问题即可得到服务器内部链路带宽异构场景下的参数同步拓扑。
 
 \textbf{3. 服务器间交换机端口带宽异构}
 
-本节考虑BCube拓扑上的服务器集群架构，如图所示，该结构采用多层交换机将服务器集群连接起来
+本节考虑底层物理拓扑采用BCube拓扑\cite{guo2009bcube}时的带宽异构场景。如所示，BCube拓扑是以服务器为中心的拓扑结构，采用多级交换机将服务器连接起来，因此该场景下的节点指服务器。若有$k$级交换机，每个交换机有$p$个端口，则服务器数目$n$需满足$n=p^k$，每个层级的交换机数目为$p^{k-1}$，且每个服务器需配备$k$个网卡，分别与每个层级中的一个交换机相连。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-2-BCube.pdf}
+    \caption{\label{fig:Fig3-2}BCube拓扑结构}
+\end{figure}
+
+在该场景下，不同层级的交换机具有不同的端口带宽。假设$k$级交换机的端口带宽为$\boldsymbol{b}=\left( b_{s_0},...,b_{s_{k-1}} \right) ^T$，根据BCube的结构特点，每个交换机端口上边的数目的上限为$p-1$（此处的边指连接在同一个交换机上的服务器之间的边）。于是基于本节的带宽分配策略，可以得到每个层级的交换机端口上分配的边的数目为$\boldsymbol{e}=\left( e_{s_0},...,e_{s_{k-1}} \right)^T$。将\autoref{tab:equ-3-25}中对节点度的约束改为对交换机端口上边的数目的约束，即可得到服务器间交换机端口带宽异构场景下的优化问题：
+\begin{equation}
+    \label{tab:equ-3-28}
+    \begin{matrix}
+        \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
+        s.t.&		\begin{array}{c}
+        \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
+        \mathbf{z}\in \left\{ 0,1 \right\} ^e,\mathbf{g}\leqslant \mathbf{z},M\mathbf{z}=\boldsymbol{e},\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda}\mathbf{I},\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right) \mathbf{I},\\
+        \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+
+\autoref{tab:equ-3-28}与\autoref{tab:equ-3-26}形式上相同，不同的是掩码矩阵$M$和约束向量$\boldsymbol{e}$。其中$\boldsymbol{e}=\left( e_{s_0}\mathbf{1}^T,...,e_{s_{k-1}}\mathbf{1}^T \right) ^T$为所有交换机端口上边的数目，$\mathbf{1}\in \mathbb{R} ^n$，$M$的定义如下：
+\begin{equation}
+    \label{tab:equ-3-29}
+    \mathrm{M}=\left( \begin{array}{c}
+        M_{s_0}\\
+        \vdots\\
+        M_{s_{k-1}}\\
+    \end{array} \right) =\left( \begin{array}{c}
+        \left( \boldsymbol{m}_{s_0p_1},...,\boldsymbol{m}_{s_0p_n} \right) ^T\\
+        \vdots\\
+        \left( \boldsymbol{m}_{s_{k-1}p_1},...,\boldsymbol{m}_{s_{k-1}p_n} \right) ^T\\
+    \end{array} \right) 
+\end{equation}
+其中$M_{s_i}\in \mathbb{R} ^{n\times e},\ i=0,...,k-1$是第$i$级交换机上所有端口的掩码向量构成的矩阵，$\boldsymbol{m}_{s_ip_j}\in \mathbb{R} ^e,\ i=0,...,k-1,\ j=1,...,n$是第$i$级交换机上第$j$个端口的边的掩码向量。求解\autoref{tab:equ-3-28}表示的优化问题即可得到服务器间交换机端口带宽异构场景下的参数同步拓扑。
 
 \section{参数同步拓扑优化问题求解框架}
 \subsection{基于ADMM的拓扑优化问题求解方法}
+
+本章使用交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）求解\autoref{subsection3-2-2}和\autoref{subsection3-2-3}中描述的优化问题。ADMM算法主要用于解决约束优化问题，该算法的基本思想是通过将原始问题分解为子问题，并通过交替的方式逐步求解这些子问题进而求解整个问题。下面首先介绍ADMM算法求解基于基数约束的优化问题（CCOP）的基本原理，然后将本章研究的不同场景下的参数同步拓扑优化问题进行适当变换，并提出用于求解这些问题的定制化的ADMM算法。
+
+对于一般的CCOP：
+\begin{equation}
+    \label{tab:equ-3-30}
+    \begin{matrix}
+        \underset{\mathbf{x}}{\min}&		f(\mathbf{x})\\
+        \,\,s.t.&		\mathbf{x}\in \mathcal{C} ,\ |\mathbf{x}|_0\le r,\\
+    \end{matrix}
+\end{equation}
+其中$\mathbf{x}\in \mathbb{R}^e$是优化变量，$f(\mathbf{x})$是可微的凸函数，$\mathcal{C}$是凸且非空的可行域，$\left| \mathbf{x} \right|_0$表示$\mathbf{x}$中非零元素的数量，$r\le e\in \mathbb{N} $。引入辅助变量$\mathbf{x}_1$将问题转换为如下形式：
+\begin{equation}
+    \label{tab:equ-3-31}
+    \begin{matrix}
+        \underset{\mathbf{x},\mathbf{x}_1}{\min}&		f(\mathbf{x})\\
+        \,\,s.t.&		\begin{array}{c}
+        \mathbf{x}\in \mathcal{C} , \ |\mathbf{x}_1|_0\le r,\\
+        \mathbf{x}=\mathbf{x}_1.\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+
+\autoref{tab:equ-3-31}对应的增广拉格朗日函数为：
+\begin{equation}
+    \label{tab:equ-3-32}
+    \mathcal{L} =f(\mathbf{x})+\langle \boldsymbol{\mu },\mathbf{x}-\mathbf{x}_1\rangle +\frac{\rho}{2}\parallel \mathbf{x}-\mathbf{x}_1\parallel_{2}^{2},
+\end{equation}
+其中$\boldsymbol{\mu } \in \mathbb{R} ^e$是相应的对偶变量，$\rho$是惩罚项的权重。则基于ADMM求解\autoref{tab:equ-3-31}的过程为交替更新$\mathbf{x}_1$和$\mathbf{x}$，然后更新对偶变量$\mu$，具体算法如下：
+
+\begin{center}
+% \begin{minipage}{8.5cm}
+\begin{algorithm}[!htbp]
+        \caption{ADMM求解一般CCOP的流程} 
+    %   \small
+        \label{Algorithm-ADMM-CCOP} 
+        \begin{algorithmic}[1]
+        \REQUIRE{$f(\mathbf{x})$，$r$，$\rho$和初始值$\mathbf{x}^0$，$\boldsymbol{\mu }^0$}
+        \ENSURE{\autoref{tab:equ-3-31}的局部最优解$\mathbf{x}$和$\mathbf{z}$}。
+        \FOR{$i \in [1, l]$}
+            \STATE 基于\autoref{tab:features_fomula}计算第$i$个神经网络层的扩充特征：
+            \begin{align*}
+            %\small
+                &mem_w=\begin{cases}
+                    k^2c_{in}c_{out}+c_{out},&bias=1\\
+                    k^2c_{in}c_{out},&bias=0\\
+                \end{cases}\\
+                &mem_{in}=bm_{in}^2c_{in}, \hspace{0.2in} mem_{out}=bm_{out}^2c_{out},\\
+                &m_{out}=\lfloor \frac{m_{in}+2p-k}{s} \rfloor +1,\\
+                &ops_{conv}=bm_{out}^2k^2c_{in}c_{out}, \hspace{0.2in} ops_{fc}=bd_{in}d_{out}.
+            \end{align*}
+            \STATE 使用多层感知器模型预测第$i$个神经网络层的计算时间。
+        \ENDFOR
+        \IF{通信是基于$all\underline{~}reduce$进行的}
+        \STATE 基于\autoref{tab:multi_gpu_allreduce_based_multiGPU}预测通信时间：
+        \begin{align*}
+        %\small
+            t_{all\underline{~}reduce}^{cluster}=\left( m-1 \right) \cdot t_{all\underline{~}reduce}^{link}\left( \frac{2N}{m} \right),
+        \end{align*}
+        \ELSE
+        \STATE 根据分布式训练架构和拓扑结构分析一次迭代需要进行的通信次数$c$以及每次通信涉及的通信链路的集合$links_i$。
+        \STATE 基于\autoref{tab:topo_based_on_broadcast}预测通信时间：
+        \begin{align*}
+        %\small
+            t_{comm}=\sum_{i=1}^c{t_{broadcast}^{cluster}\left( n_i, links_i \right)},
+        \end{align*}
+        \ENDIF
+        \STATE 提取关键路径并计算迭代时间。
+        \end{algorithmic}
+\end{algorithm}
+% \end{minipage}
+\end{center}
+
 
 \subsection{基于模拟退火的拓扑生成方法}
 

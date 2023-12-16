@@ -230,11 +230,11 @@
 
 \textbf{1. 节点带宽异构}
 
-在该场景下，每个节点具有不同的可用带宽。假设节点数为$n$，节点的可用带宽为$\boldsymbol{b}=\left( b_1,...,b_n \right)^T$。根据上述带宽分配策略，可以得到每个节点上分配的边的数目$\boldsymbol{e}=\left( e_1,...,e_n \right)^T$。由于节点上的边数等于节点的度，于是定义节点的度$\boldsymbol{d}=\left( d_1,...,d_n \right)^T,\ d_i=e_i,\ i=1,...,n$。进而可以得到对节点度的约束：
+在该场景下，每个节点具有不同的可用带宽。假设节点数为$n$，节点的可用带宽为$\boldsymbol{b}=\left( b_1,...,b_n \right)^T$。根据上述带宽分配策略，可以得到每个节点上分配的边的数目$\boldsymbol{e}=\left( e_1,...,e_n \right)^T$。由于节点上的边数等于节点的度，于是定义对节点度的约束：
 \begin{equation}
     \begin{aligned}
     \label{tab:equ-3-23}
-    \mathbf{card}\left( \boldsymbol{m}_i\mathbf{g} \right) &=d_i,\ i=1,...,n,
+    \mathbf{card}\left( \boldsymbol{m}_i\mathbf{g} \right) &=e_i,\ i=1,...,n,
     \\
     \boldsymbol{m}_i&=\mathrm{abs}\left( A_{i,:} \right) ,
     \end{aligned}
@@ -248,7 +248,7 @@
         \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
         s.t.&		\begin{array}{c}
         \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
-        \mathbf{card}\left( \boldsymbol{m}_i\mathbf{g} \right) =d_i, i=1,...,n,\\
+        \mathbf{card}\left( \boldsymbol{m}_i\mathbf{g} \right) =e_i, i=1,...,n,\\
         L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda} I,\\
         L\curlyeqprec \left( 2-\tilde{\lambda} \right)  I,\\
         \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
@@ -262,7 +262,7 @@
         \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
         s.t.&		\begin{array}{c}
         \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
-        \mathbf{z}\in \left\{ 0,1 \right\} ^e,\mathbf{g}\leqslant \mathbf{z},M\mathbf{z}=\boldsymbol{d},\\
+        \mathbf{z}\in \left\{ 0,1 \right\} ^e,\mathbf{g}\leqslant \mathbf{z},M\mathbf{z}=\boldsymbol{e},\\
         L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda} I,\\
         L\curlyeqprec \left( 2-\tilde{\lambda} \right)  I,\\
         \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
@@ -273,21 +273,7 @@
 
 \textbf{2. 服务器内部链路带宽异构}
 
-该场景指\autoref{fig:Fig2-4}所示的标准服务器架构中，三种类型的物理链路具有不同的可用带宽，假设分别为$b_{PIX}$，$b_{NODE}$和$b_{SYS}$。根据服务器架构的特点，三种物理链路上边的数目的上限分别为1，4和16。于是基于本节的带宽分配策略，可以得到三种类型的物理链路上分配的边的数目$e_{PIX}$，$e_{NODE}$和$e_{SYS}$。将\autoref{tab:equ-3-25}中对节点度的约束改为对物理链路上边的数目的约束，即可得到服务器内部链路带宽异构场景下的优化问题：
-\begin{equation}
-    \label{tab:equ-3-26}
-    \begin{matrix}
-        \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
-        s.t.&		\begin{array}{c}
-        \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
-        \mathbf{z}\in \left\{ 0,1 \right\} ^e,\mathbf{g}\leqslant \mathbf{z},M\mathbf{z}=\boldsymbol{e},\\
-        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda} I,\\
-        L\curlyeqprec \left( 2-\tilde{\lambda} \right)  I,\\
-        \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
-    \end{array}\\
-    \end{matrix}
-\end{equation}
-其中$\boldsymbol{e}=\left( e_{PIX1},e_{PIX2},e_{PIX3},e_{PIX4},e_{NODE1},e_{NODE2},e_{SYS} \right) ^T$为服务器内所有物理链路上边的数目，掩码矩阵$M$的定义如下：
+该场景指\autoref{fig:Fig2-4}所示的标准服务器架构中，三种类型的物理链路具有不同的可用带宽，假设分别为$b_{PIX}$，$b_{NODE}$和$b_{SYS}$。根据服务器架构的特点，三种物理链路上边的数目的上限分别为1，4和16。于是基于本节的带宽分配策略，可以得到三种类型的物理链路上分配的边的数目$e_{PIX}$，$e_{NODE}$和$e_{SYS}$。将\autoref{tab:equ-3-25}中对节点度的约束替换为对物理链路上边的数目的约束，即可得到服务器内部链路带宽异构场景下的优化问题。其中约束向量$\boldsymbol{e}$替换为$\left( e_{PIX1},e_{PIX2},e_{PIX3},e_{PIX4},e_{NODE1},e_{NODE2},e_{SYS} \right) ^T$，表示服务器内所有物理链路上边的数目，掩码矩阵$M$替换为：
 \begin{equation}
     \begin{aligned}
     \label{tab:equ-3-27}
@@ -307,10 +293,10 @@
             0110000110000000000000000000\\
             0000000000000000000000011110\\
             0001111001111011111111000000\\
-    \end{matrix} \right]
+    \end{matrix} \right].
     \end{aligned}
 \end{equation}
-求解\autoref{tab:equ-3-26}表示的优化问题即可得到服务器内部链路带宽异构场景下的参数同步拓扑。
+求解替换$M$和$\boldsymbol{e}$后的优化问题即可得到服务器内部链路带宽异构场景下的参数同步拓扑。
 
 \textbf{3. 服务器间交换机端口带宽异构}
 
@@ -322,22 +308,7 @@
     \caption{\label{fig:Fig3-2}BCube拓扑结构}
 \end{figure}
 
-在该场景下，不同层级的交换机具有不同的端口带宽。假设$k$级交换机的端口带宽为$\boldsymbol{b}=\left( b_{s_0},...,b_{s_{k-1}} \right) ^T$，根据BCube的结构特点，每个交换机端口上边的数目的上限为$p-1$（此处的边指连接在同一个交换机上的服务器之间的边）。于是基于本节的带宽分配策略，可以得到每个层级的交换机端口上分配的边的数目为$\boldsymbol{e}=\left( e_{s_0},...,e_{s_{k-1}} \right)^T$。将\autoref{tab:equ-3-25}中对节点度的约束改为对交换机端口上边的数目的约束，即可得到服务器间交换机端口带宽异构场景下的优化问题：
-\begin{equation}
-    \label{tab:equ-3-28}
-    \begin{matrix}
-        \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
-        s.t.&		\begin{array}{c}
-        \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
-        \mathbf{z}\in \left\{ 0,1 \right\} ^e,\mathbf{g}\leqslant \mathbf{z},M\mathbf{z}=\boldsymbol{e},\\
-        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda} I,\\
-        L\curlyeqprec \left( 2-\tilde{\lambda} \right)  I,\\
-        \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
-    \end{array}\\
-    \end{matrix}
-\end{equation}
-
-\autoref{tab:equ-3-28}与\autoref{tab:equ-3-26}形式上相同，不同的是掩码矩阵$M$和约束向量$\boldsymbol{e}$。其中$\boldsymbol{e}=\left( e_{s_0}\mathbf{1}^T,...,e_{s_{k-1}}\mathbf{1}^T \right) ^T$为所有交换机端口上边的数目，$\mathbf{1}\in \mathbb{R} ^n$，$M$的定义如下：
+在该场景下，不同层级的交换机具有不同的端口带宽。假设$k$级交换机的端口带宽为$\boldsymbol{b}=\left( b_{s_0},...,b_{s_{k-1}} \right) ^T$，根据BCube的结构特点，每个交换机端口上边的数目的上限为$p-1$（此处的边指连接在同一个交换机上的服务器之间的边）。于是基于本节的带宽分配策略，可以得到每个层级的交换机端口上分配的边的数目为$\boldsymbol{e}=\left( e_{s_0},...,e_{s_{k-1}} \right)^T$。将\autoref{tab:equ-3-25}中对节点度的约束替换为对交换机端口上边的数目的约束，即可得到服务器间交换机端口带宽异构场景下的优化问题。其中约束向量$\boldsymbol{e}$替换为$\left( e_{s_0}\mathbf{1}^T,...,e_{s_{k-1}}\mathbf{1}^T \right) ^T$，表示所有交换机端口上边的数目，掩码矩阵$\mathbf{1}\in \mathbb{R} ^n$，$M$替换为：
 \begin{equation}
     \label{tab:equ-3-29}
     \mathrm{M}=\left[ \begin{array}{c}
@@ -350,14 +321,14 @@
         \left( \boldsymbol{m}_{s_{k-1}p_1},...,\boldsymbol{m}_{s_{k-1}p_n} \right) ^T\\
     \end{array} \right] 
 \end{equation}
-其中$M_{s_i}\in \mathbb{R} ^{n\times e},\ i=0,...,k-1$是第$i$级交换机上所有端口的掩码向量构成的矩阵，$\boldsymbol{m}_{s_ip_j}\in \mathbb{R} ^e,\ i=0,...,k-1,\ j=1,...,n$是第$i$级交换机上第$j$个端口的边的掩码向量。求解\autoref{tab:equ-3-28}表示的优化问题即可得到服务器间交换机端口带宽异构场景下的参数同步拓扑。
+其中$M_{s_i}\in \mathbb{R} ^{n\times e},\ i=0,...,k-1$是第$i$级交换机上所有端口的掩码向量构成的矩阵，$\boldsymbol{m}_{s_ip_j}\in \mathbb{R} ^e,\ i=0,...,k-1,\ j=1,...,n$是第$i$级交换机上第$j$个端口的边的掩码向量。求解替换$M$和$\boldsymbol{e}$后的优化问题即可得到服务器间交换机端口带宽异构场景下的参数同步拓扑。
 
 % 综上所述，同构带宽场景下的参数同步拓扑优化问题考虑了对边的数目的约束，以设计稀疏的拓扑结构；而异构带宽场景下，通过对带宽分配策略进行设计，以保证每条边上带宽的最优分配，进而分别引入了对节点度的约束、对服务器内部链路上边的数目的约束和对服务器间交换机端口上边的数目的约束
 
 \section{参数同步拓扑优化问题求解框架}
 \subsection{基于ADMM的拓扑优化问题求解方法}
 
-本章使用交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）求解\autoref{subsection3-2-2}和\autoref{subsection3-2-3}中描述的优化问题。ADMM算法主要用于解决约束优化问题，该算法的基本思想是通过将原始问题分解为子问题，并通过交替的方式逐步求解这些子问题进而求解整个问题。下面首先介绍ADMM算法求解基于基数约束的优化问题（CCOP）的基本原理，然后将本章研究的不同场景下的参数同步拓扑优化问题进行适当变换，并提出用于求解这些问题的定制化的ADMM算法。
+本章使用交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）求解\autoref{subsection3-2-2}和\autoref{subsection3-2-3}中描述的参数同步拓扑优化问题。ADMM算法主要用于解决约束优化问题，该算法的基本思想是通过将原始问题分解为子问题，并通过交替的方式逐步求解这些子问题进而求解整个问题。下面首先介绍ADMM算法求解基于基数约束的优化问题（CCOP）的基本原理，然后将本章研究的不同场景下的参数同步拓扑优化问题进行适当变换，并提出用于求解这些问题的定制化的ADMM算法。
 
 \textbf{1. 基于ADMM求解CCOP的原理}
 
@@ -452,7 +423,7 @@
 
 \textbf{2. 定制化的ADMM算法}
 
-为了使用ADMM算法求解同构带宽下的拓扑优化问题（\autoref{tab:equ-3-19}）和异构带宽下的拓扑优化问题（\autoref{tab:equ-3-25}，\autoref{tab:equ-3-26}和\autoref{tab:equ-3-28}），首先将优化问题转换为上述具有线性目标函数和线性约束的形式。下面以同构带宽下的拓扑优化问题为例进行说明，异构带宽下的优化问题可以使用相同的转换方法。
+为了使用ADMM算法求解同构带宽下的拓扑优化问题（\autoref{tab:equ-3-19}）和异构带宽下的拓扑优化问题（\autoref{tab:equ-3-25}），首先将优化问题转换为上述具有线性目标函数和线性约束的形式。下面以同构带宽下的拓扑优化问题为例进行说明，异构带宽下的优化问题可以使用相同的转换方法。
 
 令$\mathbf{x}=\left( \mathbf{g}^T,\tilde{\lambda} \right) ^T$，$\mathcal{B} ^+\left( \mathbf{x} \right) =L+\tilde{\lambda} I$，$\mathcal{B} ^-\left( \mathbf{x} \right) =L-\tilde{\lambda} I$，$B_0=\frac{\alpha 11^T}{n}$，以及通过分析可以得出$D\mathbf{x}=\mathrm{diag}\left( L \right) $，其中$ D=\left( \mathrm{abs} \left( A \right) ,\mathbf{0} \right) ,\mathbf{0}\in \mathbb{R} ^n$，于是\autoref{tab:equ-3-19}可以转换为如下形式：
 \begin{equation}
@@ -615,7 +586,7 @@
 % \end{minipage}
 \end{center}
 
-类似的，对异构带宽下的拓扑优化问题进行转换，引入
+类似的，引入辅助变量$\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1,\mathbf{z},\mathbf{z_1},\mathbf{\nu },\mathbf{\nu }_1$，对异构带宽下的拓扑优化问题进行转换，
 
 
 \subsection{基于模拟退火的拓扑生成方法}

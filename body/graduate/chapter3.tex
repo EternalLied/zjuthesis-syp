@@ -152,22 +152,22 @@
 根据拉普拉斯矩阵的定义式可知，$L$的最小特征值$\lambda _n\left( L \right)=0$对应的特征向量为$\mathbf{1}$。于是，定义正交阵$P=\left( \boldsymbol{p}_1,\boldsymbol{p}_2,...,\boldsymbol{p}_{n-1},\mathbf{1}/\sqrt{n} \right)$，其中每个列向量为单位向量，并且满足${\boldsymbol{p}_i}^T\mathbf{1}=0\left( i=1,2,...,n-1 \right) $和${\boldsymbol{p}_i}^T\boldsymbol{p}_j=0\left( i\ne j \right) $，可以得到：
 \begin{equation}
     \label{tab:equ-3-17}
-    L\sim P^TLP\sim P^T\left( \begin{matrix}
+    L\sim P^TLP\sim P^T\left[ \begin{matrix}
         \lambda _1\left( L \right)&		0&		0\\
         0&		\ddots&		0\\
         0&		0&		\lambda _n\left( L \right)\\
-    \end{matrix} \right) P,
+    \end{matrix} \right] P,
 \end{equation}
 其中$\sim$表示矩阵相似。
 
 很显然，$\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}$有一个特征值等于$\alpha$，其对应的特征向量为$\mathbf{1}$，并且其余特征值均为0。假设$\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}$的$n$个特征向量为$P=\left( \boldsymbol{p}_1,\boldsymbol{p}_2,...,\boldsymbol{p}_{n-1},\mathbf{1}/\sqrt{n} \right) $，可以得到：
 \begin{equation}
     \label{tab:equ-3-18}
-    P^T\left( L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n} \right) P\sim P^T\left( \begin{matrix}
+    P^T\left( L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n} \right) P\sim P^T\left[ \begin{matrix}
         \lambda _1\left( L \right)&		0&		0\\
         0&		\ddots&		0\\
         0&		0&		\lambda _n\left( L \right) +\alpha\\
-    \end{matrix} \right) P.
+    \end{matrix} \right] P.
 \end{equation}
 因此，$L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succcurlyeq \lambda _{n-1}\left( L \right) I$当且仅当$\alpha \geqslant \lambda _{n-1}\left( L \right)$。
 
@@ -178,13 +178,13 @@
         \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
         s.t.&		\begin{array}{c}
         \mathbf{g}\ge 0,\tilde{\lambda}>0,\mathbf{Card}\left( \mathbf{g} \right) \le r,\\
-        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda}\mathbf{I},\\
-        L\curlyeqprec \left( 2-\tilde{\lambda} \right) \mathbf{I},\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda} I,\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right) I,\\
         \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
     \end{array}\\
     \end{matrix}
 \end{equation}
-其中$\mathrm{diag}$表示矩阵对角线元素组成的列向量。关于拉普拉斯矩阵的两个LMI约束能够保证$\lambda _{n-1}\left( L \right)$和$\lambda _1\left( L \right)$同时向1靠近，从而实现最小化渐进收敛因子，即最大化一致性速度。最后一个不等式约束是为了保证最终得到的权重矩阵中所有元素都不小于0，因为通常情况下，分布式深度学习中用于参数同步的权重不为负数。
+其中$\mathrm{diag}$表示矩阵对角线元素组成的列向量，$\succeq$表示左边矩阵的特征值全部大于等于右边矩阵，$\curlyeqprec$则表示小于等于。关于拉普拉斯矩阵的两个LMI约束能够保证$\lambda _{n-1}\left( L \right)$和$\lambda _1\left( L \right)$同时向1靠近，从而实现最小化渐进收敛因子，即最大化一致性速度。最后一个不等式约束是为了保证最终得到的权重矩阵中所有元素都不小于0，因为通常情况下，分布式深度学习中用于参数同步的权重不为负数。
 
 \autoref{tab:equ-3-19}即为同构带宽下的拓扑优化问题，由于引入了对边的数目的约束以保证拓扑的稀疏性，因此通过求解该问题得到的权重矩阵能够比较好地权衡一致性速度和每次迭代所需通信时间。
 
@@ -249,8 +249,8 @@
         s.t.&		\begin{array}{c}
         \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
         \mathbf{card}\left( \boldsymbol{m}_i\mathbf{g} \right) =d_i, i=1,...,n,\\
-        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda}\mathbf{I},\\
-        L\curlyeqprec \left( 2-\tilde{\lambda} \right) \mathbf{I},\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda} I,\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right)  I,\\
         \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
     \end{array}\\
     \end{matrix}
@@ -263,8 +263,8 @@
         s.t.&		\begin{array}{c}
         \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
         \mathbf{z}\in \left\{ 0,1 \right\} ^e,\mathbf{g}\leqslant \mathbf{z},M\mathbf{z}=\boldsymbol{d},\\
-        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda}\mathbf{I},\\
-        L\curlyeqprec \left( 2-\tilde{\lambda} \right) \mathbf{I},\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda} I,\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right)  I,\\
         \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
     \end{array}\\
     \end{matrix}
@@ -281,8 +281,8 @@
         s.t.&		\begin{array}{c}
         \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
         \mathbf{z}\in \left\{ 0,1 \right\} ^e,\mathbf{g}\leqslant \mathbf{z},M\mathbf{z}=\boldsymbol{e},\\
-        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda}\mathbf{I},\\
-        L\curlyeqprec \left( 2-\tilde{\lambda} \right) \mathbf{I},\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda} I,\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right)  I,\\
         \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
     \end{array}\\
     \end{matrix}
@@ -291,7 +291,7 @@
 \begin{equation}
     \begin{aligned}
     \label{tab:equ-3-27}
-    M=\left( \begin{array}{c}
+    M=\left[ \begin{array}{c}
         \boldsymbol{m}_{PIX1}\\
         \boldsymbol{m}_{PIX2}\\
         \boldsymbol{m}_{PIX3}\\
@@ -299,7 +299,7 @@
         \boldsymbol{m}_{NODE1}\\
         \boldsymbol{m}_{NODE2}\\
         \boldsymbol{m}_{SYS}\\
-    \end{array} \right) =\left( \begin{matrix}
+    \end{array} \right] =\left[ \begin{matrix}
             1000000000000000000000000000\\
             0000000000000100000000000000\\
             0000000000000000000000100000\\
@@ -307,7 +307,7 @@
             0110000110000000000000000000\\
             0000000000000000000000011110\\
             0001111001111011111111000000\\
-    \end{matrix} \right)
+    \end{matrix} \right]
     \end{aligned}
 \end{equation}
 求解\autoref{tab:equ-3-26}表示的优化问题即可得到服务器内部链路带宽异构场景下的参数同步拓扑。
@@ -330,8 +330,8 @@
         s.t.&		\begin{array}{c}
         \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
         \mathbf{z}\in \left\{ 0,1 \right\} ^e,\mathbf{g}\leqslant \mathbf{z},M\mathbf{z}=\boldsymbol{e},\\
-        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda}\mathbf{I},\\
-        L\curlyeqprec \left( 2-\tilde{\lambda} \right) \mathbf{I},\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda} I,\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right)  I,\\
         \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
     \end{array}\\
     \end{matrix}
@@ -340,22 +340,26 @@
 \autoref{tab:equ-3-28}与\autoref{tab:equ-3-26}形式上相同，不同的是掩码矩阵$M$和约束向量$\boldsymbol{e}$。其中$\boldsymbol{e}=\left( e_{s_0}\mathbf{1}^T,...,e_{s_{k-1}}\mathbf{1}^T \right) ^T$为所有交换机端口上边的数目，$\mathbf{1}\in \mathbb{R} ^n$，$M$的定义如下：
 \begin{equation}
     \label{tab:equ-3-29}
-    \mathrm{M}=\left( \begin{array}{c}
+    \mathrm{M}=\left[ \begin{array}{c}
         M_{s_0}\\
         \vdots\\
         M_{s_{k-1}}\\
-    \end{array} \right) =\left( \begin{array}{c}
+    \end{array} \right] =\left[ \begin{array}{c}
         \left( \boldsymbol{m}_{s_0p_1},...,\boldsymbol{m}_{s_0p_n} \right) ^T\\
         \vdots\\
         \left( \boldsymbol{m}_{s_{k-1}p_1},...,\boldsymbol{m}_{s_{k-1}p_n} \right) ^T\\
-    \end{array} \right) 
+    \end{array} \right] 
 \end{equation}
 其中$M_{s_i}\in \mathbb{R} ^{n\times e},\ i=0,...,k-1$是第$i$级交换机上所有端口的掩码向量构成的矩阵，$\boldsymbol{m}_{s_ip_j}\in \mathbb{R} ^e,\ i=0,...,k-1,\ j=1,...,n$是第$i$级交换机上第$j$个端口的边的掩码向量。求解\autoref{tab:equ-3-28}表示的优化问题即可得到服务器间交换机端口带宽异构场景下的参数同步拓扑。
+
+% 综上所述，同构带宽场景下的参数同步拓扑优化问题考虑了对边的数目的约束，以设计稀疏的拓扑结构；而异构带宽场景下，通过对带宽分配策略进行设计，以保证每条边上带宽的最优分配，进而分别引入了对节点度的约束、对服务器内部链路上边的数目的约束和对服务器间交换机端口上边的数目的约束
 
 \section{参数同步拓扑优化问题求解框架}
 \subsection{基于ADMM的拓扑优化问题求解方法}
 
 本章使用交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）求解\autoref{subsection3-2-2}和\autoref{subsection3-2-3}中描述的优化问题。ADMM算法主要用于解决约束优化问题，该算法的基本思想是通过将原始问题分解为子问题，并通过交替的方式逐步求解这些子问题进而求解整个问题。下面首先介绍ADMM算法求解基于基数约束的优化问题（CCOP）的基本原理，然后将本章研究的不同场景下的参数同步拓扑优化问题进行适当变换，并提出用于求解这些问题的定制化的ADMM算法。
+
+\textbf{1. 基于ADMM求解CCOP的原理}
 
 对于一般的CCOP：
 \begin{equation}
@@ -365,7 +369,7 @@
         \,\,s.t.&		\mathbf{x}\in \mathcal{C} ,\ |\mathbf{x}|_0\le r,\\
     \end{matrix}
 \end{equation}
-其中$\mathbf{x}\in \mathbb{R}^e$是优化变量，$f(\mathbf{x})$是可微的凸函数，$\mathcal{C}$是凸且非空的可行域，$\left| \mathbf{x} \right|_0$表示$\mathbf{x}$中非零元素的数量，$r\le e\in \mathbb{N} $。引入辅助变量$\mathbf{x}_1$将问题转换为如下形式：
+其中$\mathbf{x}\in \mathbb{R}^p$是优化变量，$f(\mathbf{x})$是可微的凸函数，$\mathcal{C}$是凸且非空的可行域，$\left| \mathbf{x} \right|_0$表示$\mathbf{x}$中非零元素的数量，$r\le p\in \mathbb{N} $。引入辅助变量$\mathbf{x}_1$将问题转换为如下形式：
 \begin{equation}
     \label{tab:equ-3-31}
     \begin{matrix}
@@ -391,41 +395,227 @@
     %   \small
         \label{Algorithm-ADMM-CCOP} 
         \begin{algorithmic}[1]
-        \REQUIRE{$f(\mathbf{x})$，$r$，$\rho$和初始值$\mathbf{x}^0$，$\boldsymbol{\mu }^0$}
-        \ENSURE{\autoref{tab:equ-3-31}的局部最优解$\mathbf{x}$和$\mathbf{z}$}。
-        \FOR{$i \in [1, l]$}
-            \STATE 基于\autoref{tab:features_fomula}计算第$i$个神经网络层的扩充特征：
-            \begin{align*}
-            %\small
-                &mem_w=\begin{cases}
-                    k^2c_{in}c_{out}+c_{out},&bias=1\\
-                    k^2c_{in}c_{out},&bias=0\\
-                \end{cases}\\
-                &mem_{in}=bm_{in}^2c_{in}, \hspace{0.2in} mem_{out}=bm_{out}^2c_{out},\\
-                &m_{out}=\lfloor \frac{m_{in}+2p-k}{s} \rfloor +1,\\
-                &ops_{conv}=bm_{out}^2k^2c_{in}c_{out}, \hspace{0.2in} ops_{fc}=bd_{in}d_{out}.
-            \end{align*}
-            \STATE 使用多层感知器模型预测第$i$个神经网络层的计算时间。
-        \ENDFOR
-        \IF{通信是基于$all\underline{~}reduce$进行的}
-        \STATE 基于\autoref{tab:multi_gpu_allreduce_based_multiGPU}预测通信时间：
-        \begin{align*}
-        %\small
-            t_{all\underline{~}reduce}^{cluster}=\left( m-1 \right) \cdot t_{all\underline{~}reduce}^{link}\left( \frac{2N}{m} \right),
-        \end{align*}
-        \ELSE
-        \STATE 根据分布式训练架构和拓扑结构分析一次迭代需要进行的通信次数$c$以及每次通信涉及的通信链路的集合$links_i$。
-        \STATE 基于\autoref{tab:topo_based_on_broadcast}预测通信时间：
-        \begin{align*}
-        %\small
-            t_{comm}=\sum_{i=1}^c{t_{broadcast}^{cluster}\left( n_i, links_i \right)},
-        \end{align*}
-        \ENDIF
-        \STATE 提取关键路径并计算迭代时间。
+        \REQUIRE{$f(\mathbf{x}),\mathcal{C},r,\rho$，初始值$\mathbf{x}^0,\mathbf{x}_{1}^{0},\boldsymbol{\mu }^0$，算法收敛误差$\epsilon$}；
+        \ENSURE{\autoref{tab:equ-3-31}的局部最优解$\mathbf{x}$和$\mathbf{x}_1$}；
+        \STATE 令$k=0$；
+        \WHILE{$\left\| \mathbf{x}^k-\mathbf{x}_{1}^{k} \right\| _{F}^{2}>\epsilon $}
+            \STATE 更新$\mathbf{x}_1$：
+            \begin{equation}
+                \label{tab:equ-3-33}
+                \mathbf{x}_{1}^{k+1}\coloneqq \mathrm{arg}\min_{|\mathbf{x}_1|_0\le r} \left\| \mathbf{x}^k-\mathbf{x}_1+\frac{\boldsymbol{\mu }^k}{\rho} \right\| _{F}^{2}\text{；}
+            \end{equation}
+            \STATE 更新$\mathbf{x}$：
+            \begin{equation}
+                \label{tab:equ-3-34}
+                \mathbf{x}^{k+1}\coloneqq \mathrm{arg}\min_{\mathbf{x}\in \mathcal{C}} f(\mathbf{x})+\frac{\rho}{2}\left\| \mathbf{x}-\mathbf{x}_{1}^{k+1}+\frac{\boldsymbol{\mu }^k}{\rho} \right\| _{F}^{2}\text{；}
+            \end{equation}
+            \STATE 更新$\boldsymbol{\mu }$：
+            \begin{equation}
+                \label{tab:equ-3-35}
+                \boldsymbol{\mu }^{k+1}:=\boldsymbol{\mu }^k+\rho \left( \mathbf{x}^{k+1}-\mathbf{x}_{1}^{k+1} \right)\text{；}
+            \end{equation}
+            \STATE 令$k=k+1$；
+        \ENDWHILE
+        \STATE 确定$\mathbf{x}$和$\mathbf{x}_1$的求解结果。
         \end{algorithmic}
 \end{algorithm}
 % \end{minipage}
 \end{center}
+
+从\autoref{Algorithm-ADMM-CCOP}中可以看到，ADMM每次迭代中变量的更新过程由三个子问题组成。通过求解\autoref{tab:equ-3-33}中的子问题，可以得到：
+\begin{equation}
+    \label{tab:equ-3-36}
+    \mathbf{x}_{1}^{k+1}=\mathrm{Proj}_{\left\{ \mathbf{x}_1||\mathbf{x}_1|_0\le r \right\}}\left( \mathbf{x}^k+\frac{\boldsymbol{\mu }^k}{\rho} \right), 
+\end{equation}
+其中$\mathrm{Proj}$表示将向量投影到可行域中。为了使$\mathbf{x}_1$满足基数约束，根据Boyd等人的理论\cite{boyd2011distributed}，可以通过保留$\mathbf{x}_1$中最大的$r$个元素，并将其他元素置为零，得到$\mathbf{x}_{1}^{k+1}$。
+
+\autoref{tab:equ-3-34}中$\mathbf{x}$的更新过程为求解一个强凸问题，当$f(\mathbf{x})=\boldsymbol{c}^T\mathbf{x},\ \boldsymbol{c}\in \mathbb{R} ^p$时，求解该子问题可以得到：
+\begin{equation}
+    \label{tab:equ-3-37}
+    \mathbf{x}^{k+1}=\mathrm{Proj}_{\mathcal{C}}\left( \mathbf{x}_{1}^{k+1}-\frac{\boldsymbol{\mu }^k+\boldsymbol{c}}{\rho} \right). 
+\end{equation}
+进一步地，当$\mathcal{C} \coloneqq \left\{ \mathbf{x}\in \mathbb{R} ^p|A\mathbf{x}=\boldsymbol{b}\ \\ ,A\in \mathbb{R} ^{q\times p},\boldsymbol{b}\in \mathbb{R} ^q \right\} $时，\autoref{tab:equ-3-37}是一个线性等式约束的强凸二次规划问题，于是可以通过求解如下线性等式得到$\mathbf{x}^{k+1}$：
+\begin{equation}
+    \label{tab:equ-3-38}
+    \left[ \begin{matrix}
+        I_{p\times p}&		A^T\\
+        A&		\mathbf{0}_{q\times q}\\
+    \end{matrix} \right] \left[ \begin{array}{c}
+        \mathbf{x}^{k+1}\\
+        \boldsymbol{\lambda }\\
+    \end{array} \right] =\left[ \begin{array}{c}
+        \mathbf{x}_{1}^{k+1}-\small{\frac{\left( \boldsymbol{\mu }^k+\boldsymbol{c} \right)}{\rho}}\\
+        \boldsymbol{b}\\
+    \end{array} \right].
+\end{equation}
+其中$\boldsymbol{\lambda }$是与线性等式约束相关的对偶变量。
+
+\textbf{2. 定制化的ADMM算法}
+
+为了使用ADMM算法求解同构带宽下的拓扑优化问题（\autoref{tab:equ-3-19}）和异构带宽下的拓扑优化问题（\autoref{tab:equ-3-25}，\autoref{tab:equ-3-26}和\autoref{tab:equ-3-28}），首先将优化问题转换为上述具有线性目标函数和线性约束的形式。下面以同构带宽下的拓扑优化问题为例进行说明，异构带宽下的优化问题可以使用相同的转换方法。
+
+令$\mathbf{x}=\left( \mathbf{g}^T,\tilde{\lambda} \right) ^T$，$\mathcal{B} ^+\left( \mathbf{x} \right) =L+\tilde{\lambda} I$，$\mathcal{B} ^-\left( \mathbf{x} \right) =L-\tilde{\lambda} I$，$B_0=\frac{\alpha 11^T}{n}$，以及通过分析可以得出$D\mathbf{x}=\mathrm{diag}\left( L \right) $，其中$ D=\left( \mathrm{abs} \left( A \right) ,\mathbf{0} \right) ,\mathbf{0}\in \mathbb{R} ^n$，于是\autoref{tab:equ-3-19}可以转换为如下形式：
+\begin{equation}
+    \label{tab:equ-3-39}
+    \begin{matrix}
+        \underset{\mathbf{x}}{\min}&		\boldsymbol{c}^T\mathbf{x}\\
+        s.t.&		\begin{array}{c}
+        \mathbf{x}\ge 0,|\mathbf{x}_{:e}|_0\le r,\\
+        \mathcal{B} ^-\left( \mathbf{x} \right) +B_0\succeq \mathbf{0},\\
+        \mathcal{B} ^+\left( \mathbf{x} \right) \preceq 2 I,\\
+        D\mathbf{x}\leqslant \mathbf{1},\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+其中$\boldsymbol{c}\in \mathbb{R} ^{e+1}$，$\mathbf{x}_{:e}$表示$\mathbf{x}$的前$e$个元素。
+
+接下来引入辅助变量$\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1$，将不等式约束转换为等式约束，得到如下形式：
+\begin{equation}
+    \label{tab:equ-3-40}
+    \begin{matrix}
+        \underset{\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1}{\min}&		\boldsymbol{c}^T\mathbf{x}\\
+        s.t.&		\begin{array}{c}
+        \mathcal{B} ^-\left( \mathbf{x} \right) +B_0+S=0,\\
+        \mathcal{B} ^+\left( \mathbf{x} \right) +T=2I,\\
+        D\mathbf{x}+\mathbf{y}=1,\\
+        \mathbf{x}=\mathbf{x}_1,\mathbf{x}_1\ge 0,|\left( \mathbf{x}_1 \right) _{:e}|_0\le r,\\
+        S=S_1,S_1\preceq 0,\\
+        \mathbf{y}=\mathbf{y}_1,\mathbf{y}_1\ge 0,T=T_1,T_1\succcurlyeq 0.\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+相应的增广拉格朗日函数为：
+\begin{equation}
+    \begin{aligned}
+    \label{tab:equ-3-41}
+    \mathcal{L} &=\boldsymbol{c}^T\mathbf{x}+\left< \boldsymbol{\mu },\mathbf{x}-\mathbf{x}_1 \right> +\frac{\rho}{2}\left\| \mathbf{x}-\mathbf{x}_1 \right\| _{F}^{2}+\left< \varLambda ,S-S_1 \right> +\frac{\rho}{2}\left\| S-S_1 \right\| _{F}^{2}
+    \\
+    &+\left< \boldsymbol{\sigma },\mathbf{y}-\mathbf{y}_1 \right> +\frac{\rho}{2}\left\| \mathbf{y}-\mathbf{y}_{\mathbf{1}} \right\| _{F}^{2}+\left< \varGamma ,T-T_1 \right> +\frac{\rho}{2}\left\| T-T_1 \right\| _{F}^{2},
+    \end{aligned}
+\end{equation}
+其中$\boldsymbol{\mu },\varLambda ,\boldsymbol{\sigma },\varGamma$为对偶变量。使用ADMM求解\autoref{tab:equ-3-40}，并令$\mathcal{X} =\left( \mathbf{x}_1,S_1,\mathbf{y}_1,T_1 \right) $，$\mathcal{Y} =\left( \mathbf{x},S,\mathbf{y},T \right) $，$\mathcal{D} =\left( \boldsymbol{\mu },\varLambda ,\boldsymbol{\sigma },\varGamma \right) $，可以得到如下变量更新过程：
+\begin{equation}
+    \begin{aligned}
+        \label{tab:equ-3-42}
+        \mathcal{X} ^{k+1}&\coloneqq \mathrm{arg}\min_{\mathcal{X} \in \mathcal{C} _{\mathcal{X}}} \mathcal{L} \left( \mathcal{X} ,\mathcal{Y} ^k;\mathcal{D} ^k \right)\\
+        &=\mathrm{arg}\min_{\mathbf{x}_1\in \mathcal{C} _{\mathbf{x}_1}} \mathcal{L} \left( \mathcal{X} ,\mathcal{Y} ^k;\mathcal{D} ^k \right) +\mathrm{arg}\min_{S_1\in \mathcal{C} _{S_1}} \mathcal{L} _1\left( \mathcal{X} ,\mathcal{Y} ^k;\mathcal{D} ^k \right)\\
+        &+\mathrm{arg}\min_{\mathbf{y}_1\in \mathcal{C} _{\mathbf{y}_1}} \mathcal{L} \left( \mathcal{X} ,\mathcal{Y} ^k;\mathcal{D} ^k \right) +\mathrm{arg}\min_{T_1\in \mathcal{C} _{T_1}} \mathcal{L} _1\left( \mathcal{X} ,\mathcal{Y} ^k;\mathcal{D} ^k \right)\\
+        \mathcal{Y} ^{k+1}&\coloneqq \mathrm{arg}\min_{\mathcal{Y} \in \mathcal{C} _{\mathcal{Y}}} \mathcal{L} \left( \mathcal{X} ^{k+1},\mathcal{Y} ;\mathcal{D} ^k \right)\\
+        \boldsymbol{\mu }^{k+1}&\coloneqq \boldsymbol{\mu }^k+\rho \left( \mathbf{x}^{k+1}-\mathbf{x}_{1}^{k+1} \right)\\
+        \varLambda ^{k+1}&\coloneqq \varLambda ^k+\rho \left( S^{k+1}-S_{1}^{k+1} \right)\\
+        \boldsymbol{\sigma }^{k+1}&\coloneqq \boldsymbol{\sigma }^k+\rho \left( \mathbf{y}^{k+1}-\mathbf{y}_{1}^{k+1} \right)\\
+        \varGamma ^{k+1}&\coloneqq \varGamma ^k+\rho \left( T^{k+1}-T_{1}^{k+1} \right)\\
+    \end{aligned}
+\end{equation}
+其中，$\mathbf{x}_1,S_1,\mathbf{y}_1,T_1$的更新可以分别进行，于是可以得到：
+\begin{equation}
+    \label{tab:equ-3-43}
+    \begin{aligned}
+        \mathbf{x}_{1}^{k+1}&=\mathrm{Proj}_{\left\{ \mathbf{x}_1||\left( \mathbf{x}_1 \right) _{:e}|_0\le r \right\}}\left( \mathrm{Proj}_{\left\{ \mathbf{x}_1|\mathbf{x}_1\geqslant 0 \right\}}\left( \mathbf{x}^k+\frac{\boldsymbol{\mu }^k}{\rho} \right) \right) 
+        \\
+        S_{1}^{k+1}&=\mathrm{Proj}_{\left\{ S_1|S_1\preceq \mathbf{0} \right\}}\left( S^k+\frac{\varLambda ^k}{\rho} \right) 
+        \\
+        \mathbf{y}_{1}^{k+1}&=\mathrm{Proj}_{\left\{ \mathbf{y}_1|\mathbf{y}_1\geqslant 0 \right\}}\left( \mathbf{y}^k+\frac{\boldsymbol{\mu }^k}{\rho} \right) 
+        \\
+        T_{1}^{k+1}&=\mathrm{Proj}_{\left\{ T_1|T_1\succcurlyeq \mathbf{0} \right\}}\left( T^k+\frac{\varGamma ^k}{\rho} \right) 
+    \end{aligned}
+\end{equation}
+其中对于$\mathbf{x}_1\geqslant 0$和$\mathbf{y}_1\geqslant 0$，通过保留其中大于等于零的元素并将其他元素置为零进行映射；对于$|\left( \mathbf{x}_1 \right) _{:e}|_0\le r$，通过保留$\mathbf{x}_1$前$e$个元素中最大的$r$个元素并将其他元素置为零进行映射；对于$S_1\preceq \mathbf{0}$，通过下式进行映射：
+\begin{equation}
+    \label{tab:equ-3-44}
+    S_1=U\mathrm{Diag}\left( \min \left( \mathrm{diag}\left( \varSigma \right) ,0 \right) \right) U^T
+\end{equation}
+其中$U$和$\varSigma$是对$S_1$进行特征值分解得到的单位特征向量和特征值对应的矩阵，$\mathrm{diag}$表示由矩阵的对角线元素构成的向量，$\mathrm{Diag}$表示由向量作为对角线元素得到的矩阵。对于$T_1\succcurlyeq \mathbf{0}$，映射方法与\autoref{tab:equ-3-44}相同。
+
+\autoref{tab:equ-3-42}中对于$\mathbf{x},S,\mathbf{y},T$的更新参考\autoref{tab:equ-3-38}可以得到：
+\begin{equation}
+    \label{tab:equ-3-45}
+    \left[ \begin{matrix}
+        I&		\tilde{A}^T\\
+        \tilde{A}&		\mathbf{0}_{q\times q}\\
+    \end{matrix} \right] \left[ \begin{array}{c}
+        \mathbf{x}_{P}^{k+1}\\
+        \boldsymbol{\lambda }\\
+    \end{array} \right] =\left[ \begin{array}{c}
+        \mathbf{x}_{1}^{k+1}-\frac{\boldsymbol{\mu }^k+\boldsymbol{c}}{\rho}\\
+        \mathrm{vec}\left( S_{1}^{k+1}-\frac{\Lambda ^k}{\rho} \right)\\
+        \mathbf{y}_{1}^{k+1}-\frac{\boldsymbol{\sigma }^k}{\rho}\\
+        \mathrm{vec}\left( T_{1}^{k+1}-\frac{\varGamma ^k}{\rho} \right)\\
+        \mathrm{vec}\left( -B_0 \right)\\
+        \mathrm{vec}\left( 2I \right)\\
+        \mathbf{1}\\
+    \end{array} \right] 
+\end{equation}
+其中
+\begin{equation}
+    \label{tab:equ-3-46}
+    \begin{aligned}
+        \mathbf{x}_P&=\left( \mathbf{x}^T,\mathrm{vec}\left( S \right) ^T,\mathbf{y}^T,\mathrm{vec}\left( T \right) ^T \right) ^T, \\
+        \tilde{A}&=\left[ \begin{matrix}
+            \begin{array}{c}
+            \tilde{B}^-\\
+            \tilde{B}^+\\
+            D\\
+        \end{array}&		\begin{array}{c}
+            I_{n^2}\\
+            \mathbf{0}_{n^2\times n^2}\\
+            \mathbf{0}_{n\times n^2}\\
+        \end{array}&		\begin{array}{c}
+            \mathbf{0}_{n^2\times n}\\
+            \mathbf{0}_{n^2\times n}\\
+            I_n\\
+        \end{array}&		\begin{array}{c}
+            \mathbf{0}_{n^2\times n^2}\\
+            I_{n^2}\\
+            \mathbf{0}_{n\times n^2}\\
+        \end{array}\\
+        \end{matrix} \right] ,
+    \end{aligned}
+\end{equation}
+并且$\tilde{B}^-\mathbf{x}=\mathrm{vec}\left( \mathcal{B} ^-\left( \mathbf{x} \right) \right)$，$\tilde{B}^+\mathbf{x}=\mathrm{vec}\left( \mathcal{B} ^+\left( \mathbf{x} \right) \right)$，$\mathrm{vec}$表示将矩阵按列展开成一维向量。求解\autoref{tab:equ-3-45}即可得到$\mathbf{x},S,\mathbf{y},T$的更新值。
+
+基于上述分析，总结利用定制化的ADMM算法求解同构带宽下的参数同步拓扑优化问题的流程如\autoref{Algorithm-T-ADMM}所示。
+
+\begin{center}
+    % \begin{minipage}{8.5cm}
+    \begin{algorithm}[!htbp]
+            \caption{定制化的ADMM求解同构带宽下的拓扑优化问题} 
+        %   \small
+            \label{Algorithm-T-ADMM} 
+            \begin{algorithmic}[1]
+            \REQUIRE{$n,r,\rho,\alpha$，初始值$\mathbf{x}^0,\mathbf{x}_{1}^{0},S^0,S_{1}^{0},\mathbf{y}^0,\mathbf{y}_{1}^{0},T^0,T_{1}^{0},\boldsymbol{\mu }^0,\varLambda ^0,\boldsymbol{\sigma }^0,\varGamma ^0$}，算法收敛误差$\epsilon$；
+            \ENSURE{\autoref{tab:equ-3-40}的局部最优解$\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1$}；
+            \STATE 令$k=0$；
+            \WHILE{$\left\| \mathbf{x}^k-\mathbf{x}_{1}^{k} \right\| _{F}^{2}+\left\| S^k-S_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{y}^k-\mathbf{y}_{1}^{k} \right\| _{F}^{2}+\left\| T^k-T_{1}^{k} \right\| _{F}^{2}>\epsilon $}
+                \STATE 基于\autoref{tab:equ-3-43}更新$\mathbf{x}_1,S_1,\mathbf{y}_1,T_1$：
+                \begin{align*}
+                    \small
+                    \mathbf{x}_{1}^{k+1}&=\mathrm{Proj}_{\left\{ \mathbf{x}_1||\left( \mathbf{x}_1 \right) _{:e}|_0\le r \right\}}\left( \mathrm{Proj}_{\left\{ \mathbf{x}_1|\mathbf{x}_1\geqslant 0 \right\}}\left( \mathbf{x}^k+\frac{\boldsymbol{\mu }^k}{\rho} \right) \right) 
+        \\
+        S_{1}^{k+1}&=\mathrm{Proj}_{\left\{ S_1|S_1\preceq \mathbf{0} \right\}}\left( S^k+\frac{\varLambda ^k}{\rho} \right) 
+        \\
+        \mathbf{y}_{1}^{k+1}&=\mathrm{Proj}_{\left\{ \mathbf{y}_1|\mathbf{y}_1\geqslant 0 \right\}}\left( \mathbf{y}^k+\frac{\boldsymbol{\mu }^k}{\rho} \right) 
+        \\
+        T_{1}^{k+1}&=\mathrm{Proj}_{\left\{ T_1|T_1\succcurlyeq \mathbf{0} \right\}}\left( T^k+\frac{\varGamma ^k}{\rho} \right) 
+                \end{align*}
+                \STATE 求解\autoref{tab:equ-3-45}以更新$\mathbf{x},S,\mathbf{y},T$；
+                \STATE 基于\autoref{tab:equ-3-45}更新$\boldsymbol{\mu },\varLambda ,\boldsymbol{\sigma },\varGamma$：
+                \begin{align*}
+                    \small
+                    \boldsymbol{\mu }^{k+1}&\coloneqq \boldsymbol{\mu }^k+\rho \left( \mathbf{x}^{k+1}-\mathbf{x}_{1}^{k+1} \right)\\
+	\varLambda ^{k+1}&\coloneqq \varLambda ^k+\rho \left( S^{k+1}-S_{1}^{k+1} \right)\\
+	\boldsymbol{\sigma }^{k+1}&\coloneqq \boldsymbol{\sigma }^k+\rho \left( \mathbf{y}^{k+1}-\mathbf{y}_{1}^{k+1} \right)\\
+	\varGamma ^{k+1}&\coloneqq \varSigma ^k+\rho \left( T^{k+1}-T_{1}^{k+1} \right)
+                \end{align*}
+                \STATE 令$k=k+1$；
+            \ENDWHILE
+            \STATE 确定$\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1$的求解结果。
+            \end{algorithmic}
+    \end{algorithm}
+% \end{minipage}
+\end{center}
+
+类似的，对异构带宽下的拓扑优化问题进行转换，引入
 
 
 \subsection{基于模拟退火的拓扑生成方法}

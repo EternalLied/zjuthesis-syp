@@ -166,12 +166,12 @@
     %   \small
       \label{Algorithm-PreTopo} 
         \begin{algorithmic}[1]
-        \REQUIRE{神经网络的层数$l$；各神经网络层的类型$layer_i, i\in{1,...,l}$；各神经网络层的特征$\boldsymbol{c}_{nn}^{layer_i}$；GPU的硬件特征$\boldsymbol{c}_{gpu}$；集群的通信特征$\boldsymbol{c}_{cluster}$}。
-        \ENSURE{分布式训练的迭代时间$T_{iter}$}。
+        \REQUIRE{神经网络的层数$l$；各神经网络层的类型$layer_i, i\in{1,...,l}$；各神经网络层的特征$\boldsymbol{c}_{nn}^{layer_i}$；GPU的硬件特征$\boldsymbol{c}_{gpu}$；集群的通信特征$\boldsymbol{c}_{cluster}$}；
+        \ENSURE{分布式训练的迭代时间$T_{iter}$}；
         \FOR{$i \in [1, l]$}
             \STATE 基于\autoref{tab:features_fomula}计算第$i$个神经网络层的扩充特征：
             \begin{align*}
-            %\small
+            % \small
                 &mem_w=\begin{cases}
                     k^2c_{in}c_{out}+c_{out},&bias=1\\
                     k^2c_{in}c_{out},&bias=0\\
@@ -180,7 +180,7 @@
                 &m_{out}=\lfloor \frac{m_{in}+2p-k}{s} \rfloor +1,\\
                 &ops_{conv}=bm_{out}^2k^2c_{in}c_{out}, \hspace{0.2in} ops_{fc}=bd_{in}d_{out}.
             \end{align*}
-            \STATE 使用多层感知器模型预测第$i$个神经网络层的计算时间。
+            \STATE 使用多层感知器模型预测第$i$个神经网络层的计算时间；
         \ENDFOR
         \IF{通信是基于$all\underline{~}reduce$进行的}
         \STATE 基于\autoref{tab:multi_gpu_allreduce_based_multiGPU}预测通信时间：
@@ -189,7 +189,7 @@
             t_{all\underline{~}reduce}^{cluster}=\left( m-1 \right) \cdot t_{all\underline{~}reduce}^{link}\left( \frac{2N}{m} \right),
         \end{align*}
         \ELSE
-        \STATE 根据分布式训练架构和拓扑结构分析一次迭代需要进行的通信次数$c$以及每次通信涉及的通信链路的集合$links_i$。
+        \STATE 根据分布式训练架构和拓扑结构分析一次迭代需要进行的通信次数$c$以及每次通信涉及的通信链路的集合$links_i$；
         \STATE 基于\autoref{tab:topo_based_on_broadcast}预测通信时间：
         \begin{align*}
         %\small

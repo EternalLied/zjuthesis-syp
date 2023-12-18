@@ -328,7 +328,7 @@
 \section{参数同步拓扑优化问题求解框架}
 \subsection{基于ADMM的拓扑优化问题求解方法}
 
-本节使用交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）求解\autoref{subsection3-2-2}和\autoref{subsection3-2-3}中描述的参数同步拓扑优化问题。ADMM算法主要用于解决约束优化问题，该算法的基本思想是通过将原始问题分解为子问题，并通过交替的方式逐步求解这些子问题进而求解整个问题。下面首先介绍ADMM算法求解基于基数约束的优化问题（CCOP）的基本原理，然后将本章研究的不同场景下的参数同步拓扑优化问题进行适当变换，并提出用于求解这些问题的定制化的ADMM算法。
+本节使用交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）求解\autoref{section3-2}中描述的参数同步拓扑优化问题。ADMM算法主要用于解决约束优化问题，该算法的基本思想是通过将原始问题分解为子问题，并通过交替的方式逐步求解这些子问题进而求解整个问题。下面首先介绍ADMM算法求解基于基数约束的优化问题（CCOP）的基本原理，然后将本章研究的不同场景下的参数同步拓扑优化问题进行适当变换，并提出用于求解这些问题的定制化的ADMM算法。
 
 \textbf{1. 基于ADMM求解CCOP的原理}
 
@@ -681,35 +681,35 @@
 基于上述分析，总结利用定制化的ADMM算法求解参数同步拓扑优化问题的流程如\autoref{Algorithm-T-ADMM}所示。
 
 \begin{center}
-    % \begin{minipage}{8.5cm}
-    \begin{algorithm}[!htbp]
-            \caption{定制化的ADMM求解参数同步拓扑优化问题的流程} 
-        %   \small
-            \label{Algorithm-T-ADMM} 
-            \begin{algorithmic}[1]
-            \REQUIRE{$n,r,\rho,\alpha$，初始值$\mathbf{x}^0,\mathbf{x}_{1}^{0},S^0,S_{1}^{0},\mathbf{y}^0,\mathbf{y}_{1}^{0},T^0,T_{1}^{0},\boldsymbol{\mu }^0,\varLambda ^0,\boldsymbol{\sigma }^0,\varGamma ^0$，算法收敛误差$\epsilon$，异构带宽场景还需初始值$\mathbf{z}^0,\mathbf{z}_{1}^{0},\mathbf{\nu }^0,\mathbf{\nu }_{1}^{0},\boldsymbol{\iota }^0,\boldsymbol{\kappa }^0$}；
-            \ENSURE{同构带宽场景为\autoref{tab:equ-3-38}的局部最优解$\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1$，异构带宽场景为\autoref{tab:equ-3-45}的局部最优解，还包括$\mathbf{z},\mathbf{z}_1,\mathbf{\nu },\mathbf{\nu }_1$}；
-            \STATE 令$k=0$；
-            \IF{优化问题是同构带宽场景下的拓扑优化问题：}
-            \WHILE{$\left\| \mathbf{x}^k-\mathbf{x}_{1}^{k} \right\| _{F}^{2}+\left\| S^k-S_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{y}^k-\mathbf{y}_{1}^{k} \right\| _{F}^{2}+\left\| T^k-T_{1}^{k} \right\| _{F}^{2}>\epsilon $}
-                \STATE 基于\autoref{tab:equ-3-41}更新$\mathbf{x}_1,S_1,\mathbf{y}_1,T_1$；
-                \STATE 求解\autoref{tab:equ-3-43}以更新$\mathbf{x},S,\mathbf{y},T$；
-                \STATE 基于\autoref{tab:equ-3-40}更新$\boldsymbol{\mu },\varLambda ,\boldsymbol{\sigma },\varGamma$；
-                \STATE 令$k=k+1$；
-            \ENDWHILE
-            \STATE 确定$\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1$的求解结果。
-            \ELSE 
-            \WHILE{$\left\| \mathbf{x}^k-\mathbf{x}_{1}^{k} \right\| _{F}^{2}+\left\| S^k-S_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{y}^k-\mathbf{y}_{1}^{k} \right\| _{F}^{2}+\left\| T^k-T_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{z}^k-\mathbf{z}_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{\nu }^k-\mathbf{\nu }_{1}^{k} \right\| _{F}^{2}>\epsilon $}
-                \STATE 基于\autoref{tab:equ-3-47}更新$\mathbf{x}_1,S_1,\mathbf{y}_1,T_1,\mathbf{z}_1,\mathbf{\nu }_1$；
-                \STATE 求解\autoref{tab:equ-3-48}以更新$\mathbf{x},S,\mathbf{y},T,\mathbf{z},\mathbf{\nu }$；
-                \STATE 基于\autoref{tab:equ-3-50}更新$\boldsymbol{\mu },\varLambda ,\boldsymbol{\sigma },\varGamma,\boldsymbol{\iota },\boldsymbol{\kappa }$；
-                \STATE 令$k=k+1$；
-            \ENDWHILE
-            \STATE 确定$\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1,\mathbf{z},\mathbf{z}_1,\mathbf{\nu },\mathbf{\nu }_1$的求解结果。
-            \ENDIF
-            
-            \end{algorithmic}
-    \end{algorithm}
+% \begin{minipage}{8.5cm}
+\begin{algorithm}[!htbp]
+        \caption{定制化的ADMM求解参数同步拓扑优化问题的流程} 
+    %   \small
+        \label{Algorithm-T-ADMM} 
+        \begin{algorithmic}[1]
+        \REQUIRE{$n,r,\rho,\alpha$，初始值$\mathbf{x}^0,\mathbf{x}_{1}^{0},S^0,S_{1}^{0},\mathbf{y}^0,\mathbf{y}_{1}^{0},T^0,T_{1}^{0},\boldsymbol{\mu }^0,\varLambda ^0,\boldsymbol{\sigma }^0,\varGamma ^0$，算法收敛误差$\epsilon$，异构带宽场景还需初始值$\mathbf{z}^0,\mathbf{z}_{1}^{0},\mathbf{\nu }^0,\mathbf{\nu }_{1}^{0},\boldsymbol{\iota }^0,\boldsymbol{\kappa }^0$}；
+        \ENSURE{同构带宽场景为\autoref{tab:equ-3-38}的局部最优解$\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1$，异构带宽场景为\autoref{tab:equ-3-45}的局部最优解，还包括$\mathbf{z},\mathbf{z}_1,\mathbf{\nu },\mathbf{\nu }_1$}；
+        \STATE 令$k=0$；
+        \IF{优化问题是同构带宽场景下的拓扑优化问题：}
+        \WHILE{$\left\| \mathbf{x}^k-\mathbf{x}_{1}^{k} \right\| _{F}^{2}+\left\| S^k-S_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{y}^k-\mathbf{y}_{1}^{k} \right\| _{F}^{2}+\left\| T^k-T_{1}^{k} \right\| _{F}^{2}>\epsilon $}
+            \STATE 基于\autoref{tab:equ-3-41}更新$\mathbf{x}_1,S_1,\mathbf{y}_1,T_1$；
+            \STATE 求解\autoref{tab:equ-3-43}以更新$\mathbf{x},S,\mathbf{y},T$；
+            \STATE 基于\autoref{tab:equ-3-40}更新$\boldsymbol{\mu },\varLambda ,\boldsymbol{\sigma },\varGamma$；
+            \STATE 令$k=k+1$；
+        \ENDWHILE
+        \STATE 确定$\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1$的求解结果。
+        \ELSE 
+        \WHILE{$\left\| \mathbf{x}^k-\mathbf{x}_{1}^{k} \right\| _{F}^{2}+\left\| S^k-S_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{y}^k-\mathbf{y}_{1}^{k} \right\| _{F}^{2}+\left\| T^k-T_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{z}^k-\mathbf{z}_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{\nu }^k-\mathbf{\nu }_{1}^{k} \right\| _{F}^{2}>\epsilon $}
+            \STATE 基于\autoref{tab:equ-3-47}更新$\mathbf{x}_1,S_1,\mathbf{y}_1,T_1,\mathbf{z}_1,\mathbf{\nu }_1$；
+            \STATE 求解\autoref{tab:equ-3-48}以更新$\mathbf{x},S,\mathbf{y},T,\mathbf{z},\mathbf{\nu }$；
+            \STATE 基于\autoref{tab:equ-3-50}更新$\boldsymbol{\mu },\varLambda ,\boldsymbol{\sigma },\varGamma,\boldsymbol{\iota },\boldsymbol{\kappa }$；
+            \STATE 令$k=k+1$；
+        \ENDWHILE
+        \STATE 确定$\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1,\mathbf{z},\mathbf{z}_1,\mathbf{\nu },\mathbf{\nu }_1$的求解结果。
+        \ENDIF
+        
+        \end{algorithmic}
+\end{algorithm}
 % \end{minipage}
 \end{center}
 
@@ -731,26 +731,131 @@
 
 \textbf{1）初始化}
 
-根据节点数目和节点的度随机生成一个初始拓扑，并计算该初始拓扑的ASPL值。考虑到计算ASPL的过程需要获得每个节点到其他所有节点的最短路径，为了减少计算时间，基于计算ASPL。
-
+根据节点数目和节点的度随机生成一个初始拓扑，并计算该初始拓扑的ASPL值。考虑到计算ASPL的过程需要获得每个节点到其他所有节点的最短路径，为了减少计算时间，基于位运算计算ASPL，计算过程如\autoref{Algorithm-ASPL}所示。\autoref{fig:Fig3-4}展示了计算\autoref{fig:Fig3-3}中拓扑的ASPL时邻接矩阵$\mathrm{A}$的变化。
 \begin{center}
     % \begin{minipage}{8.5cm}
     \begin{algorithm}[!htbp]
             \caption{ASPL计算过程} 
         %   \small
-            \label{Algorithm-T-ADMM} 
+            \label{Algorithm-ASPL} 
             \begin{algorithmic}[1]
-            \REQUIRE{$n,r,\rho,\alpha$，初始值$\mathbf{x}^0,\mathbf{x}_{1}^{0},S^0,S_{1}^{0},\mathbf{y}^0,\mathbf{y}_{1}^{0},T^0,T_{1}^{0},\boldsymbol{\mu }^0,\varLambda ^0,\boldsymbol{\sigma }^0,\varGamma ^0$}；
-            \ENSURE{同构带宽场景为\autoref{tab:equ-3-38}的局部最优解$\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1$}，异构带宽场景为\autoref{tab:equ-3-45}的局部最优解，还包括$\mathbf{z},\mathbf{z}_1,\mathbf{\nu },\mathbf{\nu }_1$；
-            \STATE 令$k=0$；
+            \REQUIRE{节点数$n$和每个节点的邻居$\mathcal{N}_i$}；
+            \ENSURE{ASPL值}；
+            \STATE 初始化拓扑的直径$\mathrm{diameter}=1$，所有节点之间的距离和$\mathrm{distance}=n(n-1)$；
+            \STATE 初始化邻接矩阵$\mathrm{A}^0=\left( 2^{n-1},...,1 \right) ^T,\mathrm{B}^0=\mathrm{A}^0$，其中$\mathrm{A}^k$的第$i\left(i=1,...,n\right)$个元素的最低位$n$个比特表示节点$i$在距离$k$以内是否能够到达其他节点；
+            \FOR{$k=1,...,n-1$}
+                \FOR{$i=1,...,n$}
+                    \STATE $\mathrm{B}^k\left[ i \right] =\mathrm{B}^{k-1}\left[ i \right] $；
+                    \FOR{$j\in\mathcal{N}_i$}
+                        \STATE $\mathrm{B}^k\left[ i \right] =\mathrm{B}^k\left[ i \right] |\mathrm{A}^{k-1}\left[ j \right] $；
+                    \ENDFOR
+                \ENDFOR
+                \IF{$\mathrm{B}^k=\mathrm{A}^{k-1}$}
+                    \STATE 拓扑不连通，结束执行；
+                \ENDIF
+                \STATE 令$\mathrm{num}=0$表示邻接矩阵$\mathrm{B}^k$中比特值为1的数量；
+                \FOR{$i=1,...,n$}
+                    \STATE 统计$\mathrm{B}^k\left[ i \right]$的二进制形式中1的数量$\mathrm{num}_i$；
+                    \STATE $\mathrm{num}=\mathrm{num}+\mathrm{num}_i$；
+                \ENDFOR
+                \IF{$\mathrm{num}=n\times n$}
+                    \STATE 结束循环；
+                \ENDIF
+                \STATE $\mathrm{A}^k=\mathrm{B}^k$；
+                \STATE $\mathrm{diameter}++$；
+                \STATE $\mathrm{distance}=\mathrm{distance}+\left( n\times n-\mathrm{num} \right) $；
+            \ENDFOR
+            \STATE $ASPL=\frac{\mathrm{dis}\tan\mathrm{ce}}{n\left( n-1 \right)}$。
             \end{algorithmic}
     \end{algorithm}
 % \end{minipage}
 \end{center}
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter3/fig3-4-ASPL-example2.pdf}
+    \caption{\label{fig:Fig3-4}ASPL计算过程中邻接矩阵的变化}
+\end{figure}
 
+\textbf{2）突变}
+
+为了生成新的拓扑，使用\autoref{fig:Fig3-5}所示的2-opt方法对拓扑中的边进行突变。首先从拓扑中随机选取两条边，然后使用这两条边的端点生成两条新的边，生成结果有两种：第一种是分别将1和4、2和3连接；第二种是分别将1和3、2和4连接。随机选择两种突变结果中的一种用于得到新的拓扑，这种突变方式能够保证每个节点的度始终不变。为了避免突变后的拓扑与当前拓扑相同，需要保证随机选取的两条边没有公共端点，另外如果经过突变生成的边在当前拓扑中已经存在，则需要重新进行突变。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.6\linewidth]{figure/chapter3/fig3-5-2opt.pdf}
+    \caption{\label{fig:Fig3-5}基于2-opt的突变}
+\end{figure}
+
+\textbf{3）评估}
+
+利用\autoref{Algorithm-ASPL}计算新生成拓扑的能量值$E\left( \mathcal{G} _{new} \right) $，并计算与当前拓扑的能量差，为了便于温度参数的计算，使用$n\times \left(n-1\right)$对能量差进行缩放。
+\begin{equation}
+    \label{tab:equ-3-51}
+    \varDelta E=\left( E\left( \mathcal{G} _{new} \right) -E\left( \mathcal{G} _{k} \right) \right) \times \left( n^2-n \right) ,
+\end{equation}
+其中$\mathcal{G} _{k}$为SA执行到第$k$次迭代时的拓扑。
+
+\textbf{4）接受条件}
+
+在得到能量差之后，基于下式计算接受新拓扑的概率：
+\begin{equation}
+    \label{tab:equ-3-52}
+    \mathrm{Prob}=\left\{ \begin{array}{c}
+        1\\
+        \exp \left( -\frac{\varDelta E}{T_k} \right)\\
+    \end{array} \right. ,
+\end{equation}
+其中$T_k$是第$k$次迭代的温度参数值，$T_k$越大，接受概率越大。当新拓扑的ASPL值小于当前拓扑时，直接接受新拓扑，否则根据概率值决定是否接受。
+
+\textbf{5）更新}
+
+如果接受新拓扑，则令新拓扑为当前拓扑。
+
+\textbf{6）冷却}
+
+基于中的指数退火公式降低温度参数$T_k$，其中$\alpha$是冷却率。根据给定的最大温度$T_{max}$，最小温度$T_{min}$以及迭代次数$N$，可以得到冷却率$\alpha =\left( \frac{T_{min}}{T_{max}} \right) ^{\frac{1}{N}}$。
+\begin{equation}
+    \label{tab:equ-3-53}
+    T_{k+1} = \alpha \times T_{k}.
+\end{equation}
+
+综上所述，基于SA生成拓扑的算法流程如下。
+\begin{center}
+    % \begin{minipage}{8.5cm}
+    \begin{algorithm}[!htbp]
+        \caption{基于SA生成拓扑的算法流程} 
+    %   \small
+        \label{Algorithm-SA} 
+        \begin{algorithmic}[1]
+        \REQUIRE{节点数目$n$，节点的度$\boldsymbol{d}$}，迭代次数$N$，初始温度参数$T_0$，冷却率$\alpha$；
+        \ENSURE{生成的拓扑结构$\mathcal{G}$}；
+        \STATE 初始化拓扑结构$\mathcal{G}_0$和能量值$E\left(\mathcal{G}_0\right)$；
+        \FOR{$k=1,...,N$}
+            \STATE 基于2-opt突变生成新的拓扑$\mathcal{G} _{new}$；
+            \STATE 基于\autoref{tab:equ-3-51}评估新拓扑与当前拓扑的能量差；
+            \STATE 基于\autoref{tab:equ-3-52}计算接受新拓扑的概率，并判断是否接受新拓扑；
+            \IF{接受新拓扑}
+                \STATE 更新当前拓扑；
+                \STATE 基于\autoref{tab:equ-3-53}调整温度参数；
+            \ENDIF
+        \ENDFOR
+        \STATE 得到生成的拓扑结构$\mathcal{G}$。
+    \end{algorithmic}
+    \end{algorithm}
+% \end{minipage}
+\end{center}
+
+由于ODP问题要求拓扑中节点的度给定，在\autoref{section3-2}描述的参数同步拓扑优化问题中，节点带宽异构和服务器间交换机端口带宽异构两种场景下对边的数目的约束都可以看作是对节点度的约束，因此本章将基于SA生成的拓扑结构作为这两种场景的初始拓扑结构，用于改进最终求解得到的参数同步拓扑，并且实验结果中也证明了基于SA生成初始拓扑的有效性。对于同构带宽和服务器内部链路带宽异构场景，则随机初始化拓扑，其优化问题求解结果同样优于现有的参数同步拓扑。
 
 \section{算力分析}
+本节对提出的参数同步拓扑优化方法的有效性进行验证，将与现有的参数同步拓扑进行对比分析。所有实验都是在同一个硬件系统上完成的，该系统配备了2个Intel Xeon Gold 6226R处理器和8个NVIDIA GeForce RTX 2080 Ti，每个GPU有11GB显存。该硬件系统采用\autoref{fig:Fig2-4}所示的标准服务器架构。本节的实验使用pytorch实现。
+
 \subsection{实验设置}
+本章对同构带宽场景和异构带宽场景均进行了一致性实验和分布式深度学习实验以评估优化得到的参数同步拓扑的效果。在分布式深度学习实验中，使用Cifar10和Cifar100作为分布式深度学习实验的数据集。这两个数据集都有60000张32×32像素的彩色图像，其中Cifar10数据集包含10个类别，每个类别有6000张图像，而Cifar100数据集包含100个类别，每个类别有600张图像。在60000张图像中，50000张作为训练数据，10000张作为测试数据。由于Cifar100的图像类型较多，因此在分类学任务上更具有挑战性，模型预测准确率相对于Cifar10更低。
+%介绍数据划分方式
+
+本章使用ResNet-18作为训练的神经网络模型，每个节点的批大小设置为32，学习率设置为0.05，动量因子设置为0.9，权重衰减设置为0.0001。
+
 \subsection{实验结果与分析}
 
 \section{本章小结}

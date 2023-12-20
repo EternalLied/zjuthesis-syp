@@ -495,7 +495,11 @@
 
 \subsection{实验设置与评价指标}
 
-在训练多层感知器模型时，优化器使用Adam，批大小设置为128，初始学习率设置为0.1，并分别在第40和80个训练周期时将学习率缩小10倍。本节选择VGG-16\cite{simonyan2014very}，ResNet-50\cite{he2016deep}，ResNet-101\cite{he2016deep}和GoogLeNet\cite{szegedy2015going}作为待预测的卷积神经网络，其中VGG-16由标准的卷积层、池化层和全连接堆叠而成，ResNet-50和ResNet-101由残差块组成，GoogLeNet由Inception模块组成。这些神经网络的基本组成单元都是本章所考虑的卷积层、池化层、全连接层和批归一化层。另外，本节选择环形拓扑\cite{nedic2018network}、树形拓扑\cite{iandola2016firecaffe}、分层拓扑\cite{trevisan2017lecture}、2D-Torus\cite{tanakaimagenet}和指数拓扑\cite{ying2021exponential}作为待预测的拓扑结构，并且在测试和预测时，前四种拓扑结构基于All-Reduce架构，指数拓扑则基于Gossip架构。
+在训练多层感知器模型时，优化器使用Adam，批大小设置为128，初始学习率设置为0.1，并分别在第40和80个训练周期时将学习率缩小10倍。本节选择VGG-16\cite{simonyan2014very}，ResNet-50\cite{he2016deep}，ResNet-101\cite{he2016deep}和GoogLeNet\cite{szegedy2015going}作为待预测的卷积神经网络，其中VGG-16由标准的卷积层、池化层和全连接堆叠而成，ResNet-50和ResNet-101由残差块组成，GoogLeNet由Inception模块组成。这些神经网络的基本组成单元都是本章所考虑的卷积层、池化层、全连接层和批归一化层。另外，本节选择如图所示的五种拓扑作为待预测的拓扑结构，分别是环形拓扑\cite{nedic2018network}、树形拓扑\cite{iandola2016firecaffe}、分层拓扑\cite{trevisan2017lecture}、2D-Torus\cite{tanakaimagenet}和指数拓扑\cite{ying2021exponential}，并且在测试和预测时，前四种拓扑结构基于All-Reduce架构，指数拓扑则基于Gossip架构。\textcolor{red}{下面简单介绍一下五种拓扑上的通信机制：}
+
+\begin{itemize}
+    \item 在基于All-Reduce架构的环形拓扑进行通信时，数据需要在各节点间依次传递，
+\end{itemize}
 
 为了衡量预测模型的性能，本节使用均方根误差（RMSE），平均绝对百分比误差（MAPE）和决定系数（$R^2$）作为评价指标。其中RMSE和MAPE表示预测值与真实值之间的偏差，这两个指标越小，说明预测模型的精度越高。RMSE和MAPE的计算公式如下：
 \begin{equation}
@@ -647,19 +651,19 @@
 \begin{figure}[!htbp]
     \centering
     \subfigure[环形拓扑]{
-        \includegraphics[width=0.18\linewidth]{figure/chapter2/fig2-13-1-different-topo.pdf}
+        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-1-different-topo.pdf}
     }
     \subfigure[树形拓扑]{
-        \includegraphics[width=0.18\linewidth]{figure/chapter2/fig2-13-2-different-topo.pdf}
+        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-2-different-topo.pdf}
     }
     \subfigure[分层拓扑]{
-        \includegraphics[width=0.18\linewidth]{figure/chapter2/fig2-13-3-different-topo.pdf}
+        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-3-different-topo.pdf}
     }
     \subfigure[2D-Torus]{
-        \includegraphics[width=0.18\linewidth]{figure/chapter2/fig2-13-4-different-topo.pdf}
+        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-4-different-topo.pdf}
     }
     \subfigure[指数拓扑]{
-        \includegraphics[width=0.18\linewidth]{figure/chapter2/fig2-13-5-different-topo.pdf}
+        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-5-different-topo.pdf}
     }
     \caption{基于$broadcast$实现的不同通信拓扑}
     \label{fig:Fig2-13}

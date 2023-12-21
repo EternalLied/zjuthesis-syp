@@ -816,10 +816,10 @@
 
 \textbf{6）冷却}
 
-基于中的指数退火公式降低温度参数$T_k$，其中$\alpha$是冷却率。根据给定的最大温度$T_{max}$，最小温度$T_{min}$以及迭代次数$N$，可以得到冷却率$\alpha =\left( \frac{T_{min}}{T_{max}} \right) ^{\frac{1}{N}}$。
+基于\autoref{tab:equ-3-53}中的指数退火公式降低温度参数$T_k$，其中$\beta$是冷却率。根据给定的初始温度$T_0$，终止温度$T_N$以及迭代次数$N$，可以得到冷却率$\beta =\left( \frac{T_N}{T_0} \right) ^{\frac{1}{N}}$。
 \begin{equation}
     \label{tab:equ-3-53}
-    T_{k+1} = \alpha \times T_{k}.
+    T_{k+1} = \beta \times T_{k}.
 \end{equation}
 
 综上所述，基于SA生成拓扑的算法流程如下。
@@ -830,7 +830,7 @@
     %   \small
         \label{Algorithm-SA} 
         \begin{algorithmic}[1]
-        \REQUIRE{节点数目$n$，节点的度$\boldsymbol{d}$}，迭代次数$N$，初始温度参数$T_0$，冷却率$\alpha$；
+        \REQUIRE{节点数目$n$，节点的度$\boldsymbol{d}$}，迭代次数$N$，初始温度参数$T_0$，冷却率$\beta$；
         \ENSURE{生成的拓扑结构$\mathcal{G}$}；
         \STATE 初始化拓扑结构$\mathcal{G}_0$和能量值$E\left(\mathcal{G}_0\right)$；
         \FOR{$k=1,...,N$}
@@ -854,18 +854,18 @@
 本节对提出的参数同步拓扑优化方法的有效性进行验证，并与现有的参数同步拓扑进行对比分析。所有实验都是在同一个硬件系统上完成的，该系统配备了2个Intel Xeon Gold 6226R处理器和8个NVIDIA GeForce RTX 2080 Ti，每个GPU有11GB显存。该硬件系统采用\autoref{fig:Fig2-4}所示的标准服务器架构。本节的实验使用pytorch实现。
 
 \subsection{实验设置}
-为了充分评估基于本章提出的方法获得的参数同步拓扑的性能，本节分别进行了一致性实验和分布式深度学习实验。一致性实验是指在给定拓扑上执行\autoref{section3-2-1}中描述的线性平均一致迭代过程，并根据一致性误差随时间的变化评估考虑通信开销时拓扑的一致性速度。在分布式深度学习实验中，选用Cifar10和Cifar100作为评估数据集，并采用ResNet-18作为训练的神经网络模型。Cifar10和Cifar100数据集均包含60000张32×32像素的彩色图像。其中，Cifar10数据集涵盖10个类别，每个类别有6000张图像；而Cifar100数据集则包含100个类别，每个类别有600张图像。在这60000张图像中，50000张被用作训练数据，另外10000张用于测试。在训练开始之前，每个节点从每个类别的训练数据中随机采样相同数量的样本构成本地训练数据集。实验的超参数中批大小设置为32，学习率设置为0.05，动量因子设置为0.9，权重衰减设置为0.0001。
+为了充分评估基于本章提出的方法获得的参数同步拓扑的性能，本节分别进行了一致性实验和分布式深度学习实验。一致性实验是指在给定拓扑上执行\autoref{section3-2-1}中描述的线性平均一致迭代过程，并根据一致性误差随时间的变化评估考虑通信开销时拓扑的一致性速度。在分布式深度学习实验中，选用Cifar10和Cifar100作为评估数据集，并采用ResNet-18作为训练的神经网络模型。Cifar10和Cifar100数据集均包含60000张32×32像素的彩色图像。其中，Cifar10数据集涵盖10个类别，每个类别有6000张图像；而Cifar100数据集则包含100个类别，每个类别有600张图像。在这60000张图像中，50000张被用作训练数据，另外10000张用于测试。在训练开始之前，每个节点从每个类别的训练数据中随机采样相同数量的样本构成本地训练数据集。实验的超参数中批大小设置为32（每个节点），学习率设置为0.05，动量因子设置为0.9，权重衰减设置为0.0001，训练周期数设置为100。
 %介绍数据划分方式
 %为了充分验证参数同步拓扑对分布式深度学习的影响，本章对实验数据进行同构划分和异构划分。其中同构划分指每个节点从每个类别的数据中随机采样相同数量的样本构成本地训练数据集，从而保证不同节点的本地数据符合独立同分布。而异构划分指每个节点仅随机采样部分类别的数据，构成本地训练数据集，从而使每个节点的本地数据不为独立同分布。在异构的数据上进行训练能够更好地表现出一致性速度对模型收敛速度和模型精度的影响。本章的异构划分方式中，每个节点从Cifar10数据集中随机采样7个类别的数据，而从Cifar100数据集中随机采样80个类别的数据。图以Cifar10为例展示了每个节点上采样的数据类别。
 
-另外在参数同步拓扑优化问题求解时，ADMM算法的收敛误差设置为0.0001，SA的迭代次数设置为100000，初始温度参数设置为使ASPL值最大的拓扑以50\%的概率被接受的温度值，对于不同的场景，该温度值不同，终止温度参数设置为比当前拓扑ASPL值更大的拓扑以不大于0.01\%的概率被接受的温度值，由于采用2-opt进行突变时，比当前拓扑ASPL值更大的拓扑与当前拓扑的能量差至少为2，因此基于\autoref{tab:equ-3-52}设置终止温度参数为0.22。
+另外在参数同步拓扑优化问题求解时，ADMM算法的收敛误差$\epsilon$设置为0.0001，惩罚项的权重$\rho$设置为10，$\alpha$设置为1，SA的迭代次数$N$设置为100000，初始温度参数$T_0$设置为使ASPL值最大的拓扑以50\%的概率被接受的温度值，对于不同的场景，该温度值不同，终止温度参数$T_N$设置为比当前拓扑ASPL值更大的拓扑以不大于0.01\%的概率被接受的温度值，由于采用2-opt进行突变时，比当前拓扑ASPL值更大的拓扑与当前拓扑的能量差至少为2，因此基于\autoref{tab:equ-3-52}设置终止温度参数为0.22。
 
 本节将优化得到的参数同步拓扑与五种现有的参数同步拓扑进行了对比，包括环形拓扑、网格拓扑（2D-grid）、2D-torus、指数拓扑和随机拓扑，\autoref{fig:Fig3-6}展示了8个节点上这五种拓扑的结构。其中前三种拓扑的权重矩阵基于Metropolis规则\cite{nedic2018network}生成：
 \begin{equation}
     \label{tab:equ-3-54}
     W_{ij}=\frac{1}{2\max \left\{ d_i,d_j \right\}} \ i,j\in \left\{ 1,...,n \right\} 
 \end{equation}
-式中$d_i$表示节点$i$的度。指数拓扑为有向拓扑，其每个节点将数据乘以$\frac{1}{d_{out}+1}$后发送给出邻居和节点本身，$d_{out}$为节点的出度。随机拓扑的每条边以0.5的概率生成，并且边的权重等于$\frac{1}{d_{\max}}$，$d_{\max}$为拓扑中最大的度，例如图\autoref{random-topo}中$d_{\max}=5$。
+式中$d_i$表示节点$i$的度。指数拓扑为有向拓扑，其每个节点将数据乘以$\frac{1}{d_{out}+1}$后发送给出邻居和节点本身，$d_{out}$为节点的出度。随机拓扑的每条边以0.5的概率生成，并且边的权重等于$\frac{1}{d_{\max}}$，$d_{\max}$为拓扑的最大度（无向拓扑中指度最大的节点的度），例如图\autoref{random-topo}中$d_{\max}=5$。本章研究和对比的拓扑中，除指数拓扑外均为无向拓扑，由于Gossip架构上一条无向边可以看作两条有向边，并且本章考虑的边的数目为无向边的数目，因此令指数拓扑中边的数目为有向边数目的$\frac{1}{2}$。
 
 \begin{figure}[!htbp]
     \centering
@@ -885,9 +885,23 @@
         \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-5-different-topo.pdf}
         \label{random-topo}
     }
-    \caption{现有的参数同步拓扑}
-    \label{fig:Fig3-6}
+    \caption{\label{fig:Fig3-6}现有的参数同步拓扑}
 \end{figure}
+
+为了模拟不同的带宽场景，本节采用第二章中获得计算时间和通信时间的方法，测试了在单个2080Ti上训练ResNet-18一次迭代的计算时间和在带宽为9.76GB/s的链路上通信ResNet-18的模型参数的通信时间，分别为15.21ms和5.01ms，并以测试结果为基准，对不同场景下一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放。缩放方式如下：
+\begin{itemize}
+    \item 首先计算拓扑中每条边的可用带宽，并确定其中最小的可用带宽，假设为$b$；
+    \item 对于一致性实验，根据9.76与$b$的比值对迭代时间进行缩放：
+    \begin{equation}
+        \label{tab:equ-3-55}
+        t_{iter}=\frac{9.76}{b}\times 5.01;
+    \end{equation}
+    \item 对于分布式深度学习实验，根据9.76与$b$的比值对每次迭代的通信时间进行缩放，并基于批大小和节点数获得一个训练周期所需的迭代次数$c_{iter}$，进而计算一个训练周期所需时间：
+    \begin{equation}
+        \label{tab:equ-3-56}
+        t_{epoch}=\left( \frac{9.76}{b}\times 5.01+15.21 \right) \times c_{iter}.
+    \end{equation}
+\end{itemize}
 
 \subsection{实验结果与分析}
 本小节从以下几个方面设计实验以验证本章提出的参数同步拓扑优化方法的有效性：实验1在8个节点上验证了本章提出的定制化ADMM算法求解参数同步拓扑优化问题的收敛性；实验2通过一致性实验和分布式深度学习实验，对比了同构带宽场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能；实验3通过一致性实验和分布式深度学习实验，对比了节点带宽异构场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能；实验4通过一致性实验和分布式深度学习实验，对比了服务器内部链路带宽异构场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能；实验5通过一致性实验和分布式深度学习实验，对比了服务器间交换机端口带宽异构场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能。
@@ -902,8 +916,7 @@
     \subfigure{
         \includegraphics[width=0.54\linewidth]{figure/chapter3/fig3-6-2-weight-matrix.pdf}
     }
-    \caption{同构带宽场景下$n=8,r=12$时求解得到的参数同步拓扑}
-    \label{fig:Fig3-7}
+    \caption{\label{fig:Fig3-7}同构带宽场景下$n=8,r=12$时求解得到的参数同步拓扑}
 \end{figure}
 
 \begin{figure}[!htbp]
@@ -914,12 +927,77 @@
     \subfigure[收敛误差]{
         \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-7-2-resid.pdf}
     }
-    \caption{优化目标和收敛误差随迭代次数的变化}
-    \label{fig:Fig3-8}
+    \caption{\label{fig:Fig3-8}优化目标和收敛误差随迭代次数的变化}
 \end{figure}
 
-\textbf{实验2：}为了验证同构带宽场景下参数同步拓扑优化方法的有效性，首先进行一致性实验，将
+\textbf{实验2：}为了验证同构带宽场景下参数同步拓扑优化方法的有效性，本节将基于\autoref{Algorithm-T-ADMM}得到的参数同步拓扑（T-ADMM）与现有的参数同步拓扑进行比较。首先进行一致性实验：令节点数目为16，边的数目分别为16，24，32和54，随机初始化边的权重并求解得到不同边的数目对应的参数同步拓扑；然后，为每个节点随机初始化维度与ResNet-18模型参数量相同的数据（经统计，ResNet-18模型参数量为11689512）；在求解得到的参数同步拓扑和现有的参数同步拓扑上执行线性平均一致问题的迭代过程，并记录一致性误差$\left\| x\left( k \right) -\bar{x} \right\| _2$随迭代次数$k$的变化。在同构带宽场景下，每个节点的带宽相同，假设为9.76GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\min \left( \frac{9.76}{d_i},\frac{9.76}{d_j} \right) $，$d_i$和$d_j$为节点$i$和节点$j$的度（指数拓扑中为节点的出度/入度）。对迭代时间进行缩放后，不同拓扑的一致性误差随时间的变化如\autoref{fig:Fig3-9}所示。图中$r$为边的数目，$d$为拓扑的最大度。可以看到，当边的数目相同时，T-ADMM的一致性速度均优于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时求解得到的参数同步拓扑的一致性速度最快。在对比的拓扑中，指数拓扑的一致性速度最快，为了进一步比较T-ADMM与指数拓扑的性能，本节还在不同的节点数目上对比了两者的渐进收敛因子和一致性误差达到0.0001所需的收敛时间，实验结果如\autoref{tab:iso-bandwidth-consensus}所示。当节点数目从6增加到32时，T-ADMM的渐进收敛因子和收敛时间始终小于指数拓扑，充分说明了T-ADMM在一致性速度上优于指数拓扑。
 
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-9-iso-bandwidth-consensus.pdf}
+    \caption{\label{fig:Fig3-9}同构带宽场景下一致性误差随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
+    \center
+    \caption{同构带宽场景下T-ADMM与指数拓扑在不同节点数目上的一致性速度}
+    \label{tab:iso-bandwidth-consensus}
+    \setlength{\tabcolsep}{1.5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|}
+      \hline
+      \multicolumn{2}{|c|}{节点数目}            & 6 & 8 & 10 & 12 & 14 & 16 & 18 & 20 & 22 & 24 & 26 & 28 & 30 & 32 \\ \hline
+      \multirow{2}{*}{渐进收敛因子} & 指数拓扑 & 0.5 & 0.5 & 0.6 & 0.6 & 0.6 & 0.6 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 \\ \cline{2-16}
+                                   & T-ADMM  & \textbf{0.33} &  \textbf{0.41} & \textbf{0.45} & \textbf{0.5} & \textbf{0.48} & \textbf{0.53} & \textbf{0.45} & \textbf{0.46} & \textbf{0.48} & \textbf{0.51} & \textbf{0.54} & \textbf{0.52} & \textbf{0.54} & \textbf{0.54} \\ \hline
+      \multirow{2}{*}{收敛时间/ms}     & 指数拓扑 & 210 & 210 & 381 & 381 & 381 & 381 & 576 & 576 & 576 & 576 & 576 & 576 & 576 & 576 \\ \cline{2-16}
+                                   & T-ADMM & \textbf{150} & \textbf{180} & \textbf{240} & \textbf{301} & \textbf{351} & \textbf{351} & \textbf{391} & \textbf{421} & \textbf{451} & \textbf{481} & \textbf{511} & \textbf{511} & \textbf{541} & \textbf{541} \\ \hline
+    \end{tabular}
+    }}
+\end{table}
+
+接下来在16个节点上利用求解得到的参数同步拓扑和现有的参数同步拓扑进行分布式深度学习实验，并根据\autoref{tab:equ-3-56}计算每个训练周期的时间，得到测试准确率\footnote{利用滑动窗口对测试准确率进行了光滑化。}随时间的变化如\autoref{fig:Fig3-10}所示。此外，为了定量评估不同参数同步拓扑对分布式深度学习训练性能的影响，统计了在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间\footnote{在本节的实验设置下，84\%和62\%为所有拓扑都能达到的相对较高的预测准确率值。}，如\autoref{tab:iso-bandwidth-accuracy-time}所示。从图中可以看到，当边的数目相同时，相同时间内T-ADMM上的预测准确率高于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时求解得到的参数同步拓扑上的预测准确率最高。其中环形拓扑和T-ADMM（r=16，d=2）对应的曲线在250s左右消失的原因是这两个拓扑已经完成100个训练周期的训练。
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Cifar10]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-10-1-iso-bandwidth-cifar10.pdf}
+    }
+    \subfigure[Cifar100]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-10-2-iso-bandwidth-cifar100.pdf}
+    }
+    \caption{\label{fig:Fig3-10}同构带宽场景下测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
+    \center
+    \caption{同构带宽场景下测试准确率达到设定值所需的时间（单位：s）}
+    \label{tab:iso-bandwidth-accuracy-time}
+    \setlength{\tabcolsep}{1mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|}
+      \hline
+      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-ADMM} \\ ($r$=16)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=24)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=32)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=54)}\\ \hline
+      Cifar10 & 229.7 & 227.7 & 189.8 & 134.6 & 262.0 & 165.4 & 144.9 & \textbf{110.1} & 146.1 \\ \hline
+      Cifar100 & 234.7 & 269.1 & 200.1 & 151.8 & 345.1 & 177.8 & 172.5 & \textbf{127.6} & 183.9 \\ \hline
+    \end{tabular}
+    }}
+\end{table}
+
+% \begin{table}[!htpb]
+%     \center
+%     \caption{同构带宽场景下测试准确率达到设定值所需的时间（s）}
+%     \label{tab:iso-bandwidth-accuracy-time}
+%     \setlength{\tabcolsep}{1mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+%     \scalebox{0.8}{
+%     \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|}
+%       \hline
+%       \multirow{2}{*}{参数同步拓扑} & \multirow{2}{*}{ring} & \multirow{2}{*}{2D-grid} & \multirow{2}{*}{2D-torus} & \multirow{2}{*}{exponential} & \multirow{2}{*}{random} & T-ADMM & T-ADMM & T-ADMM & T-ADMM\\ 
+%       &&&&&&($r$=16, $d$=2) &($r$=24, $d$=4) & ($r$=32, $d$=4) &($r$=54, $d$=8) \\ \hline
+%       Cifar10 & 229.7 & 227.7 & 189.8 & 134.6 & 262.0 & 165.4 & 144.9 & 110.1 & 146.1 \\ \hline
+%       Cifar100 & 234.7 & 269.1 & 200.1 & 151.8 & 345.1 & 177.8 & 172.5 & 127.6 & 183.9 \\ \hline
+%     \end{tabular}
+%     }}
+% \end{table}
 
 \section{本章小结}
 

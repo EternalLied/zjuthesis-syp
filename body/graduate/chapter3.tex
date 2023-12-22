@@ -300,7 +300,7 @@
 
 \textbf{3. 服务器间交换机端口带宽异构}
 
-本节考虑底层物理拓扑采用BCube拓扑\cite{guo2009bcube}时的异构带宽场景。如所示，BCube拓扑是以服务器为中心的拓扑结构，采用多级交换机将服务器连接起来，因此该场景下的节点指服务器。若有$k$级交换机，每个交换机有$p$个端口，则服务器数目$n$需满足$n=p^k$，每个层级的交换机数目为$p^{k-1}$，且每个服务器需配备$k$个网卡，分别与每个层级中的一个交换机相连。
+本节考虑底层物理拓扑采用BCube拓扑\cite{guo2009bcube}时的异构带宽场景。如\autoref{fig:Fig3-2}所示，BCube拓扑是以服务器为中心的拓扑结构，采用多级交换机将服务器连接起来，因此该场景下的节点指服务器。若有$k$级交换机，每个交换机有$p$个端口，则服务器数目$n$需满足$n=p^k$，每个层级的交换机数目为$p^{k-1}$，且每个服务器需配备$k$个网卡，分别与每个层级中的一个交换机相连。
 
 \begin{figure}[!htbp]   
     \centering
@@ -854,7 +854,7 @@
 本节对提出的参数同步拓扑优化方法的有效性进行验证，并与现有的参数同步拓扑进行对比分析。所有实验都是在同一个硬件系统上完成的，该系统配备了2个Intel Xeon Gold 6226R处理器和8个NVIDIA GeForce RTX 2080 Ti，每个GPU有11GB显存。该硬件系统采用\autoref{fig:Fig2-4}所示的标准服务器架构。本节的实验使用pytorch实现。
 
 \subsection{实验设置}
-为了充分评估基于本章提出的方法获得的参数同步拓扑的性能，本节分别进行了一致性实验和分布式深度学习实验。一致性实验是指在给定拓扑上执行\autoref{section3-2-1}中描述的线性平均一致迭代过程，并根据一致性误差随时间的变化评估考虑通信开销时拓扑的一致性速度。在分布式深度学习实验中，选用Cifar10和Cifar100作为评估数据集，并采用ResNet-18作为训练的神经网络模型。Cifar10和Cifar100数据集均包含60000张32×32像素的彩色图像。其中，Cifar10数据集涵盖10个类别，每个类别有6000张图像；而Cifar100数据集则包含100个类别，每个类别有600张图像。在这60000张图像中，50000张被用作训练数据，另外10000张用于测试。在训练开始之前，每个节点从每个类别的训练数据中随机采样相同数量的样本构成本地训练数据集。实验的超参数中批大小设置为32（每个节点），学习率设置为0.05，动量因子设置为0.9，权重衰减设置为0.0001，训练周期数设置为100。
+为了充分评估基于本章提出的方法获得的参数同步拓扑的性能，本节分别进行了一致性实验和分布式深度学习实验。一致性实验是指在给定拓扑上执行\autoref{section3-2-1}中描述的线性平均一致迭代过程，并根据一致性误差随时间的变化评估考虑通信开销时拓扑的一致性速度。在分布式深度学习实验中，训练算法使用分布式随机梯度下降算法（算法细节见\autoref{subsection-4-2-1}），数据集选用Cifar10和Cifar100图像分类数据集，神经网络模型采用ResNet-18。Cifar10和Cifar100数据集均包含60000张32×32像素的彩色图像。其中，Cifar10数据集涵盖10个类别，每个类别有6000张图像；而Cifar100数据集则包含100个类别，每个类别有600张图像。在这60000张图像中，50000张被用作训练数据，另外10000张用于测试。在训练开始之前，每个节点从每个类别的训练数据中随机采样相同数量的样本构成本地训练数据集。实验的超参数中批大小设置为32（每个节点），学习率设置为0.05，动量因子设置为0.9，权重衰减设置为0.0001，训练周期数设置为100。
 %介绍数据划分方式
 %为了充分验证参数同步拓扑对分布式深度学习的影响，本章对实验数据进行同构划分和异构划分。其中同构划分指每个节点从每个类别的数据中随机采样相同数量的样本构成本地训练数据集，从而保证不同节点的本地数据符合独立同分布。而异构划分指每个节点仅随机采样部分类别的数据，构成本地训练数据集，从而使每个节点的本地数据不为独立同分布。在异构的数据上进行训练能够更好地表现出一致性速度对模型收敛速度和模型精度的影响。本章的异构划分方式中，每个节点从Cifar10数据集中随机采样7个类别的数据，而从Cifar100数据集中随机采样80个类别的数据。图以Cifar10为例展示了每个节点上采样的数据类别。
 
@@ -890,16 +890,16 @@
 
 为了模拟不同的带宽场景，本节采用第二章中获得计算时间和通信时间的方法，测试了在单个2080Ti上训练ResNet-18一次迭代的计算时间和在带宽为9.76GB/s的链路上通信ResNet-18的模型参数的通信时间，分别为15.21ms和5.01ms，并以测试结果为基准，对不同场景下一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放。缩放方式如下：
 \begin{itemize}
-    \item 首先计算拓扑中每条边的可用带宽，并确定其中最小的可用带宽，假设为$b$；
-    \item 对于一致性实验，根据9.76与$b$的比值对迭代时间进行缩放：
+    \item 首先计算拓扑中每条边的可用带宽，并确定其中最小的可用带宽，假设为$b_{min}$；
+    \item 对于一致性实验，根据9.76与$b_{min}$的比值对迭代时间进行缩放：
     \begin{equation}
         \label{tab:equ-3-55}
-        t_{iter}=\frac{9.76}{b}\times 5.01;
+        t_{iter}=\frac{9.76}{b_{min}}\times 5.01;
     \end{equation}
-    \item 对于分布式深度学习实验，根据9.76与$b$的比值对每次迭代的通信时间进行缩放，并基于批大小和节点数获得一个训练周期所需的迭代次数$c_{iter}$，进而计算一个训练周期所需时间：
+    \item 对于分布式深度学习实验，根据9.76与$b_{min}$的比值对每次迭代的通信时间进行缩放，并基于批大小和节点数获得一个训练周期所需的迭代次数$c_{iter}$，进而计算一个训练周期所需时间：
     \begin{equation}
         \label{tab:equ-3-56}
-        t_{epoch}=\left( \frac{9.76}{b}\times 5.01+15.21 \right) \times c_{iter}.
+        t_{epoch}=\left( \frac{9.76}{b_{min}}\times 5.01+15.21 \right) \times c_{iter}.
     \end{equation}
 \end{itemize}
 
@@ -930,7 +930,7 @@
     \caption{\label{fig:Fig3-8}优化目标和收敛误差随迭代次数的变化}
 \end{figure}
 
-\textbf{实验2：}为了验证同构带宽场景下参数同步拓扑优化方法的有效性，本节将基于\autoref{Algorithm-T-ADMM}得到的参数同步拓扑（T-ADMM）与现有的参数同步拓扑进行比较。首先进行一致性实验：令节点数目为16，边的数目分别为16，24，32和54，随机初始化边的权重并求解得到不同边的数目对应的参数同步拓扑；然后，为每个节点随机初始化维度与ResNet-18模型参数量相同的数据（经统计，ResNet-18模型参数量为11689512）；在求解得到的参数同步拓扑和现有的参数同步拓扑上执行线性平均一致问题的迭代过程，并记录一致性误差$\left\| x\left( k \right) -\bar{x} \right\| _2$随迭代次数$k$的变化。在同构带宽场景下，每个节点的带宽相同，假设为9.76GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\min \left( \frac{9.76}{d_i},\frac{9.76}{d_j} \right) $，$d_i$和$d_j$为节点$i$和节点$j$的度（指数拓扑中为节点的出度/入度）。对迭代时间进行缩放后，不同拓扑的一致性误差随时间的变化如\autoref{fig:Fig3-9}所示。图中$r$为边的数目，$d$为拓扑的最大度。可以看到，当边的数目相同时，T-ADMM的一致性速度均优于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时求解得到的参数同步拓扑的一致性速度最快。在对比的拓扑中，指数拓扑的一致性速度最快，为了进一步比较T-ADMM与指数拓扑的性能，本节还在不同的节点数目上对比了两者的渐进收敛因子和一致性误差达到0.0001所需的收敛时间，实验结果如\autoref{tab:iso-bandwidth-consensus}所示。当节点数目从6增加到32时，T-ADMM的渐进收敛因子和收敛时间始终小于指数拓扑，充分说明了T-ADMM在一致性速度上优于指数拓扑。
+\textbf{实验2：}为了验证同构带宽场景下参数同步拓扑优化方法的有效性，本节将基于\autoref{Algorithm-T-ADMM}得到的参数同步拓扑（T-ADMM）与现有的参数同步拓扑进行比较。首先进行一致性实验：令节点数目为16，边的数目分别为16，24，32和54，随机初始化边的权重并求解得到不同边的数目对应的参数同步拓扑；然后，为每个节点随机初始化维度与ResNet-18模型参数量相同的数据（经统计，ResNet-18模型参数量为11689512）；在求解得到的参数同步拓扑和现有的参数同步拓扑上执行线性平均一致问题的迭代过程，并记录一致性误差$\left\| x\left( k \right) -\bar{x} \right\| _2$随迭代次数$k$的变化。在同构带宽场景下，每个节点的带宽相同，假设为9.76GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\min \left( \frac{9.76}{d_i},\frac{9.76}{d_j} \right) $，$d_i$和$d_j$为节点$i$和节点$j$的度（指数拓扑中为节点的出度/入度）。对迭代时间进行缩放后，不同拓扑的一致性误差随时间的变化如\autoref{fig:Fig3-9}所示。图中$r$为边的数目，$d$为拓扑的最大度。可以看到，当边的数目相同时，T-ADMM的一致性速度均优于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时T-ADMM的一致性速度最快。在对比的拓扑中，指数拓扑的一致性速度最快，为了进一步比较T-ADMM与指数拓扑的性能，本节还在不同的节点数目上对比了两者的渐进收敛因子和一致性误差达到0.0001所需的收敛时间，实验结果如\autoref{tab:iso-bandwidth-consensus}所示。当节点数目从6增加到32时，T-ADMM的渐进收敛因子和收敛时间始终小于指数拓扑，充分说明了T-ADMM在一致性速度上优于指数拓扑。
 
 \begin{figure}[!htbp]   
     \centering
@@ -955,7 +955,7 @@
     }}
 \end{table}
 
-接下来在16个节点上利用求解得到的参数同步拓扑和现有的参数同步拓扑进行分布式深度学习实验，并根据\autoref{tab:equ-3-56}计算每个训练周期的时间，得到测试准确率\footnote{利用滑动窗口对测试准确率进行了光滑化。}随时间的变化如\autoref{fig:Fig3-10}所示。此外，为了定量评估不同参数同步拓扑对分布式深度学习训练性能的影响，统计了在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间\footnote{在本节的实验设置下，84\%和62\%为所有拓扑都能达到的相对较高的预测准确率值。}，如\autoref{tab:iso-bandwidth-accuracy-time}所示。从图中可以看到，当边的数目相同时，相同时间内T-ADMM上的预测准确率高于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时求解得到的参数同步拓扑上的预测准确率最高。其中环形拓扑和T-ADMM（r=16，d=2）对应的曲线在250s左右消失的原因是这两个拓扑已经完成100个训练周期的训练。
+接下来在16个节点上利用求解得到的参数同步拓扑和现有的参数同步拓扑进行分布式深度学习实验，并根据\autoref{tab:equ-3-56}计算每个训练周期的时间，得到测试准确率\footnote{利用滑动窗口对测试准确率进行了光滑化。}随时间的变化如\autoref{fig:Fig3-10}所示。从图中可以看到，当边的数目相同时，相同时间内T-ADMM上的预测准确率高于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时T-ADMM上的预测准确率最高。其中环形拓扑和T-ADMM（$r$=16，$d$=2）对应的曲线在250s左右消失的原因是这两个拓扑已经完成100个训练周期的训练。另外，为了定量评估不同参数同步拓扑对分布式深度学习训练性能的影响，统计了在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间\footnote{在本节的实验设置下，84\%和62\%为所有拓扑都能达到的相对较高的预测准确率值。}，如\autoref{tab:iso-bandwidth-accuracy-time}所示。可以看到，边的数目为32时求解得到的参数同步拓扑在Cifar10数据集和Cifar100数据集上预测准确率达到设定值所需的时间分别为110.1s和127.6s，均是所有拓扑中所需时间最少的，并且比环形拓扑和网格拓扑快了1倍左右，比随机拓扑快了1倍多。其他边的数目约束下的T-ADMM不如T-ADMM（$r$=32）的原因是当边的数目更少时拓扑更稀疏，一致性速度更慢，而当边的数目更多时，节点的度更大，每次迭代所需通信时间更多。
 
 \begin{figure}[!htbp]
     \centering
@@ -983,21 +983,184 @@
     }}
 \end{table}
 
-% \begin{table}[!htpb]
-%     \center
-%     \caption{同构带宽场景下测试准确率达到设定值所需的时间（s）}
-%     \label{tab:iso-bandwidth-accuracy-time}
-%     \setlength{\tabcolsep}{1mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-%     \scalebox{0.8}{
-%     \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|}
-%       \hline
-%       \multirow{2}{*}{参数同步拓扑} & \multirow{2}{*}{ring} & \multirow{2}{*}{2D-grid} & \multirow{2}{*}{2D-torus} & \multirow{2}{*}{exponential} & \multirow{2}{*}{random} & T-ADMM & T-ADMM & T-ADMM & T-ADMM\\ 
-%       &&&&&&($r$=16, $d$=2) &($r$=24, $d$=4) & ($r$=32, $d$=4) &($r$=54, $d$=8) \\ \hline
-%       Cifar10 & 229.7 & 227.7 & 189.8 & 134.6 & 262.0 & 165.4 & 144.9 & 110.1 & 146.1 \\ \hline
-%       Cifar100 & 234.7 & 269.1 & 200.1 & 151.8 & 345.1 & 177.8 & 172.5 & 127.6 & 183.9 \\ \hline
-%     \end{tabular}
-%     }}
-% \end{table}
+\textbf{实验3：}下面验证节点带宽异构场景下参数同步拓扑优化方法的有效性。在与现有的参数同步拓扑进行对比前，首先对基于模拟退火算法（SA）生成\autoref{Algorithm-T-ADMM}的初始拓扑的有效性进行验证。改变节点数目和节点带宽的异构性，并分别随机初始化拓扑结构和使用SA生成初始拓扑结构，然后基于\autoref{Algorithm-T-ADMM}求解得到对应的参数同步拓扑，\autoref{tab:bandwidth-constraint-SA-compare}对比了使用两种方式得到的优化目标值$\tilde{\lambda}$和参数同步拓扑的渐进收敛因子。其中T-ADMM为随机初始化并求解优化问题得到的参数同步拓扑，T-SA-ADMM为使用SA生成初始拓扑结构并求解优化问题得到的参数同步拓扑，可以看到，当节点数目为6时，两种方法得到的结果相同，当节点数目增加至8和16时，对于大部分的节点带宽比，T-SA-ADMM得到的结果要优于T-ADMM，说明基于SA初始化拓扑结构确实能够改善求解结果。\autoref{fig:Fig3-11}是几种节点带宽比对应的T-SA-ADMM的拓扑结构图，其中边的粗细表示对应边的权重。
+
+\begin{table}[!htpb]
+    \center
+    \caption{节点带宽异构场景下T-ADMM与T-SA-ADMM的对比}
+    \label{tab:bandwidth-constraint-SA-compare}
+    \setlength{\tabcolsep}{3mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|}
+      \hline
+      \multirow{2}{*}{节点数目} & \multirow{2}{*}{节点带宽比} & \multirow{2}{*}{边的数目} & \multicolumn{2}{c}{$\tilde{\lambda}$} &  \multicolumn{2}{|c|}{渐进收敛因子}\\ \cline{4-7}
+      &&& T-ADMM &  T-SA-ADMM & T-ADMM &  T-SA-ADMM \\ \hline
+      6 & \makecell[c]{3:3:2:2:1:1} & 6 & 0.26 & 0.26 & 0.74 & 0.74 \\ \hline
+      6 & \makecell[c]{3:3:3:1:1:1} & 6 & 0.25 & 0.25 & 0.75 & 0.75 \\ \hline
+      8 & \makecell[c]{3:3:3:3:1:1:1:1} & 8& 0.20 & 0.20 & 0.80 & 0.80 \\ \hline
+      8 & \makecell[c]{3:3:3:3:2:2:2:2} & 10& 0.36 & \textbf{0.42} & 0.64 & \textbf{0.58} \\ \hline
+      16 & \makecell[c]{3:3:3:3:3:3:3:3 \\ :1:1:1:1:1:1:1:1} & 16& 0.04 & \textbf{0.09} & 0.96 & \textbf{0.91} \\ \hline
+      16 & \makecell[c]{3:3:3:3:3:3:3:3 \\ :2:2:2:2:2:2:2:2} & 20& 0.20 & \textbf{0.21} & 0.80 & \textbf{0.79} \\ \hline
+      16 & \makecell[c]{5:5:5:5:1:1:1:1 \\ :1:1:1:1:1:1:1:1} & 16& 0 & \textbf{0.08} & 1 & \textbf{0.92} \\ \hline
+      16 & \makecell[c]{8:8:1:1:1:1:1:1 \\ :1:1:1:1:1:1:1:1} & 16& 0.05 & 0.05 & 0.95 & 0.95 \\ \hline
+    \end{tabular}
+    }}
+\end{table}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[3:3:2:2:1:1 ($r=6$)]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-1.pdf}
+    }
+    \subfigure[3:3:3:1:1:1 ($r=6$)]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-2.pdf}
+    }
+    \subfigure[3:3:3:3:1:1:1:1 ($r=8$)]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-3.pdf}
+    }
+    \subfigure[3:3:3:3:2:2:2:2 ($r=10$)]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-4.pdf}
+    }
+    \subfigure[3:3:3:3:3:3:3:3:1:1:1:1:1:1:1:1 ($r=16$)]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-5.pdf}
+    }
+    \subfigure[5:5:5:5:1:1:1:1:1:1:1:1:1:1:1:1 ($r=16$)]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-6.pdf}
+    }
+    \caption{\label{fig:Fig3-11}不同节点带宽比对应的T-SA-ADMM的拓扑结构}
+\end{figure}
+
+%令边的数目分别为16，32和48，求解得到对应的参数同步拓扑。在求解得到的参数同步拓扑和现有的参数同步拓扑上进行一致性实验和分布式深度学习实验，
+接下来在16个节点上进行一致性实验和分布式深度学习实验，对比T-SA-ADMM与现有参数同步拓扑的性能。设置节点的带宽比为3:3:3:3:3:3:3:3:1:1:1:1:1:1:1:1，其中3对应的带宽为9.76GB/s，1对应的带宽为3.25GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\min \left( \frac{b_i}{d_i},\frac{b_j}{d_j} \right) $，$b_i$和$b_j$为节点$i$和节点$j$的带宽，$d_i$和$d_j$为节点$i$和节点$j$的度。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-12}和\autoref{fig:Fig3-13}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽3.25GB/s的比值。可以看到，一致性速度方面，边的数目为32和48时，T-SA-ADMM优于现有的参数同步拓扑，边的数目为16时，T-SA-ADMM的一致性速度略慢于指数拓扑，但是仍优于其他现有的参数同步拓扑。在分布式深度学习实验中，相同时间内不同边的数目对应的T-SA-ADMM上的预测准确率均高于现有的参数同步拓扑。虽然T-SA-ADMM（$r$=16，$b$=1）的一致性速度慢于指数拓扑，但是由于该拓扑中边的可用带宽更高，使得分布式深度学习一次迭代所需时间更短，从而可以在相同时间内执行更多次数的模型参数更新步骤，加快模型收敛速度。\autoref{tab:bandwidth-constraint-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间。其中不同边的数目对应的T-SA-ADMM所需的时间均明显少于现有的参数同步拓扑。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-12-bandwidth-constraint-consensus.pdf}
+    \caption{\label{fig:Fig3-12}节点带宽异构场景下一致性误差随时间的变化}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Cifar10]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-13-1-bandwidth-constraint-cifar10.pdf}
+    }
+    \subfigure[Cifar100]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-13-2-bandwidth-constraint-cifar100.pdf}
+    }
+    \caption{\label{fig:Fig3-13}节点带宽异构场景下测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
+    \center
+    \caption{节点带宽异构场景下测试准确率达到设定值所需的时间（单位：s）}
+    \label{tab:bandwidth-constraint-accuracy-time}
+    \setlength{\tabcolsep}{1mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|}
+      \hline
+      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=16)} & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=32)} & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=48)}\\ \hline
+      Cifar10 & 412.0 & 486.4 & 405.3 & 287.4 & 663.8 & 275.3 & \textbf{181.6} & 182.9 \\ \hline
+      Cifar100 & 420.9 & 574.9 & 427.5 & 324.3 & 874.26 & 239.76 & 248.1 & \textbf{194.7} \\ \hline
+    \end{tabular}
+    }}
+\end{table}
+
+\textbf{实验4：}下面验证服务器内部链路带宽异构场景下参数同步拓扑优化方法的有效性。由于SA不适用于该场景，因此随机初始化拓扑结构，并基于\autoref{Algorithm-T-ADMM}求解得到参数同步拓扑（T-ADMM）。\autoref{fig:Fig3-14}是不同链路带宽比对应的T-ADMM的拓扑结构图，其中边的粗细表示对应边的权重。接下来设置三种类型的物理链路上的带宽比为$b_{PIX}:b_{NODE}:b_{SYS}$=1:1:2，其中2对应的带宽为9.76GB/s，1对应的带宽为4.88GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\frac{b_{link}}{e_{link}}$，$b_{link}$为边$\left\{ i,j \right\} $所在物理链路的带宽，$e_{link}$为边$\left\{ i,j \right\} $所在物理链路上边的数目。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-15}和\autoref{fig:Fig3-16}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽4.88GB/s的比值。可以看到，相同时间内，T-ADMM的一致性误差和预测准确率均优于现有的参数同步拓扑。另外，在该场景下，指数拓扑的性能有所下降，因为指数拓扑中物理链路SYS上有10条边，导致边的最小可用带宽仅为0.976GB/s，从而大大增加了一致性实验的迭代时间和分布式深度学习实验的训练周期时间。\autoref{tab:bandwidth-constraint-intra-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到61\%所需的时间。其中除了Cifar10上2D-torus与T-ADMM（$r$=16）所需的时间接近外，不同边的数目对应的T-ADMM所需的时间均明显少于现有的参数同步拓扑。
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:1:1 ($r=7$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-1-topo.pdf}
+    }
+    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:1:2 ($r=8$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-2-topo.pdf}
+    }
+    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:2:4 ($r=12$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-3-topo.pdf}
+    }
+    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:4:4 ($r=16$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-4-topo.pdf}
+    }
+    \caption{\label{fig:Fig3-14}不同链路带宽比对应的T-ADMM的拓扑结构}
+\end{figure}
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-15-bandwidth-constraint-intra-consensus.pdf}
+    \caption{\label{fig:Fig3-15}服务器内部链路带宽异构场景下一致性误差随时间的变化}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Cifar10]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-16-1-bandwidth-constraint-intra-cifar10.pdf}
+    }
+    \subfigure[Cifar100]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-16-2-bandwidth-constraint-intra-cifar100.pdf}
+    }
+    \caption{\label{fig:Fig3-16}服务器内部链路带宽异构场景下测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
+    \center
+    \caption{服务器内部链路带宽异构场景下测试准确率达到设定值所需的时间（单位：s）}
+    \label{tab:bandwidth-constraint-intra-accuracy-time}
+    \setlength{\tabcolsep}{2mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|}
+      \hline
+      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-ADMM} \\ ($r$=8)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=12)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=16)}\\ \hline
+      Cifar10 & 484.1 & 662.4 & 407.1 & 754.0 & 754.0 & \textbf{266.8} & 276.0 & 407.6 \\ \hline
+      Cifar100 & 350.7 & 552.0 & 510.6 & 651.8 & 766.8 & \textbf{261.8} & 269.1 & 310.1 \\ \hline
+    \end{tabular}
+    }}
+\end{table}
+
+\textbf{实验5：}下面验证服务器间交换机端口带宽异构场景下参数同步拓扑优化方法的有效性。在该场景下，对交换机端口上边的数目的约束可以看作是对子拓扑中节点度的约束，因此基于SA生成初始拓扑结构的方法同样适用于该场景下优化问题的求解。设置节点数目为16，交换机层级数为2，每个交换机上的端口数为4，分别令不同层级上的交换机端口带宽比为1：2和2：3，求解优化问题得到的T-SA-ADMM的拓扑结构如\autoref{fig:Fig3-17}所示，其中边的粗细表示对应边的权重。接下来在交换机端口带宽比为1：2的场景下进行一致性实验和分布式深度学习实验，其中2对应的带宽为9.76GB/s，1对应的带宽为4.88GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\frac{b_{s_{ij}}}{e_{s_{ij}}}$，$b_{s_{ij}}$为边$\left\{ i,j \right\} $经过的交换机端口的带宽，$e_{s_{ij}}$为边$\left\{ i,j \right\} $经过的交换机端口上边的数目。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-18}和\autoref{fig:Fig3-19}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽4.88GB/s的比值。可以看到，相同时间内，T-SA-ADMM的一致性误差和预测准确率均优于现有的参数同步拓扑。\autoref{tab:bandwidth-constraint-inter-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间。与图中结果相同，不同边的数目对应的T-SA-ADMM所需的时间均明显少于现有的参数同步拓扑。
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[$b_{s_0}:b_{s_1}$=1:2 ($r=24$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-17-1-topo.pdf}
+    }
+    \subfigure[$b_{s_0}:b_{s_1}$=2:3 ($r=40$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-17-2-topo.pdf}
+    }
+    \caption{\label{fig:Fig3-17}不同交换机端口带宽比对应的T-SA-ADMM的拓扑结构}
+\end{figure}
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-18-bandwidth-constraint-inter-consensus.pdf}
+    \caption{\label{fig:Fig3-18}服务器间交换机端口带宽异构场景下一致性误差随时间的变化}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Cifar10]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-19-1-bandwidth-constraint-inter-cifar10.pdf}
+    }
+    \subfigure[Cifar100]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-19-2-bandwidth-constraint-inter-cifar100.pdf}
+    }
+    \caption{\label{fig:Fig3-19}服务器间交换机端口带宽异构场景下测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
+    \center
+    \caption{服务器间交换机端口带宽异构场景下测试准确率达到设定值所需的时间（单位：s）}
+    \label{tab:bandwidth-constraint-inter-accuracy-time}
+    \setlength{\tabcolsep}{2mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|}
+      \hline
+      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=24)} & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=48)} \\ \hline
+      Cifar10 & 320.8 & 227.7 & 189.7 & 134.5 & 262.0 & 101.3 & \textbf{86.25} \\ \hline
+      Cifar100 & 327.8 & 269.1 & 200.1 & 151.8 & 345.1 & 126.0 & \textbf{117.3} \\ \hline
+    \end{tabular}
+    }}
+\end{table}
+
 
 \section{本章小结}
 

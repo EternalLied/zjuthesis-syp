@@ -1,22 +1,163 @@
 \chapter{带宽自适应的通信数据压缩}
 \section{引言}
-在分布式深度学习中，减少通信数据量是降低通信开销最直接的方式，可以在参数同步拓扑优化的基础上进一步减少通信时间，提高通信效率。目前用于减少通信数据量的主要手段是通信数据压缩，包括量化和稀疏化。由于数据压缩往往是有损压缩，会导致信息量的丢失，从而不可避免地影响模型精度，并且压缩程度越高，对模型精度的影响越大，甚至可能会导致模型无法收敛。为了降低压缩对模型精度的影响，一些现有的方法引入了差分压缩和压缩误差补偿等策略，然而压缩程度过高时模型精度还是会有所下降。另外现有的方法对不同节点采用相同的压缩程度，这使得在带宽异构场景下进行同步训练时，带宽不同的链路上通信时间不同，从而导致通信带宽较大的链路利用率较低，造成资源的浪费。
+在分布式深度学习中，减少通信数据量是降低通信开销最直接的方式，可以在参数同步拓扑优化的基础上进一步减少通信时间，提高训练效率。目前用于减少通信数据量的主要手段是通信数据压缩，包括量化和稀疏化。由于数据压缩往往是有损压缩，会导致信息量的丢失，从而不可避免地影响模型精度，并且压缩程度越高，对模型精度的影响越大，甚至可能会导致模型无法收敛。为了降低压缩对模型精度的影响，一些现有的方法引入了差分压缩和压缩误差补偿等策略，然而压缩程度过高时模型精度还是会有所下降。另外现有的方法对不同节点采用相同的压缩程度，这使得在带宽异构场景下进行同步训练时，带宽不同的链路上通信时间不同，从而导致通信带宽较大的链路利用率较低，造成资源的浪费。
 
 针对上述问题，本章提出了带宽自适应的量化分布式随机梯度下降算法（BA-QDSG D）和带宽自适应的量化分布式随机梯度跟踪算法（BA-QDSGT）。首先，基于差分压缩和压缩误差补偿实现量化分布式随机梯度下降算法和量化分布式随机梯度跟踪算法。然后在此基础上引入带宽自适应策略，根据带宽矩阵调整每条边上通信数据的压缩程度，以降低某些带宽较高的边上的数据压缩误差，提高模型精度，同时提高通信资源的利用率。最后在Cifar10数据集上进行分布式深度学习实验，验证了本章提出的带宽自适应的通信数据压缩方法的有效性。
 
 本章其他小结的内容安排如下：4.2节介绍了分布式深度学习中两种经典的基于去中心化架构的算法，分布式随机梯度下降算法（DSGD）和分布式随机梯度跟踪算法（DSGT）；4.3节介绍了本章采用的量化策略并提出了带宽自适应的量化分布式训练算法；4.4节基于Cifar10数据集上的分布式深度学习实验对提出的算法进行验证分析；4.5节对本章内容进行了总结。
 
-
-
-
-
- 
 \section{分布式训练算法}
 \subsection{分布式随机梯度下降算法} \label{subsection-4-2-1}
+分布式随机梯度下降算法（Distributed Stochastic Gradient Descent，简称DSGD）是最早提出的基于去中心化的分布式（Gossip）架构的优化算法，该算法是随机梯度下降算法（Stochastic Gradient Descent，简称SGD）的一种变体，旨在通过将计算任务分布到多个计算节点或设备上来提高训练效率。在该算法中，节点只对参数进行通信，并利用本地随机梯度对融合后的参数进行更新。正是由于该算法原理简单，并且拥有可以媲美集中式算法的性能而被广泛研究。
+
+DSGD算法的实现过程可以简单地描述为三个步骤：1）随机采样本地数据计算梯度；2）通信并融合模型参数；3）本地随机梯度搜索。其中本地随机梯度搜索是在模型参数融合之后进行的，当然也可以在模型参数融合之前进行本地随机梯度搜索，本章仅研究前一种算法实现。根据上述实现过程，DSGD算法的原理可以表示为如下形式：
+\begin{equation}
+    \label{tab:DSGD-equation}
+    \begin{aligned}
+        \boldsymbol{x}_{k+1} =W\boldsymbol{x}_k -\gamma \nabla f\left( \boldsymbol{x}_k \right),
+    \end{aligned}
+\end{equation}
+其中$\boldsymbol{x}_k =\left( \boldsymbol{x}_{1,k} ,...,\boldsymbol{x}_{n,k} \right) ^T$，$\nabla f\left( \boldsymbol{x}_k \right) =\left( \nabla f_1\left( \boldsymbol{x}_{1,k} \right) ,...,\nabla f_n\left( \boldsymbol{x}_{n,k} \right) \right) ^T$，$\boldsymbol{x}_{i,k} $是节点$i$在第$k$次迭代的模型参数，$f_i\left( \cdot \right) $是节点$i$的本地损失函数，$\nabla f_i\left( \boldsymbol{x}_{i,k} \right) $是节点$i$在第$k$次迭代的本地随机梯度，$W\in \mathbb{R} ^{n\times n}$是权重矩阵，$\gamma$是步长。
+
+由于Gossip架构的拓扑结构的约束，网络中的每个节点仅有本地数据以及部分邻居的信息，因此需要一个有效的通信机制来保障节点的本地信息能够在整个网络中流通，从而使各节点的模型参数最终收敛到一致。在DSGD算法中，通过令权重矩阵$W$满足\autoref{section3-2-1}中描述的条件即可实现模型参数的一致性。另外，与\autoref{section3-2-1}中介绍的线性平均一致问题的迭代过程相比，DSGD增加了一个本地随机梯度搜索项，即$\nabla f\left( \boldsymbol{x}_k \right)$，该步骤推动模型参数朝最优值更新，所以DSGD算法能够使得各节点的模型参数收敛到一致的最优解。
+
+基于以上介绍，DSGD算法的伪代码如下：
+\begin{center}
+    % \begin{minipage}{8.5cm}
+    \begin{algorithm}[!htbp]
+            \caption{节点$i$上的DSGD算法} 
+        %   \small
+            \label{Algorithm-DSGD} 
+            \begin{algorithmic}[1]
+            \REQUIRE{模型参数初始值$\boldsymbol{x}_{i,0}$，步长$\gamma$，权重矩阵$W$，迭代次数$K$}；
+            \ENSURE{所有节点模型参数的平均值$\frac{1}{n}\sum_{i=1}^n{\boldsymbol{x}_{i,K}}$}；
+            \FOR{$k=0,1,...,K-1$}
+                \STATE 从节点$i$的本地数据集中随机采样数据$\xi _{i,k} $；
+                \STATE 计算本地随机梯度：$\nabla f_i\left( \boldsymbol{x}_{i,k} \right) =\nabla f_i\left( \boldsymbol{x}_{i,k},\xi _{i,k} \right) $；
+                \STATE 与邻居节点通信，并利用本地模型参数和接收到的参数计算加权平均值：$\boldsymbol{x}_{i,k+\frac{1}{2}}=\sum_{j=1}^n{W_{ij}\boldsymbol{x}_{j,k}}$；
+                % \begin{align*}
+                %     \boldsymbol{x}_{i,k+\frac{1}{2}}=\sum_{j=1}^n{W_{ij}\boldsymbol{x}_{j,k}};
+                % \end{align*}
+                \STATE 更新本地模型参数：$\boldsymbol{x}_{i,k+1}=\boldsymbol{x}_{i,k+\frac{1}{2}}-\gamma \nabla f_i\left( \boldsymbol{x}_{i,k} \right) $。
+            \ENDFOR            
+            \end{algorithmic}
+    \end{algorithm}
+    % \end{minipage}
+\end{center}
+
+% \vspace{-5pt}
 \subsection{分布式随机梯度跟踪算法}
+虽然DSGD算法能够使得各节点的模型参数收敛到一致，但是由于各节点的本地数据集不同，因此在进行本地随机梯度搜索后，节点模型参数又将变得不一致。为了减小节点本地随机梯度搜索对一致性的影响，通常需要采用衰减的步长，即随着迭代次数的增加，步长逐渐趋向于零，对应算法中的$\nabla f\left( \boldsymbol{x}_k \right)$逐渐趋向于零，这必然会导致模型的收敛速度变慢。为了解决这一问题，分布式随机梯度跟踪算法（Distributed Stochastic Gradient Tracking，简称DSGT）被提了出来。该算法允许使用恒定的步长进行训练，同时能够保证各节点的模型参数收敛到一致的最优解。
+
+DSGT算法与DSGD算法的主要不同在于DSGT算法对每个节点引入了一个辅助变量用于跟踪所有节点本地目标函数的平均梯度，并且在训练过程中，不仅对模型参数进行通信和融合，也对该辅助变量进行通信和融合，然后使用该辅助变量代替随机梯度对本地模型参数进行更新。DSGT算法的原理可以表示为如下形式：
+\begin{equation}
+    \label{tab:DSGT-equation}
+    \begin{aligned}
+        \boldsymbol{x}_{k+1}&=W\boldsymbol{x}_k-\gamma \boldsymbol{y}_k,
+        \\
+        \boldsymbol{y}_{k+1}&=W\boldsymbol{y}_k+\nabla f\left( \boldsymbol{x}_{k+1} \right) -\nabla f\left( \boldsymbol{x}_k \right),
+    \end{aligned}
+\end{equation}
+其中$\boldsymbol{y}_k=\left( \boldsymbol{y}_{1,k},...,\boldsymbol{y}_{n,k} \right) ^T$，$\boldsymbol{y}_{i,k}$是节点$i$用于跟踪平均梯度的辅助变量，其他变量的含义与\autoref{tab:DSGD-equation}中变量的含义相同。
+
+在每次迭代中，节点之间利用参数同步拓扑进行模型参数和辅助变量的融合，并且为了实现一致性，权重矩阵$W$同样需要满足\autoref{section3-2-1}中描述的条件。下面说明DSGT算法实现梯度跟踪的原理：
+
+由于权重矩阵$W$是双随机矩阵，则对\autoref{tab:DSGT-equation}的第二个等式两边同时左乘$\mathbf{1}^T$后，根据$\boldsymbol{y}_0=\nabla f\left( \boldsymbol{x}_0 \right)$，可以得到：
+\begin{equation}
+    \label{tab:equ-4-3}
+    \begin{aligned}
+        \mathbf{1}^T\boldsymbol{y}_{k+1}&=\mathbf{1}^T\boldsymbol{y}_k+\mathbf{1}^T\nabla f\left( \boldsymbol{x}_{k+1} \right) -\mathbf{1}^T\nabla f\left( \boldsymbol{x}_k \right) 
+        \\
+        &=\mathbf{1}^T\nabla f\left( \boldsymbol{x}_{k+1} \right) .
+    \end{aligned}
+\end{equation}
+然后由DSGT算法的一致性，每个节点的辅助变量最终收敛到相同的值，则有：
+\begin{equation}
+    \label{tab:equ-4-4}
+    \boldsymbol{y}_{i,k}=\frac{1}{n}\mathbf{1}^T\nabla f\left( \boldsymbol{x}_k \right) ,\  i=1,...,n,
+\end{equation}
+从而实现对全局平均梯度的跟踪。因此，随着迭代次数的增加，每个节点的本地模型参数最终将朝着相同的方向更新，并且当算法收敛时，节点参数达到最优值$\boldsymbol{x}^*$，平均梯度$\mathbf{1}^T\nabla f\left( \boldsymbol{x}^* \right) =\mathbf{0}$。
+
+根据以上分析，DSGT算法通过引入辅助变量实现了梯度跟踪，避免了节点本地梯度搜索对一致性的影响，因此可以使用恒定的步长，从而保证了算法的收敛速度。DSGT算法的伪代码如下：
+% \vspace{-15pt}
+\begin{center}
+    % \begin{minipage}{8.5cm}
+    \begin{algorithm}[!htbp]
+            \caption{节点$i$上的DSGT算法} 
+        %   \small
+            \label{Algorithm-DSGT} 
+            \begin{algorithmic}[1]
+            \REQUIRE{模型参数初始值$\boldsymbol{x}_{i,0}$，辅助变量初始值$\boldsymbol{y}_{i,0}=\nabla f_i\left( \boldsymbol{x}_{i,0} \right) $，步长$\gamma$，权重矩阵$W$，迭代次数$K$}；
+            \ENSURE{所有节点模型参数的平均值$\frac{1}{n}\sum_{i=1}^n{\boldsymbol{x}_{i,K}}$}；
+            \FOR{$k=0,1,...,K-1$}
+                \STATE 与邻居节点通信模型参数，并利用本地模型参数和接收到的参数计算加权平均值：$\boldsymbol{x}_{i,k+\frac{1}{2}}=\sum_{j=1}^n{W_{ij}\boldsymbol{x}_{j,k}}$；
+                % \begin{align*}
+                %     \boldsymbol{x}_{i,k+\frac{1}{2}}=\sum_{j=1}^n{W_{ij}\boldsymbol{x}_{j,k}};
+                % \end{align*}
+                \STATE 利用辅助变量$\boldsymbol{y}_{i,k}$更新本地模型参数：$\boldsymbol{x}_{i,k+1}=\boldsymbol{x}_{i,k+\frac{1}{2}}-\gamma \boldsymbol{y}_{i,k}$；
+                \STATE 与邻居节点通信辅助变量，并利用本地辅助变量和接收到的辅助变量计算加权平均值：$\boldsymbol{y}_{i,k+\frac{1}{2}}=\sum_{j=1}^n{W_{ij}\boldsymbol{y}_{j,k}}$；
+                % \begin{align*}
+                %     \boldsymbol{y}_{i,k+\frac{1}{2}}=\sum_{j=1}^n{W_{ij}\boldsymbol{y}_{j,k}};
+                % \end{align*}
+                \STATE 从节点$i$的本地数据集中随机采样数据$\xi _{i,k+1} $；
+                \STATE 计算本地随机梯度：$\nabla f_i\left( \boldsymbol{x}_{i,k+1} \right) =\nabla f_i\left( \boldsymbol{x}_{i,k+1},\xi _{i,k+1} \right) $；
+                \STATE 更新辅助变量：$\boldsymbol{y}_{i,k+1}=\boldsymbol{y}_{i,k+\frac{1}{2}}+\nabla f_i\left( \boldsymbol{x}_{i,k+1} \right) -\nabla f_i\left( \boldsymbol{x}_{i,k} \right) $。
+            \ENDFOR            
+            \end{algorithmic}
+    \end{algorithm}
+    % \end{minipage}
+\end{center}
+
 
 \section{带宽自适应的量化分布式训练算法}
+本节在DSGD算法和DSGT算法的基础上提出了带宽自适应的量化分布式随机梯度下降算法（Bandwidth Adaptive Quantized Distributed Stochastic Gradient Descent，简称BA-QDSGD）和带宽自适应的量化分布式随机梯度跟踪算法（Bandwidth Adaptive Quantized Distributed Stochastic Gradient Tracking，简称BA-QDSGT）。首先将介绍本节使用的量化策略，然后介绍基于差分压缩和压缩误差补偿的量化算法，并在此基础上引入带宽自适应策略，设计带宽自适应的量化算法。
+
 \subsection{量化策略设计}
+在分布式深度学习中，通常使用32比特浮点数来表示模型的参数和梯度，量化是在节点之间通信模型参数或梯度之前将待通信的数据压缩至更低的比特数，从而减少通信的数据量。对于任意一个32比特的浮点数向量$\boldsymbol{v}\in \mathbb{R} ^d$，本节使用下式对其每一维度的元素$v_i$进行量化：
+\begin{equation}
+    \label{tab:equ-4-5}
+    Q_{\ell}\left( v_i \right) =\left\| \boldsymbol{v} \right\| _{\infty}\cdot \mathrm{sign}\left( v_i \right) \cdot \varphi _i(\boldsymbol{v},\ell ).
+\end{equation}
+其中$\left\| \boldsymbol{v} \right\| _{\infty}$是向量$\boldsymbol{v}$的无穷范数，$\mathrm{sign}\left( \cdot \right) $是符号函数，$\varphi _i(\boldsymbol{v},\ell )$是如下定义的独立随机变量：
+\begin{equation}
+    \label{tab:equ-4-6}
+    \varphi _i(\boldsymbol{v},\ell )=\begin{cases}
+        \frac{s}{\ell}&		\,\,\mathrm{with}\  \mathrm{probability}\  1+s-\frac{\left| v_i \right|}{\left\| \boldsymbol{v}_{\infty} \right\|}\ell\\
+        \frac{s+1}{\ell}&		\,\,\mathrm{otherwise}\\
+    \end{cases},
+\end{equation}
+其中$s$为满足$0\leqslant s<\ell $的整数，并且$\frac{v_i}{\left\| \boldsymbol{v} \right\| _{\infty}}\in \left[ \frac{s}{\ell},\frac{s+1}{\ell} \right] $，$\ell$一般定义为$2^{b-1}$，表明使用该量化方法后，向量的每一维度只需要使用$b$个比特就可以表示。因此$b$的值衡量了量化的程度，$b$越小则说明量化的程度越高，相应的量化精度越低。
+
+在使用\autoref{tab:equ-4-5}对向量进行量化后，可以得到：
+\begin{equation}
+    \label{tab:equ-4-7}
+    \begin{aligned}
+        E\left[ Q_{\ell}\left( v_i \right) \right] &=\left\| \boldsymbol{v} \right\| _{\infty}\cdot \mathrm{sign}\left( v_i \right) \left[ \frac{s}{\ell}\times \left( 1+s-\frac{\left| v_i \right|}{\left\| \boldsymbol{v} \right\| _{\infty}}\ell \right) +\frac{s+1}{\ell}\left( \frac{\left| v_i \right|}{\left\| \boldsymbol{v} \right\| _{\infty}}\ell -s \right) \right]\\
+        &=\left\| \boldsymbol{v} \right\| _{\infty}\cdot \mathrm{sign}\left( v_i \right) \frac{v_i}{\left\| \boldsymbol{v} \right\| _{\infty}}\\
+        &=v_i\\
+    \end{aligned}.
+\end{equation}
+该式说明量化后向量中每一维度的元素的期望等于原向量对应位置元素的值，并且Liu等人\cite{liu2020linear}证明了该量化策略可以保证量化后的向量与原向量距离的方差是有界的，因此在一定量化程度下该量化策略可以保持分布式深度学习算法的收敛性。
+
+进一步地，为了便于通信，将\autoref{tab:equ-4-5}改写为如下形式：
+\begin{equation}
+    \label{tab:equ-4-8}
+    Q_{\ell}\left( \boldsymbol{v} \right) =\frac{\left\| \boldsymbol{v} \right\| _{\infty}}{2^{b-1}}\cdot \mathrm{sign}\left( \boldsymbol{v} \right) \odot \lfloor \frac{2^{b-1}\left| \boldsymbol{v} \right|}{\left\| \boldsymbol{v} \right\| _{\infty}}+\boldsymbol{w} \rfloor ,
+\end{equation}
+其中$\odot$为哈达玛积，$\lfloor \cdot \rfloor $表示对元素向下取整，$\boldsymbol{w}\in \mathbb{R} ^d$是扰动向量，其每一维度的元素符合如下分布：
+\begin{equation}
+    \label{tab:equ-4-9}
+    w_i=\begin{cases}
+        0&		\,\,\mathrm{with} \mathrm{probability} 1+s-\frac{\left| v_i \right|}{\left\| \boldsymbol{v}_{\infty} \right\|}\ell\\
+        1&		\,\,\mathrm{otherwise}\\
+    \end{cases}.
+\end{equation}
+
+然后，在每次通信时可以将量化后的向量分为幅值、符号向量和整数向量三部分进行通信，其中幅值部分$\frac{\left\| \boldsymbol{v} \right\| _{\infty}}{2^{b-1}}$为浮点数标量，符号向量部分$\mathrm{sign}\left( \boldsymbol{v} \right)$转换成8比特整数向量，整数向量部分$\lfloor \frac{2^{b-1}\left| \boldsymbol{v} \right|}{\left\| \boldsymbol{v} \right\| _{\infty}}+\boldsymbol{w} \rfloor$在$b=16$时为16比特浮点数向量，在$b=8$时为8比特整数向量，在$b=1/2/4$时转换成8比特整数向量。
+
+%接下来介绍转换方法，添加一张图
+
+
 \subsection{量化分布式训练算法设计}
 
 \section{算力分析}

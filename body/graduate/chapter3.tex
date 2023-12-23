@@ -1,9 +1,9 @@
 \chapter{面向高效通信的参数同步拓扑优化}
 \section{引言}
 
-在分析了分布式深度学习的性能瓶颈之后，优化性能瓶颈成为需要解决的关键问题，即优化分布式训练的通信过程，以缩短训练时间。在分布式深度学习中，参数同步拓扑决定了哪些GPU之间可以进行通信，因而对训练时间有着重要的影响。具体而言，参数同步拓扑从两个方面影响分布式深度学习的训练时间。一方面，参数同步拓扑的度决定了每次迭代所需的通信时间，此处拓扑的度指拓扑中节点的邻居数。在基于Gossip架构的同步算法中，各节点同时与邻居节点进行通信，当各节点的可用带宽相同时，邻居数目最多的节点的通信时间即为每次迭代所需的通信时间。另一方面，参数同步拓扑的权重矩阵和连通性决定了一致性的速度，进而影响分布式训练的迭代复杂度。在数据并行的分布式训练中，由于每个节点利用不同的本地数据集训练模型，因此各节点的模型参数不同。为了实现与单机训练相同的效果，需要对参数同步拓扑的权重矩阵进行设计以保证模型参数能够收敛到一致，并且收敛的速度取决于权重矩阵的选取。另外，拓扑的连通性决定了数据的融合速度，因此一致性速度也取决于拓扑的连通性。通常情况下，一致性速度越快，迭代复杂度越低，即算法收敛所需的迭代次数越少。为了缩短分布式深度学习的训练时间，需要在减少每次迭代所需通信时间的同时，尽可能地加快一致性速度，因此研究参数同步拓扑的优化至关重要。
+在分析了分布式深度学习的性能瓶颈之后，优化性能瓶颈成为需要解决的关键问题，即优化分布式训练的通信过程，以缩短训练时间，提高训练效率。在分布式深度学习中，参数同步拓扑决定了哪些GPU之间可以进行通信，因而对训练时间有着重要的影响。具体而言，参数同步拓扑从两个方面影响分布式深度学习的训练时间。一方面，参数同步拓扑的度决定了每次迭代所需的通信时间，此处拓扑的度指拓扑中节点的邻居数。在基于去中心化的分布式（Gossip）架构的同步算法中，各节点同时与邻居节点进行通信，当各节点的可用带宽相同时，邻居数目最多的节点的通信时间即为每次迭代所需的通信时间。另一方面，参数同步拓扑的权重矩阵和连通性决定了一致性的速度，进而影响分布式训练的迭代复杂度。在数据并行的分布式训练中，由于每个节点利用不同的本地数据集训练模型，因此各节点的模型参数不同。为了实现与单机训练相同的效果，需要对参数同步拓扑的权重矩阵进行设计以保证模型参数能够收敛到一致，并且收敛的速度取决于权重矩阵的选取。另外，拓扑的连通性决定了数据的融合速度，因此一致性速度也取决于拓扑的连通性。通常情况下，一致性速度越快，迭代复杂度越低，即算法收敛所需的迭代次数越少。为了缩短分布式深度学习的训练时间，需要在减少每次迭代所需通信时间的同时，尽可能地加快一致性速度，因此研究参数同步拓扑的优化至关重要。
 
-一般而言，参数同步拓扑对每次迭代所需通信时间和一致性速度的作用相反。即在稀疏的拓扑中，节点的度较低而连通性较差，使得每次迭代的通信时间较短，但是一致性速度较慢，反之同理。因此，在参数同步拓扑的设计时，需要权衡对二者的影响，这使得设计高效的参数同步拓扑的难度大大增加。在现有的关于参数同步拓扑设计的方法中，大多数采用直接设计的方式得到参数同步拓扑，无法保证其权重矩阵的最优性，而基于优化问题求解的方法往往通过简化优化目标或求解过程来得到一个局部空间内的最优解，并且其中一些优化问题的设计存在不适用于分布式深度学习场景和没有考虑通信开销的问题。
+一般而言，参数同步拓扑对每次迭代所需通信时间和一致性速度的作用相反。即在稀疏的拓扑中，节点的度较低而连通性较差，使得每次迭代的通信时间较短，但是一致性速度较慢，反之同理。因此，在参数同步拓扑的设计时，需要权衡对二者的影响，这使得设计高效的参数同步拓扑的难度大大增加。在现有的关于参数同步拓扑设计的方法中，大多数采用直接设计的方式得到参数同步拓扑，无法保证其权重矩阵的最优性，而基于优化问题求解的方法往往通过简化优化目标或求解过程来得到一个局部空间内的最优解，并且优化问题的设计存在不适用于分布式深度学习场景和没有考虑通信开销的问题。
 
 因此，针对上述问题，同时考虑到近年来对基于Gossip架构的分布式训练算法的广泛研究以及Gossip架构上拓扑设计的灵活性，本章基于Gossip架构提出了一种面向高效通信的参数同步拓扑优化方法，实现同时优化拓扑结构和权重矩阵。首先，以拓扑的一致性速度为优化目标，分别对同构带宽场景和异构带宽场景下的参数同步拓扑优化问题进行设计。然后提出基于ADMM算法和模拟退火算法的优化问题求解框架，其中基于模拟退火算法生成的拓扑结构作为ADMM算法求解优化问题的初始拓扑。最后，将求解得到的参数同步拓扑分别应用到线性平均一致问题和分布式深度学习中，以验证本章提出方法的有效性。
 
@@ -12,18 +12,18 @@
 \section{问题描述}\label{section3-2}
 \subsection{典型线性平均一致问题} \label{section3-2-1}
 
-给定一个由$n$个节点和$e$条边组成的拓扑图$\mathcal{G} \left( \mathcal{N} ,\mathcal{E} \right) $，其节点集为$\mathcal{N}$，边集为$\mathcal{E}$，其中每条边$\left\{ i,j \right\} \in \mathcal{E}$是无向边，每个节点的邻居由$\mathcal{N} _i=\left\{ j|\left\{ i,j \right\} \in \mathcal{E} \right\}$表示。拓扑中的每个节点维持一个初始数据$\boldsymbol{x}_i\left( 0 \right) \in \mathbb{R}^p$（行向量，本章中除特别强调为行向量的变量，其余均为列向量），例如神经网络的模型参数，并且拓扑中的每个节点可以和邻居节点进行通信。
+给定一个由$n$个节点和$e$条边组成的拓扑图$\mathcal{G} \left( \mathcal{N} ,\mathcal{E} \right) $，其节点集为$\mathcal{N}$，边集为$\mathcal{E}$，其中每条边$\left\{ i,j \right\} \in \mathcal{E}$是无向边，每个节点的邻居由$\mathcal{N} _i=\left\{ j|\left\{ i,j \right\} \in \mathcal{E} \right\}$表示。拓扑中的每个节点维持一个初始数据$\boldsymbol{x}_{i,0} \in \mathbb{R}^p$（行向量，本章中除特别强调为行向量的变量，其余均为列向量），例如神经网络的模型参数，并且拓扑中的每个节点可以和邻居节点进行通信。
 
-线性平均一致是在上述给定条件下，通过\autoref{tab:LA_problem_node}的迭代过程使得每个节点的数据最终都收敛到所有节点初始数据的平均值$\frac{1}{n}\sum_{i=1}^n{\boldsymbol{x}_i\left( 0 \right)}$：
+线性平均一致是在上述给定条件下，通过\autoref{tab:LA_problem_node}的迭代过程使得每个节点的数据最终都收敛到所有节点初始数据的平均值$\frac{1}{n}\sum_{i=1}^n{\boldsymbol{x}_{i,0}}$：
 \begin{equation}
     \label{tab:LA_problem_node}
-    \boldsymbol{x}_i\left( k+1 \right) =W_{ii}\boldsymbol{x}_i\left( k \right) +\sum_{j\in \mathcal{N} _i}{W_{ij}\boldsymbol{x}_j\left( k \right)},\ \ \ i=1,...,n,
+    \boldsymbol{x}_{i,k+1} =W_{ii}\boldsymbol{x}_{i,k} +\sum_{j\in \mathcal{N} _i}{W_{ij}\boldsymbol{x}_{j,k}},\ \ \ i=1,...,n,
 \end{equation}
-其中$k=0,1,2,...$是离散时间序列，表示迭代次数，$W_{ij}$是节点$i$和节点$j$之间的边$\left\{ i,j \right\}$的权重，当$j\notin \mathcal{N} _i$时，$W_{ij}$为0。令$\boldsymbol{x}\left( k \right) =\left( \boldsymbol{x}_1\left( k \right) ,...,\boldsymbol{x}_n\left( k \right) \right)^T$表示由$n$个节点的数据组成的矩阵，则\autoref{tab:LA_problem_node}可以重新表述为：
+其中$k=0,1,2,...$是离散时间序列，表示迭代次数，$W_{ij}$是节点$i$和节点$j$之间的边$\left\{ i,j \right\}$的权重，当$j\notin \mathcal{N} _i$时，$W_{ij}$为0。令$\boldsymbol{x}_k =\left( \boldsymbol{x}_{1,k} ,...,\boldsymbol{x}_{n,k} \right)^T$表示由$n$个节点的数据组成的矩阵，则\autoref{tab:LA_problem_node}可以重新表述为：
 \begin{equation}
     \label{tab:LA_problem_nodes}
     \begin{aligned}
-        \boldsymbol{x}\left( k+1 \right) =W\boldsymbol{x}\left( k \right) , \ W\in \mathcal{S},
+        \boldsymbol{x}_{k+1} =W\boldsymbol{x}_k , \ W\in \mathcal{S},
     \end{aligned}
 \end{equation}
 其中$W$是权重矩阵，$\mathcal{S} =\left\{ W\in \mathbb{R} ^{n\times n}|W_{ij}=0 \  \mathrm{if} \left\{ i,j \right\} \notin \mathcal{E} \ \mathrm{and} \  i\ne j \right\}$是底层拓扑结构对权重矩阵的约束。\autoref{tab:LA_problem_nodes}与经典的分布式梯度下降算法DGD\cite{nedic2009distributed}（算法细节见\autoref{subsection-4-2-1}）只相差一个梯度搜索项，因此可以看作是DGD的通信过程，\autoref{fig:Fig3-1}展示了5个节点上的线性平均一致问题的一次迭代的通信过程。
@@ -34,7 +34,7 @@
     \caption{\label{fig:Fig3-1}线性平均一致问题的通信过程}
 \end{figure}
 
-为了实现线性平均一致，即$\underset{k\rightarrow \infty}{\lim}\boldsymbol{x}\left( k \right) =\bar{\boldsymbol{x}}=\frac{1}{n}\sum_{i=1}^n{\boldsymbol{x}_i\left( 0 \right)}$，$W$需要满足如下充要条件\cite{xiao2004fast}：
+为了实现线性平均一致，即$\underset{k\rightarrow \infty}{\lim}\boldsymbol{x}_k=\mathbf{1}\bar{\boldsymbol{x}}=\frac{\mathbf{1}}{n}\sum_{i=1}^n{\boldsymbol{x}_{i,0}}$，$W$需要满足如下充要条件\cite{xiao2004fast}：
 \begin{equation}
     \label{tab:row_random}
     \mathbf{1}^TW=\mathbf{1}^T,
@@ -47,19 +47,19 @@
     \label{tab:spectral_radius}
     \rho \left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) <1,
 \end{equation}
-其中$\mathbf{1}\in \mathbb{R}^n$为全1列向量，$\rho$表示矩阵的谱半径，\autoref{tab:row_random}和\autoref{tab:column_random}被称为双随机约束。
+其中$\mathbf{1}\in \mathbb{R}^n$为全1列向量，$\rho$表示矩阵的谱半径，\autoref{tab:row_random}和\autoref{tab:column_random}被称为双随机约束，满足这两个条件的矩阵被称为双随机矩阵。
 
 在满足上述条件的情况下，线性平均一致问题的一致性速度由渐进收敛因子表示：
 \begin{equation}
     \label{tab:asymptotic_convergence_factor}
-    r_{\mathrm{asym}}(W)=\mathop {\mathrm{sup}} \limits_{\boldsymbol{x}(0)\ne \bar{\boldsymbol{x}}}\lim_{k\rightarrow \infty} \left( \frac{\parallel \boldsymbol{x}(k)-\bar{\boldsymbol{x}}\parallel _2}{\parallel \boldsymbol{x}(0)-\bar{\boldsymbol{x}}\parallel _2} \right) ^{1/k}.
+    r_{\mathrm{asym}}(W)=\mathop {\mathrm{sup}} \limits_{\boldsymbol{x}_0\ne \bar{\boldsymbol{x}}}\lim_{k\rightarrow \infty} \left( \frac{\parallel \boldsymbol{x}_k-\bar{\boldsymbol{x}}\parallel _2}{\parallel \boldsymbol{x}_0-\bar{\boldsymbol{x}}\parallel _2} \right) ^{1/k}.
 \end{equation}
 渐进收敛因子越小，说明一致性速度越快。由$W$的双随机性，可以得到：
 \begin{equation}
 \begin{aligned}
-    \boldsymbol{x}(k+1)-\bar{\boldsymbol{x}}&=\left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) \boldsymbol{x}\left( k \right) 
+    \boldsymbol{x}_{k+1}-\bar{\boldsymbol{x}}&=\left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) \boldsymbol{x}_k 
 \\
-&=\left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) \left( \boldsymbol{x}\left( k \right) -\bar{\boldsymbol{x}} \right) ,
+&=\left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) \left( \boldsymbol{x}_k -\bar{\boldsymbol{x}} \right) ,
 \end{aligned}
 \end{equation}
 于是\autoref{tab:asymptotic_convergence_factor}可以表示为：
@@ -930,7 +930,7 @@
     \caption{\label{fig:Fig3-8}优化目标和收敛误差随迭代次数的变化}
 \end{figure}
 
-\textbf{实验2：}为了验证同构带宽场景下参数同步拓扑优化方法的有效性，本节将基于\autoref{Algorithm-T-ADMM}得到的参数同步拓扑（T-ADMM）与现有的参数同步拓扑进行比较。首先进行一致性实验：令节点数目为16，边的数目分别为16，24，32和54，随机初始化边的权重并求解得到不同边的数目对应的参数同步拓扑；然后，为每个节点随机初始化维度与ResNet-18模型参数量相同的数据（经统计，ResNet-18模型参数量为11689512）；在求解得到的参数同步拓扑和现有的参数同步拓扑上执行线性平均一致问题的迭代过程，并记录一致性误差$\left\| x\left( k \right) -\bar{x} \right\| _2$随迭代次数$k$的变化。在同构带宽场景下，每个节点的带宽相同，假设为9.76GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\min \left( \frac{9.76}{d_i},\frac{9.76}{d_j} \right) $，$d_i$和$d_j$为节点$i$和节点$j$的度（指数拓扑中为节点的出度/入度）。对迭代时间进行缩放后，不同拓扑的一致性误差随时间的变化如\autoref{fig:Fig3-9}所示。图中$r$为边的数目，$d$为拓扑的最大度。可以看到，当边的数目相同时，T-ADMM的一致性速度均优于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时T-ADMM的一致性速度最快。在对比的拓扑中，指数拓扑的一致性速度最快，为了进一步比较T-ADMM与指数拓扑的性能，本节还在不同的节点数目上对比了两者的渐进收敛因子和一致性误差达到0.0001所需的收敛时间，实验结果如\autoref{tab:iso-bandwidth-consensus}所示。当节点数目从6增加到32时，T-ADMM的渐进收敛因子和收敛时间始终小于指数拓扑，充分说明了T-ADMM在一致性速度上优于指数拓扑。
+\textbf{实验2：}为了验证同构带宽场景下参数同步拓扑优化方法的有效性，本节将基于\autoref{Algorithm-T-ADMM}得到的参数同步拓扑（T-ADMM）与现有的参数同步拓扑进行比较。首先进行一致性实验：令节点数目为16，边的数目分别为16，24，32和54，随机初始化边的权重并求解得到不同边的数目对应的参数同步拓扑；然后，为每个节点随机初始化维度与ResNet-18模型参数量相同的数据（经统计，ResNet-18模型参数量为11689512）；在求解得到的参数同步拓扑和现有的参数同步拓扑上执行线性平均一致问题的迭代过程，并记录一致性误差$\left\| \boldsymbol{x}_k-\bar{\boldsymbol{x}} \right\| _2$随迭代次数$k$的变化。在同构带宽场景下，每个节点的带宽相同，假设为9.76GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\min \left( \frac{9.76}{d_i},\frac{9.76}{d_j} \right) $，$d_i$和$d_j$为节点$i$和节点$j$的度（指数拓扑中为节点的出度/入度）。对迭代时间进行缩放后，不同拓扑的一致性误差随时间的变化如\autoref{fig:Fig3-9}所示。图中$r$为边的数目，$d$为拓扑的最大度。可以看到，当边的数目相同时，T-ADMM的一致性速度均优于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时T-ADMM的一致性速度最快。在对比的拓扑中，指数拓扑的一致性速度最快，为了进一步比较T-ADMM与指数拓扑的性能，本节还在不同的节点数目上对比了两者的渐进收敛因子和一致性误差达到0.0001所需的收敛时间，实验结果如\autoref{tab:iso-bandwidth-consensus}所示。当节点数目从6增加到32时，T-ADMM的渐进收敛因子和收敛时间始终小于指数拓扑，充分说明了T-ADMM在一致性速度上优于指数拓扑。
 
 \begin{figure}[!htbp]   
     \centering
@@ -1116,7 +1116,7 @@
     }}
 \end{table}
 
-\textbf{实验5：}下面验证服务器间交换机端口带宽异构场景下参数同步拓扑优化方法的有效性。在该场景下，对交换机端口上边的数目的约束可以看作是对子拓扑中节点度的约束，因此基于SA生成初始拓扑结构的方法同样适用于该场景下优化问题的求解。设置节点数目为16，交换机层级数为2，每个交换机上的端口数为4，分别令不同层级上的交换机端口带宽比为1：2和2：3，求解优化问题得到的T-SA-ADMM的拓扑结构如\autoref{fig:Fig3-17}所示，其中边的粗细表示对应边的权重。接下来在交换机端口带宽比为1：2的场景下进行一致性实验和分布式深度学习实验，其中2对应的带宽为9.76GB/s，1对应的带宽为4.88GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\frac{b_{s_{ij}}}{e_{s_{ij}}}$，$b_{s_{ij}}$为边$\left\{ i,j \right\} $经过的交换机端口的带宽，$e_{s_{ij}}$为边$\left\{ i,j \right\} $经过的交换机端口上边的数目。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-18}和\autoref{fig:Fig3-19}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽4.88GB/s的比值。可以看到，相同时间内，T-SA-ADMM的一致性误差和预测准确率均优于现有的参数同步拓扑。\autoref{tab:bandwidth-constraint-inter-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间。与图中结果相同，不同边的数目对应的T-SA-ADMM所需的时间均明显少于现有的参数同步拓扑。
+\textbf{实验5：}下面验证服务器间交换机端口带宽异构场景下参数同步拓扑优化方法的有效性。在该场景下，对交换机端口上边的数目的约束可以看作是对子拓扑中节点度的约束，因此基于SA生成初始拓扑结构的方法同样适用于该场景下优化问题的求解。设置节点数目为16，交换机层级数为2，每个交换机上的端口数为4，分别令不同层级上的交换机端口带宽比为1：2和2：3，求解优化问题得到的T-SA-ADMM的拓扑结构如\autoref{fig:Fig3-17}所示，其中边的粗细表示对应边的权重。接下来在交换机端口带宽比为1：2的场景下进行一致性实验和分布式深度学习实验，其中2对应的带宽为9.76GB/s，1对应的带宽为4.88GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\frac{b_{s_{ij}}}{e_{s_{ij}}}$，$b_{s_{ij}}$为边$\left\{ i,j \right\} $经过的交换机端口的带宽，$e_{s_{ij}}$为边$\left\{ i,j \right\} $经过的交换机端口上边的数目。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-18}和\autoref{fig:Fig3-19}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽4.88GB/s的比值。可以看到，相同时间内，T-SA-ADMM的一致性误差和预测准确率均优于现有的参数同步拓扑。\autoref{tab:bandwidth-constraint-inter-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间。很显然，不同边的数目对应的T-SA-ADMM所需的时间均明显少于现有的参数同步拓扑。
 
 \begin{figure}[!htbp]
     \centering
@@ -1163,6 +1163,7 @@
 
 
 \section{本章小结}
+本章从优化分布式深度学习的通信性能出发，研究了参数同步拓扑优化方法。首先，本章分别分析了同构带宽、节点带宽异构、服务器内部链路带宽异构和服务器间交换机端口带宽异构四种场景下影响通信开销的主要因素，其中对于后面三种带宽异构场景，本章提出了一种带宽分配策略，以实现边上带宽的最优分配。然后，以一致性速度为优化目标，对四种场景分别引入通信相关的约束，设计了对应的参数同步拓扑优化问题。接下来提出了定制化的ADMM算法用于求解参数同步拓扑优化问题，为了改进求解得到的结果，本章还通过模拟退火算法生成ADMM算法的初始拓扑结构。最后，在四种场景下分别进行一致性实验和分布式深度学习实验，并与现有的参数同步拓扑进行对比。实验结果表明，基于本章提出的方法得到的参数同步拓扑在一致性速度上优于现有的参数同步拓扑，并且在分布式深度学习中，使用优化出的参数同步拓扑能够在更短的时间内达到设定的预测准确率，从而证明了本章提出的方法的有效性。
 
 
 

@@ -289,13 +289,13 @@ BA-QDSGT算法的另一个比较重要的特点是保证了梯度跟踪方法的
 本节对提出的BA-QDSGD算法和BA-QDSGT算法的有效性进行验证，并与现有的分布式训练算法进行对比分析。所有实验都是在同一个硬件系统上完成的，该系统配备了2个Intel Xeon Gold 6226R处理器和8个NVIDIA GeForce RTX 2080 Ti，每个GPU有11GB显存。该硬件系统采用\autoref{fig:Fig2-4}所示的标准服务器架构。本节的实验使用pytorch实现。
 
 \subsection{实验设置}
-本节选用Cifar10数据集和ResNet-18模型进行分布式深度学习实验。在训练开始之前，每个节点从每个类别的训练数据中随机采样相同数量的样本构成本地训练数据集。实验的超参数中批大小设置为32（每个节点），学习率设置为0.05，动量因子设置为0.9，权重衰减设置为0.0001，训练周期数设置为100。另外，BA-QDSGD算法和BA-QDSGT算法中的参数$\alpha$设置为0.5，$\eta$设置为1。
+本节选用Cifar10数据集和ResNet-18模型进行分布式深度学习实验。为了增加通信时间以进一步体现量化方法的性能，本节对ResNet-18模型进行了微调，在输出层之前增加三个神经元数目分别为4096、4096和512的全连接层，从而使模型参数量增加至32154186。在训练开始之前，每个节点从每个类别的训练数据中随机采样相同数量的样本构成本地训练数据集。实验的超参数中批大小设置为32（每个节点），初始学习率设置为0.1，并分别在第30个训练周期和第60个训练周期将学习率缩小10倍，训练周期数设置为100，动量因子设置为0.9，权重衰减设置为0.0001。另外，BA-QDSGD算法和BA-QDSGT算法中的参数$\alpha$设置为0.5，$\eta$设置为1。
 
-实验中采用的参数同步拓扑基于第三章的优化方法得到，根据第二章的测试结果，服务器内部三种物理链路的带宽比为$e_{PIX}:e_{NODE}:e_{SYS}=9.76GB/s:11.05GB/s:11.03GB/s$，令边的数目分别为10和16，基于\autoref{Algorithm-T-ADMM}得到如\autoref{fig:Fig4-3}所示的两个参数同步拓扑。本节的分布式深度学习实验将在这两个参数同步拓扑上进行。
+实验中采用的参数同步拓扑基于第三章的优化方法得到，根据第二章的测试结果，服务器内部三种物理链路的带宽比为$e_{PIX}:e_{NODE}:e_{SYS}=9.76GB/s:11.05GB/s:11.03GB/s$，令边的数目分别为9和16，基于\autoref{Algorithm-T-ADMM}得到如\autoref{fig:Fig4-3}所示的两个参数同步拓扑。本节的分布式深度学习实验将在这两个参数同步拓扑上进行。
 
 \begin{figure}[!htbp]
     \centering
-    \subfigure[$r=10$]{
+    \subfigure[$r=9$]{
         \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-3-topo1.pdf}
     }
     \subfigure[$r=16$]{
@@ -304,14 +304,125 @@ BA-QDSGT算法的另一个比较重要的特点是保证了梯度跟踪方法的
     \caption{\label{fig:Fig4-3}分布式深度学习实验采用的参数同步拓扑}
 \end{figure}
 
-本节对比的分布式训练算法包括DSGD算法、DSGT算法、Choco-SGD算法\cite{koloskova2019decentralized}和C-GT算法\cite{li2021compressed}。其中Choco-SGD算法和C-GT算法分别对DSGD算法和DSGT算法引入了差分压缩和压缩误差补偿策略。
+本节对比的分布式训练算法包括DSGD算法、DSGT算法、Choco-SGD算法\cite{koloskova2019decentralized}和C-GT算法\cite{li2021compressed}。其中Choco-SGD算法和C-GT算法分别对DSGD算法和DSGT算法引入了差分压缩和压缩误差补偿策略。对比实验分两组进行，第一组实验对比无梯度跟踪的算法，包括DSGD算法、Choco-SGD算法和本章提出的BA-QDSGD算法；第二组对比有梯度跟踪的算法，包括DSGT算法、C-GT算法和本章提出的BA-QDSGT算法。
 
 \subsection{实验结果与分析}
-本小节首先在两种参数同步拓扑上验证了本章提出的BA-QDSGD算法和BA-QDSGT算法的收敛性：将QDSG算法、Choco-SGD算法和BA-QDSGD算法进行对比，将QDST算法、C-GT算法和BA-QDSGT算法进行对比，令量化比特数$\mathrm{b}$分别等于2、4和8，
+本小节首先在两种参数同步拓扑上验证了本章提出的BA-QDSGD算法和BA-QDS GT算法的收敛性。根据服务器上的实际物理链路带宽以及两种参数同步的结构，可以得到两种参数同步拓扑对应的带宽矩阵为：
+\begin{figure}[!htbp]
+    \centering
+    \subfigure{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-4-matrix1.pdf}
+    }
+    \subfigure{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-4-matrix2.pdf}
+    }
+    \caption{\label{fig:Fig4-4}两种参数同步拓扑对应的带宽矩阵}
+\end{figure}
 
+令量化比特数$\mathrm{b}$分别等于2、4和8，在两种参数同步拓扑上利用本章提出的算法和对比的算法进行分布式深度学习实验，得到如\autoref{fig:Fig4-5}至\autoref{fig:Fig4-8}所示的实验结果。每组实验结果中，左子图为损失函数值随训练周期数的变化，右子图为测试准确率随训练周期数的变化\footnote{损失函数值和测试准确率均为所有节点的平均值。}。可以看到对于设定的量化比特数，本章提出的BA-QDSGD算法和BA-QDSGT算法均能够收敛，并且损失函数值和测试准确率能够达到与没有采用量化策略的DSGD算法和DSGT算法相同的数值结果。另外不难发现，当量化比特数为2时，本节对比的量化分布式训练算法Choco-SGD算法和C-GT算法都会出现测试准确率下降的情况，而BA-QDSGD算法和BA-QDSGT算法仍然保持较高的测试准确率，这说明通过引入带宽自适应策略提高某些高带宽边上的量化比特数能够提高模型精度。此外，在$r=9$对应的参数同步拓扑上有梯度跟踪的算法的实验结果中，量化比特数为4时C-GT算法和BA-QDSGT算法的测试准确率出现了一定程度的下降，这是因为同时对模型参数和梯度相关的辅助变量进行量化使得模型精度受到了影响，而在$r=16$对应的参数同步拓扑上该现象消失了，因为该拓扑比$r=9$对应的参数同步拓扑更稠密，一致性速度更快，从而减轻了量化导致的精度损失。
 
+\begin{figure}[!htbp]
+    \centering
+    \subfigure{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-5-SGD-loss-122.pdf}
+    }
+    \subfigure{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-5-SGD-acc-122.pdf}
+    }
+    \caption{\label{fig:Fig4-5}$r=9$对应的参数同步拓扑上无梯度跟踪的算法的实验结果}
+\end{figure}
 
+\begin{figure}[!htbp]
+    \centering
+    \subfigure{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-5-SGD-loss-144.pdf}
+    }
+    \subfigure{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-5-SGD-acc-144.pdf}
+    }
+    \caption{\label{fig:Fig4-6}$r=16$对应的参数同步拓扑上无梯度跟踪的算法的实验结果}
+\end{figure}
 
-从以下几个方面设计实验以验证本章提出的BA-QDSGD算法和BA-QDSGT算法的有效性：实验1验证了不同量化程度下BA-QDSGD算法和BA-QDSGT算法的收敛性；实验2
+\begin{figure}[!htbp]
+    \centering
+    \subfigure{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-7-SGT-loss-122.pdf}
+    }
+    \subfigure{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-7-SGT-acc-122.pdf}
+    }
+    \caption{\label{fig:Fig4-7}$r=9$对应的参数同步拓扑上有梯度跟踪的算法的实验结果}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-7-SGT-loss-144.pdf}
+    }
+    \subfigure{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-7-SGT-acc-144.pdf}
+    }
+    \caption{\label{fig:Fig4-8}$r=16$对应的参数同步拓扑上有梯度跟踪的算法的实验结果}
+\end{figure}
+
+下面在两种参数同步拓扑上验证本章提出的BA-QDSGD算法和BA-QDSGT算法对分布式深度学习训练效率的提升。\autoref{fig:Fig4-9}和\autoref{fig:Fig4-10}为不同算法的测试准确率随时间的变化。可以看到，量化比特数越低，BA-QDSGD算法和BA-QDSGT算法的收敛速度越快，并且BA-QDSGD算法和BA-QDSGT算法的运行时间分别与相同量化比特数的Choco-SGD算法和C-GT算法的运行时间接近，这说明本章提出的带宽自适应策略对算法运行时间的影响不大。另外，从图中可以发现，当量化比特数为2时，BA-QDSGD算法和BA-QDSGT算法在相应的对比实验中均能够最快达到较高的测试准确率，高于量化比特数为2时的Choco-SGD算法和C-GT算法的测试准确率。进一步地，为了定量评估BA-QDSGD算法和BA-QDSGT算法的性能，\autoref{tab:SGD-accuracy-time}和\autoref{tab:SGT-accuracy-time}统计了各个算法的测试准确率达到85\%所需的时间。可以看到，当量化比特数相同时，BA-QDSGD算法和BA-QDSGT算法的测试准确率达到85\%所需的时间分别少于Choco-SGD算法和C-GT算法，并且在每组实验中，BA-QDSGD算法和BA-QDSGT算法都是在量化比特数为4时能够最快达到85\%的测试准确率，这是因为量化比特数为2时，模型精度有所下降，而量化比特数为8时，通信时间有所增加，从而导致算法性能受到影响。另外BA-QDSGD算法所需的时间少于BA-QDSGT算法，原因在于本节对两种算法使用相同的步长调整策略，而BA-QDSGT算法中需要额外对与梯度相关的辅助变量进行量化和通信，从而增加了算法的训练时间。综上所述，本章提出的BA-QDSGD算法和BA-QDSGT算法能够在减少训练时间的同时，保证模型的精度，从而有效地提高分布式深度学习的训练效率。
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[$r=9$对应的参数同步拓扑上的实验结果]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-8-SGD-acc-time-122.pdf}
+    }
+    \subfigure[$r=16$对应的参数同步拓扑上的实验结果]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-8-SGD-acc-time-144.pdf}
+    }
+    \caption{\label{fig:Fig4-9}无梯度跟踪的算法的测试准确率随时间的变化}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[$r=9$对应的参数同步拓扑上的实验结果]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-8-SGT-acc-time-122.pdf}
+    }
+    \subfigure[$r=16$对应的参数同步拓扑上的实验结果]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-8-SGT-acc-time-144.pdf}
+    }
+    \caption{\label{fig:Fig4-10}有梯度跟踪的算法的测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htbp]
+    \center
+    \caption{ 无梯度跟踪的算法的测试准确率达到85\%所需的时间（s）}  %表的名字
+    \label{tab:SGD-accuracy-time}  %表的引用
+    \setlength{\tabcolsep}{2mm}{ %7可随机设置，调整表格整体长度到适合自己的大小为止
+        \begin{tabular}{cccccc}
+        \hline
+        \multirow{2}{*}{\begin{tabular}[c]{@{}c@{}}量化比特数\end{tabular}} & \multicolumn{2}{c}{$r=9$} &  & \multicolumn{2}{c}{$r=16$} \\ \cline{2-3} \cline{5-6} 
+        & Choco-SGD  & BA-QDSGD         &  & Choco-SGD    & BA-QDSGD          \\ \hline
+        不量化 (DSGD)  & 2546   & 2546  &  & 2636     & 2636   \\
+        2 & -   & \textbf{2018}  &  & -     & \textbf{2080}   \\
+        4  & 2157   & \textbf{1632}  &  & 2264     & \textbf{2015}   \\
+        8  & 1852   & \textbf{1794}  &  & 2409     & \textbf{2242}   \\ \hline
+        \end{tabular}
+    } %注意这里还有一个半括号
+\end{table}
+
+\begin{table}[!htbp]
+    \center
+    \caption{ 有梯度跟踪的算法的测试准确率达到85\%所需的时间（s）}  %表的名字
+    \label{tab:SGT-accuracy-time}  %表的引用
+    \setlength{\tabcolsep}{4mm}{ %7可随机设置，调整表格整体长度到适合自己的大小为止
+        \begin{tabular}{cccccc}
+        \hline
+        \multirow{2}{*}{\begin{tabular}[c]{@{}c@{}}量化比特数\end{tabular}} & \multicolumn{2}{c}{$r=9$} &  & \multicolumn{2}{c}{$r=16$} \\ \cline{2-3} \cline{5-6} 
+        & C-GT  & BA-QDSGT         &  & C-GT    & BA-QDSGT          \\ \hline
+        不量化 (DSGT)  & 4115   & 4115  &  & 6086     & 6086   \\
+        2 & -   & \textbf{3221}  &  & -     & \textbf{3096}   \\
+        4  & 5334   & \textbf{3216}  &  & 3607     & \textbf{2977}   \\
+        8  & 4268   & \textbf{3749}  &  & 4187     & \textbf{3728}   \\ \hline
+        \end{tabular}
+    } %注意这里还有一个半括号
+\end{table}
 
 \section{本章小结}
+本章从减少分布式深度学习的通信数据量出发，研究了带宽自适应的量化分布式训练算法。首先，介绍了一种能够保持数据期望的量化策略，用于实现对通信数据的有效压缩。然后介绍基于差分压缩和压缩误差补偿的算法设计，同时提出基于带宽矩阵的带宽自适应策略，该策略增加了高带宽边上的量化比特数，减小了对应的压缩误差，从而降低了量化对模型精度的影响，同时该策略使不同带宽的边上的数据通信时间相近，而不会增加整体的通信时间。接下来，结合差分压缩、压缩误差补偿和带宽自适应策略设计了带宽自适应的量化分布式训练算法：BA-QDSGD算法和BA-QDSGT算法。最后在基于第三章的方法得到的参数同步拓扑上对比了BA-QDSGD算法和BA-QDSGT算法与现有的量化分布式训练算法的性能，证明了本章提出的算法能够在加快模型收敛速度的同时保证模型的精度，从而有效地提高分布式深度学习的训练效率。
+

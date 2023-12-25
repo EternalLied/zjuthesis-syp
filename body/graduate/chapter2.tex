@@ -492,14 +492,39 @@
     }}
 \end{table}
 
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[环形拓扑]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-1-different-topo.pdf}
+    }
+    \subfigure[树形拓扑]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-2-different-topo.pdf}
+    }
+    \subfigure[分层拓扑]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-3-different-topo.pdf}
+    }
+    \subfigure[2D-Torus]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-4-different-topo.pdf}
+    }
+    \subfigure[指数拓扑]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-5-different-topo.pdf}
+    }
+    \caption{基于$broadcast$实现的不同通信拓扑}
+    \label{fig:Fig2-13}
+\end{figure}
+
 
 \subsection{实验设置与评价指标}
 
-在训练多层感知器模型时，优化器使用Adam，批大小设置为128，初始学习率设置为0.1，并分别在第40和80个训练周期时将学习率缩小10倍。本节选择VGG-16\cite{simonyan2014very}，ResNet-50\cite{he2016deep}，ResNet-101\cite{he2016deep}和GoogLeNet\cite{szegedy2015going}作为待预测的卷积神经网络，其中VGG-16由标准的卷积层、池化层和全连接堆叠而成，ResNet-50和ResNet-101由残差块组成，GoogLeNet由Inception模块组成。这些神经网络的基本组成单元都是本章所考虑的卷积层、池化层、全连接层和批归一化层。另外，本节选择如图所示的五种拓扑作为待预测的拓扑结构，分别是环形拓扑\cite{nedic2018network}、树形拓扑\cite{iandola2016firecaffe}、分层拓扑\cite{trevisan2017lecture}、2D-Torus\cite{tanakaimagenet}和指数拓扑\cite{ying2021exponential}，并且在测试和预测时，前四种拓扑结构基于All-Reduce架构，指数拓扑则基于Gossip架构。\textcolor{red}{下面简单介绍一下五种拓扑上的通信机制：}
+在训练多层感知器模型时，优化器使用Adam，批大小设置为128，初始学习率设置为0.1，并分别在第40和80个训练周期时将学习率缩小10倍。本节选择VGG-16\cite{simonyan2014very}，ResNet-50\cite{he2016deep}，ResNet-101\cite{he2016deep}和GoogLeNet\cite{szegedy2015going}作为待预测的卷积神经网络，其中VGG-16由标准的卷积层、池化层和全连接堆叠而成，ResNet-50和ResNet-101由残差块组成，GoogLeNet由Inception模块组成。这些神经网络的基本组成单元都是本章所考虑的卷积层、池化层、全连接层和批归一化层。另外，本节选择如\autoref{fig:Fig2-13}所示的五种拓扑作为待预测的拓扑结构，分别是环形拓扑\cite{nedic2018network}、树形拓扑\cite{iandola2016firecaffe}、分层拓扑\cite{trevisan2017lecture}、2D-Torus\cite{tanakaimagenet}和指数拓扑\cite{ying2021exponential}，并且在测试和预测时，前四种拓扑结构基于All-Reduce架构，指数拓扑则基于Gossip架构。
 
-\begin{itemize}
-    \item 在基于All-Reduce架构的环形拓扑进行通信时，数据需要在各节点间依次传递，
-\end{itemize}
+% 下面简单介绍一下五种拓扑上的通信机制：
+% \begin{itemize}
+%     \item 环形拓扑：在基于All-Reduce架构的环形拓扑上进行数据通信时，数据从节点1经其他节点依次发送至节点8，由节点8对所有节点的数据求平均后再依次发送给每个节点；
+%     \item 树形拓扑：在基于All-Reduce架构的树形拓扑上进行数据通信时，每个节点分别从其子节点接收数据，并将接收的数据与本地数据求和后发送给其父节点，由节点1对所有节点的数据求平均后再依次向下发送给每个节点；
+%     \item 分层拓扑：在基于All-Reduce架构的分层拓扑上进行数据通信时，节点1、3、5、7分别将数据发送给节点2、4、6、8，然后节点2、6将数据求和并发送给节点4、8，最后节点4将数据求和并发送给节点8，由节点8对所有节点的数据求平均后再反向发送给每个节点；
+%     \item 2D-Torus：
+% \end{itemize}
 
 为了衡量预测模型的性能，本节使用均方根误差（RMSE），平均绝对百分比误差（MAPE）和决定系数（$R^2$）作为评价指标。其中RMSE和MAPE表示预测值与真实值之间的偏差，这两个指标越小，说明预测模型的精度越高。RMSE和MAPE的计算公式如下：
 \begin{equation}
@@ -636,7 +661,7 @@
     \caption{\label{fig:Fig2-11}基于$all\underline{~}reduce$的8个GPU上的通信时间预测结果}
 \end{figure}
 
-对于$broadcast$，本节将PreTopo与基于Sigmoid的模型和固定带宽的模型进行比较。考虑到现有的方法没有对集合通信原语进行分析，因此本节对比的基于Sigmoid的模型和固定带宽的模型同样基于\autoref{tab:multi_gpu_broadcast_refined}，不过将其中的单链路模型替换为对应的基于Sigmoid的模型和固定带宽的模型。\autoref{fig:Fig2-12}展示了三种方法对不同数目GPU的通信时间的预测结果，其中MAPE的值为不同通信数据量的预测结果的平均值。可以看到PreTopo的预测精度分别优于基于Sigmoid的模型和固定带宽的模型12.59\%以上和2.17\%以上。另外，三种方法的MAPE随着GPU数量的增加而逐渐增加，这主要是由于在每次通信之前基于GPU数量的数据分块机制。GPU数目越多，每个数据块的数据量越小，而单链路模型在数据量较小时容易产生较大的MAPE，从而使得基于\autoref{tab:multi_gpu_broadcast_refined}的多GPU通信时间预测模型的MAPE增加。在分布式深度学习中，为了降低通信开销，每个节点的邻居数目通常不会过多，因此PreTopo可以保持较高的预测精度。
+对于$broadcast$，本节将PreTopo与基于Sigmoid的模型和固定带宽的模型进行比较。考虑到现有的方法没有对集合通信原语进行分析，因此本节对比的基于Sigmoid的模型和固定带宽的模型同样基于\autoref{tab:multi_gpu_broadcast_refined}，不过将其中的单链路模型替换为对应的基于Sigmoid的模型和固定带宽的模型。\autoref{fig:Fig2-12}展示了三种方法对不同数目GPU的通信时间的预测结果，其中MAPE的值为不同通信数据量的预测结果的平均值。可以看到PreTopo的预测精度分别优于基于Sigmoid的模型和固定带宽的模型12.59\%以上和2.17\%以上。其中，基于Sigmoid的模型在通信数据量小于0.14MB时，预测误差会大大增加，导致其MAPE值在三种方法中最大。另外，三种方法的MAPE随着GPU数量的增加而逐渐增加，这归因于在每次通信之前基于GPU数量的数据分块机制。GPU数目越多，每个数据块的数据量越小，而单链路模型在数据量较小时容易产生较大的MAPE，从而使得基于\autoref{tab:multi_gpu_broadcast_refined}的多GPU通信时间预测模型的MAPE增加。在分布式深度学习中，为了降低通信开销，每个节点的邻居数目通常不会过多，因此PreTopo可以保持较高的预测精度。
 
 \begin{figure}[!htbp]
     \centering
@@ -646,28 +671,28 @@
 
 3）一般拓扑上的通信时间预测
 
-进一步地，对PreTopo在不同拓扑上的通信时间预测结果进行评估。本节选择\autoref{fig:Fig2-13} 所示的五种拓扑作为待预测的拓扑结构，其中前四种拓扑基于All-Reduce架构，最后一种拓扑基于Gossip架构。实验结果如\autoref{fig:Fig2-14}所示，其中MAPE的值为不同通信数据量的预测结果的平均值。可以看到，PreTopo在五种拓扑上的MAPE都小于15\%，优于基于Sigmoid的模型和固定带宽的模型。由此验证了PreTopo对于预测一般拓扑上的通信时间的有效性。
+进一步地，对PreTopo在\autoref{fig:Fig2-13}所示的五种拓扑上的通信时间预测结果进行评估。实验结果如\autoref{fig:Fig2-14}所示，其中MAPE的值为不同通信数据量的预测结果的平均值。可以看到，PreTopo在五种拓扑上的MAPE都小于15\%，优于基于Sigmoid的模型和固定带宽的模型。由此验证了PreTopo对于预测一般拓扑上的通信时间的有效性。
 
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[环形拓扑]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-1-different-topo.pdf}
-    }
-    \subfigure[树形拓扑]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-2-different-topo.pdf}
-    }
-    \subfigure[分层拓扑]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-3-different-topo.pdf}
-    }
-    \subfigure[2D-Torus]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-4-different-topo.pdf}
-    }
-    \subfigure[指数拓扑]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-5-different-topo.pdf}
-    }
-    \caption{基于$broadcast$实现的不同通信拓扑}
-    \label{fig:Fig2-13}
-\end{figure}
+% \begin{figure}[!htbp]
+%     \centering
+%     \subfigure[环形拓扑]{
+%         \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-1-different-topo.pdf}
+%     }
+%     \subfigure[树形拓扑]{
+%         \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-2-different-topo.pdf}
+%     }
+%     \subfigure[分层拓扑]{
+%         \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-3-different-topo.pdf}
+%     }
+%     \subfigure[2D-Torus]{
+%         \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-4-different-topo.pdf}
+%     }
+%     \subfigure[指数拓扑]{
+%         \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-5-different-topo.pdf}
+%     }
+%     \caption{基于$broadcast$实现的不同通信拓扑}
+%     \label{fig:Fig2-13}
+% \end{figure}
 
 \begin{figure}[!htbp]
     \centering

@@ -30,7 +30,7 @@
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.55\linewidth]{figure/chapter3/fig3-1-LA-procedure.pdf}
+    \includegraphics[width=0.5\linewidth]{figure/chapter3/fig3-1-LA-procedure.pdf}
     \caption{\label{fig:Fig3-1}线性平均一致问题的通信过程}
 \end{figure}
 
@@ -326,12 +326,18 @@
 % 综上所述，同构带宽场景下的参数同步拓扑优化问题考虑了对边的数目的约束，以设计稀疏的拓扑结构；而异构带宽场景下，通过对带宽分配策略进行设计，以保证每条边上带宽的最优分配，进而分别引入了对节点度的约束、对服务器内部链路上边的数目的约束和对服务器间交换机端口上边的数目的约束
 
 \section{参数同步拓扑优化问题求解框架}
+为了求解上一节中描述的参数同步拓扑优化问题，本节提出了如\autoref{fig:Fig3-0}所示的求解框架。将四种场景下的优化问题进行适当变换后，提出定制化的ADMM算法对优化问题进行求解，本节将求解得到的参数同步拓扑称为T-ADMM（Topology Based on ADMM）。进一步地，基于模拟退火算法生成拓扑结构，并将生成的拓扑结构作为ADMM算法求解节点带宽异构和服务器间交换机端口带宽异构场景下的优化问题的初始拓扑，以改进这两种场景下的优化问题求解结果，本节将改进的拓扑求解结果称为T-SA-ADMM（Topology Based on SA and ADMM）。下面分别介绍基于ADMM的拓扑优化问题求解方法和基于模拟退火算法的拓扑生成方法。
 
-\textcolor{red}{插入一个求解框架图，同构带宽场景、异构带宽场景，指到下面用ADMM算法求解，然后基于SA进行改进}
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/framework.pdf}
+    \caption{\label{fig:Fig3-0}参数同步拓扑优化问题求解框架}
+\end{figure}
 
 \subsection{基于ADMM的拓扑优化问题求解方法}
 
-本节使用交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）求解\autoref{section3-2}中描述的参数同步拓扑优化问题。ADMM算法主要用于解决约束优化问题，该算法的基本思想是通过将原始问题分解为子问题，并通过交替的方式逐步求解这些子问题进而求解整个问题。下面首先介绍ADMM算法求解基于基数约束的优化问题（CCOP）的基本原理，然后将本章研究的不同场景下的参数同步拓扑优化问题进行适当变换，并提出用于求解这些问题的定制化的ADMM算法。
+% 本节使用交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）求解\autoref{section3-2}中描述的参数同步拓扑优化问题。
+交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）主要用于解决约束优化问题，该方法的基本思想是通过将原始问题分解为子问题，并通过交替的方式逐步求解这些子问题进而求解整个问题。下面首先介绍ADMM算法求解基于基数约束的优化问题（CCOP）的基本原理，然后将本章研究的不同场景下的参数同步拓扑优化问题进行适当变换，并提出用于求解这些问题的定制化的ADMM算法。
 
 \textbf{1. 基于ADMM求解CCOP的原理}
 
@@ -716,7 +722,7 @@
 % \end{minipage}
 \end{center}
 
-\subsection{基于模拟退火的拓扑生成方法}
+\subsection{基于模拟退火算法的拓扑生成方法}
 
 由于\autoref{section3-2}中描述的参数同步拓扑优化问题是非凸问题，因此使用\autoref{Algorithm-T-ADMM}求解得到的结果取决于初始值的选取，特别是当节点数目较大时，随机给定\autoref{Algorithm-T-ADMM}的初始值容易使算法陷入局部最优解，从而无法得到一致性速度更快的参数同步拓扑。根据Koibuchi等人\cite{koibuchi2016optical}对高性能计算系统中网络拓扑的介绍，具有较小平均最短路径长度（Average Shortest Path Length，简称ASPL）的网络拓扑通常能够实现较低的延时，从而使系统具有更好的性能。平均最短路径长度指拓扑中所有节点之间最短路径长度的平均值，\autoref{fig:Fig3-3}是平均最短路径长度的一个示例。相较于随机初始化的拓扑结构，具有较小ASPL的拓扑作为初始拓扑可以在一定程度上帮助\autoref{Algorithm-T-ADMM}优化出一致性速度更快的参数同步拓扑。
 %是异构带宽场景下的优化问题，由于引入了离散变量，

@@ -1,4 +1,4 @@
-\chapter{面向一般拓扑的训练时间预测}
+\chapter{面向一般拓扑的分布式训练时间预测}
 \section{引言}
 
 在基于数据并行的分布式深度学习任务的训练过程中，每个计算节点（GPU）依次执行本地神经网络模型的计算和与其他节点的数据通信，这两部分共同决定了分布式训练所需的时间。通常情况下，加速比和扩展效率被用来衡量分布式训练的加速效果，其中加速比指同一深度学习任务在单机训练和分布式训练时所需时间的比值，扩展效率则是指加速比和节点数目的比值，也用于表示计算资源的利用率。随着节点数目的增加，通信时间在整体训练时间中的占比逐渐变大。当节点数目达到一定规模时，通信将成为性能瓶颈，从而导致加速比和扩展效率变差，资源利用率严重降低，这与使用分布式训练的初衷背道而驰。因此，需要一种工具帮助分析分布式训练的性能瓶颈，并确定合适的节点数目，在保证加速比的同时尽可能节约计算资源。
@@ -48,7 +48,7 @@
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter2/fig2-2-cnn-architecture.png}
+    \includegraphics[width=0.9\linewidth]{figure/chapter2/fig2-2-cnn-architecture.pdf}
     \caption{\label{fig:Fig2-2}卷积神经网络结构示意图}
 \end{figure}
 
@@ -69,9 +69,9 @@
 \setlength{\tabcolsep}{3mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
 \scalebox{0.9}{
     \begin{tabular}{llp{11cm}}
-      \hline
+        \toprule[2pt]
       特征          & 符号 & 描述 \\ 
-      \hline
+      \midrule[1pt]
       输入尺寸        &  $m_{in}$      &  卷积层/池化层/批归一化层的输入特征图的宽度和高度。 \\
       输出尺寸       & $m_{out}$      &  卷积层/池化层/批归一化层的输出特征图的宽度和高度。 \\
       批大小               &     $b$        &  一次迭代训练的样本数。 \\
@@ -91,7 +91,7 @@
       GPU浮点数运算性能 &      -   &  GPU每秒能够执行的浮点运算次数（FLOPS）。  \\
       GPU内核数          &        -       &  GPU中的处理单元数量。 \\
       GPU时钟频率          &       -        &  GPU的处理器核心运行时的时钟速率，单位Hz。   \\
-      \hline
+      \bottomrule[2pt]
     %   \hline
     %   Communication Data Size    &        -     &  The size of data communicated between GPUs.\\
     %   Communication Bandwidth    &       -     &  The maximum number of floating point numbers that can be transmitted per second. \\
@@ -388,30 +388,30 @@
     \label{tab:sample-convolutional-layer}
     \setlength{\tabcolsep}{7.5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
     \scalebox{0.9}{
-        \begin{tabular}{|c|c|}
-          \hline
+        \begin{tabular}{cc}
+          \toprule[2pt]
           特征          & 采样范围\\ 
-          \hline
+          \midrule[1pt]
           输入尺寸         &  1\~{}256 \\
-          \hline
+        %   \hline
           批大小          &  1\~{}256 \\
-          \hline
+        %   \hline
           输入通道数       &  1\~{}1024  \\
-          \hline
+        %   \hline
           输出通道数       &  1\~{}1024 \\
-          \hline
+        %   \hline
           卷积核大小       &  1\~{}7          \\
-          \hline
+        %   \hline
           边界填充大小     &  0\~{}3 \\
-          \hline
+        %   \hline
           卷积核步幅大小   &  1\~{}5            \\
-          \hline
+        %   \hline
           是否使用偏置项          & True/False            \\
-          \hline
+        %   \hline
           激活函数类型    &  none/relu/tanh/sigmiod           \\
-          \hline
+        %   \hline
           优化器类型       & SGD/Adadelta/Adagrad/Adam/RMSProp             \\
-          \hline
+          \bottomrule[2pt]
         \end{tabular}
     }}
 \end{table}
@@ -422,24 +422,24 @@
     \label{tab:sample-pooling-layer}
     \setlength{\tabcolsep}{5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
     \scalebox{0.9}{
-        \begin{tabular}{|c|c|}
-          \hline
+        \begin{tabular}{cc}
+            \toprule[2pt]
           特征          & 采样范围\\ 
-          \hline
+          \midrule[1pt]
           输入尺寸         &  1\~{}256 \\
-          \hline
+        %   \hline
           批大小          &  1\~{}256 \\
-          \hline
+        %   \hline
           通道数       &  1\~{}1024  \\
-          \hline
+        %   \hline
           池化核大小       &  1\~{}7          \\
-          \hline
+        %   \hline
           边界填充大小     &  0\~{}3 \\
-          \hline
+        %   \hline
           池化核步幅大小   &  1\~{}5            \\
-          \hline
+        %   \hline
           池化类型       & MaxPool2d/MaxPool1d/AvgPool2d/AvgPool1d             \\
-          \hline
+          \bottomrule[2pt]
         \end{tabular}
     }}
 \end{table}
@@ -450,49 +450,56 @@
     \label{tab:sample-fully-connected-layer}
     \setlength{\tabcolsep}{7.5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
     \scalebox{0.9}{
-        \begin{tabular}{|c|c|}
-          \hline
+        \begin{tabular}{cc}
+            \toprule[2pt]
           特征          & 采样范围\\ 
-          \hline
+          \midrule[1pt]
           批大小         &  1\~{}256 \\
-          \hline
+        %   \hline
           输入维度         &  1\~{}4096 \\
-          \hline
+        %   \hline
           输出维度          &  1\~{}4096 \\
-          \hline
+        %   \hline
           是否使用偏置项     &  True/False \\
-          \hline
+        %   \hline
           激活函数类型       &  none/relu/tanh/sigmoid            \\
-          \hline
+        %   \hline
           优化器类型       & SGD/Adadelta/Adagrad/Adam/RMSProp             \\
-          \hline
+          \bottomrule[2pt]
         \end{tabular}
     }}
 \end{table}
 
-\begin{table}[!htbp]
+\begin{table}[t]
     \center
     \caption{批归一化层特征空间的采样范围}
     \label{tab:sample-bn-layer}
     \setlength{\tabcolsep}{8mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
     \scalebox{0.9}{
-        \begin{tabular}{|c|c|}
-            \hline
+        \begin{tabular}{cc}
+            \toprule[2pt]
+          特征          & 采样范围\\ 
+          \midrule[1pt]
             输入尺寸         &  1\~{}256 \\
-            \hline
+            % \hline
             批大小          &  1\~{}256 \\
-            \hline
+            % \hline
             通道数       &  1\~{}1024  \\
-          \hline
+        %   \hline
           激活函数类型    &  none/relu/tanh/sigmiod           \\
-          \hline
+        %   \hline
           优化器类型       & SGD/Adadelta/Adagrad/Adam/RMSProp             \\
-          \hline
+          \bottomrule[2pt]
         \end{tabular}
     }}
 \end{table}
 
-\begin{figure}[!htbp]
+
+\subsection{实验设置与评价指标}
+
+在训练多层感知器模型时，优化器使用Adam，批大小设置为128，初始学习率设置为0.1，并分别在第40和80个训练周期时将学习率缩小10倍。本节选择VGG-16\cite{simonyan2014very}，ResNet-50\cite{he2016deep}，ResNet-101\cite{he2016deep}和GoogLeNet\cite{szegedy2015going}作为待预测的卷积神经网络，其中VGG-16由标准的卷积层、池化层和全连接堆叠而成，ResNet-50和ResNet-101由残差块组成，GoogLeNet由Inception模块组成。这些神经网络的基本组成单元都是本章所考虑的卷积层、池化层、全连接层和批归一化层。另外，本节选择如\autoref{fig:Fig2-13}所示的五种拓扑作为待预测的拓扑结构，分别是环形拓扑\cite{nedic2018network}、树形拓扑\cite{iandola2016firecaffe}、分层拓扑\cite{trevisan2017lecture}、2D-Torus\cite{tanakaimagenet}和指数拓扑\cite{ying2021exponential}，并且在测试和预测时，前四种拓扑结构基于All-Reduce架构，指数拓扑则基于Gossip架构。
+
+\begin{figure}[h]
     \centering
     \subfigure[环形拓扑]{
         \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-1-different-topo.pdf}
@@ -512,11 +519,6 @@
     \caption{基于$broadcast$实现的不同通信拓扑}
     \label{fig:Fig2-13}
 \end{figure}
-
-
-\subsection{实验设置与评价指标}
-
-在训练多层感知器模型时，优化器使用Adam，批大小设置为128，初始学习率设置为0.1，并分别在第40和80个训练周期时将学习率缩小10倍。本节选择VGG-16\cite{simonyan2014very}，ResNet-50\cite{he2016deep}，ResNet-101\cite{he2016deep}和GoogLeNet\cite{szegedy2015going}作为待预测的卷积神经网络，其中VGG-16由标准的卷积层、池化层和全连接堆叠而成，ResNet-50和ResNet-101由残差块组成，GoogLeNet由Inception模块组成。这些神经网络的基本组成单元都是本章所考虑的卷积层、池化层、全连接层和批归一化层。另外，本节选择如\autoref{fig:Fig2-13}所示的五种拓扑作为待预测的拓扑结构，分别是环形拓扑\cite{nedic2018network}、树形拓扑\cite{iandola2016firecaffe}、分层拓扑\cite{trevisan2017lecture}、2D-Torus\cite{tanakaimagenet}和指数拓扑\cite{ying2021exponential}，并且在测试和预测时，前四种拓扑结构基于All-Reduce架构，指数拓扑则基于Gossip架构。
 
 % 下面简单介绍一下五种拓扑上的通信机制：
 % \begin{itemize}

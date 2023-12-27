@@ -365,7 +365,7 @@ BA-QDSGT算法的另一个比较重要的特点是保证了梯度跟踪方法的
     \caption{\label{fig:Fig4-8}$r=16$对应的参数同步拓扑上有梯度跟踪的算法的实验结果}
 \end{figure}
 
-下面在两种参数同步拓扑上验证本章提出的BA-QDSGD算法和BA-QDSGT算法对分布式深度学习训练效率的提升。\autoref{fig:Fig4-9}和\autoref{fig:Fig4-10}为不同算法的测试准确率随时间的变化。可以看到，量化比特数越低，BA-QDSGD算法和BA-QDSGT算法的收敛速度越快，并且BA-QDSGD算法和BA-QDSGT算法的运行时间分别与相同量化比特数的Choco-SGD算法和C-GT算法的运行时间接近，这说明本章提出的带宽自适应策略对算法运行时间的影响不大。另外，从图中可以发现，当量化比特数为2时，BA-QDSGD算法和BA-QDSGT算法在相应的对比实验中均能够最快达到较高的测试准确率，高于量化比特数为2时的Choco-SGD算法和C-GT算法的测试准确率。进一步地，为了定量评估BA-QDSGD算法和BA-QDSGT算法的性能，\autoref{tab:SGD-accuracy-time}和\autoref{tab:SGT-accuracy-time}统计了各个算法的测试准确率达到85\%所需的时间。可以看到，当量化比特数相同时，BA-QDSGD算法和BA-QDSGT算法的测试准确率达到85\%所需的时间分别少于Choco-SGD算法和C-GT算法，并且在每组实验中，BA-QDSGD算法和BA-QDSGT算法都是在量化比特数为4时能够最快达到85\%的测试准确率，这是因为量化比特数为2时，模型精度有所下降，而量化比特数为8时，通信时间有所增加，从而导致算法性能受到影响。另外BA-QDSGD算法所需的时间少于BA-QDSGT算法，原因在于本节对两种算法使用相同的步长调整策略，而BA-QDSGT算法中需要额外对与梯度相关的辅助变量进行量化和通信，从而增加了算法的训练时间。综上所述，本章提出的BA-QDSGD算法和BA-QDSGT算法能够在减少训练时间的同时，保证模型的精度，从而有效地提高分布式深度学习的训练效率。
+下面在两种参数同步拓扑上验证本章提出的BA-QDSGD算法和BA-QDSGT算法对分布式深度学习训练效率的提升。\autoref{fig:Fig4-9}和\autoref{fig:Fig4-10}为不同算法的测试准确率随时间的变化。可以看到，量化比特数越低，BA-QDSGD算法和BA-QDSGT算法的收敛速度越快，并且BA-QDSGD算法和BA-QDSGT算法的运行时间分别与相同量化比特数的Choco-SGD算法和C-GT算法的运行时间接近，这说明本章提出的带宽自适应策略对算法运行时间的影响不大。另外，从图中可以发现，当量化比特数为2时，BA-QDSGD算法和BA-QDSGT算法在相应的对比实验中均能够最快达到较高的测试准确率，高于量化比特数为2时的Choco-SGD算法和C-GT算法的测试准确率。进一步地，为了定量评估BA-QDSGD算法和BA-QDSGT算法的性能，\autoref{tab:SGD-accuracy-time}和\autoref{tab:SGT-accuracy-time}统计了各个算法的测试准确率达到85\%所需的时间。当四种量化算法不对通信数据进行量化时，则分别退化为对应的DSGD算法和DSGT算法。从表中可以看到，当量化比特数相同时，BA-QDSGD算法和BA-QDSGT算法的测试准确率达到85\%所需的时间分别少于Choco-SGD算法和C-GT算法，并且在每组实验中，BA-QDSGD算法和BA-QDSGT算法都是在量化比特数为4时能够最快达到85\%的测试准确率，这是因为量化比特数为2时，模型精度有所下降，而量化比特数为8时，通信时间有所增加，从而导致算法性能受到影响。另外BA-QDSGD算法所需的时间少于BA-QDSGT算法，原因在于本节对两种算法使用相同的步长调整策略，而BA-QDSGT算法中需要额外对与梯度相关的辅助变量进行量化和通信，从而增加了算法的训练时间。综上所述，本章提出的BA-QDSGD算法和BA-QDSGT算法能够在减少训练时间的同时，保证模型的精度，从而有效地提高分布式深度学习的训练效率。
 
 \begin{figure}[!htbp]
     \centering
@@ -398,10 +398,10 @@ BA-QDSGT算法的另一个比较重要的特点是保证了梯度跟踪方法的
         \hline
         \multirow{2}{*}{\begin{tabular}[c]{@{}c@{}}量化比特数\end{tabular}} & \multicolumn{2}{c}{$r=9$} &  & \multicolumn{2}{c}{$r=16$} \\ \cline{2-3} \cline{5-6} 
         & Choco-SGD  & BA-QDSGD         &  & Choco-SGD    & BA-QDSGD          \\ \hline
-        不量化 (DSGD)  & 2546   & 2546  &  & 2636     & 2636   \\
-        2 & -   & \textbf{2018}  &  & -     & \textbf{2080}   \\
-        4  & 2157   & \textbf{1632}  &  & 2264     & \textbf{2015}   \\
-        8  & 1852   & \textbf{1794}  &  & 2409     & \textbf{2242}   \\ \hline
+        不量化 (DSGD)  & 763.8   & 763.8  &  & 790.9     & 790.9   \\
+        2 & -   & \textbf{605.4}  &  & -     & \textbf{624}   \\
+        4  & 647.1   & \textbf{489.6}  &  & 679.2     & \textbf{604.5}   \\
+        8  & 555.7   & \textbf{538.2}  &  & 722.7     & \textbf{672.6}   \\ \hline
         \end{tabular}
     } %注意这里还有一个半括号
 \end{table}
@@ -415,10 +415,10 @@ BA-QDSGT算法的另一个比较重要的特点是保证了梯度跟踪方法的
         \hline
         \multirow{2}{*}{\begin{tabular}[c]{@{}c@{}}量化比特数\end{tabular}} & \multicolumn{2}{c}{$r=9$} &  & \multicolumn{2}{c}{$r=16$} \\ \cline{2-3} \cline{5-6} 
         & C-GT  & BA-QDSGT         &  & C-GT    & BA-QDSGT          \\ \hline
-        不量化 (DSGT)  & 4115   & 4115  &  & 6086     & 6086   \\
-        2 & -   & \textbf{3221}  &  & -     & \textbf{3096}   \\
-        4  & 5334   & \textbf{3216}  &  & 3607     & \textbf{2977}   \\
-        8  & 4268   & \textbf{3749}  &  & 4187     & \textbf{3728}   \\ \hline
+        不量化 (DSGT)  & 1234.5   & 1234.5  &  & 1825.8     & 1825.8   \\
+        2 & -   & \textbf{966.3}  &  & -     & \textbf{928.8}   \\
+        4  & 1600.2   & \textbf{964.8}  &  & 1082.1     & \textbf{1028.6}   \\
+        8  & 1280.4   & \textbf{1124.7}  &  & 1256.3     & \textbf{1118.4}   \\ \hline
         \end{tabular}
     } %注意这里还有一个半括号
 \end{table}

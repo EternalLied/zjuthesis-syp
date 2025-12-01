@@ -1,4 +1,4 @@
-\chapter{面向一般拓扑的分布式训练时间预测}
+\chapter{集合通信算法优化}
 \section{引言}
 
 在基于数据并行的分布式深度学习任务的训练过程中，每个计算节点（GPU）依次执行本地神经网络模型的计算和与其他节点的数据通信，这两部分共同决定了分布式训练所需的时间。通常情况下，加速比和扩展效率被用来衡量分布式训练的加速效果，其中加速比指同一深度学习任务在单机训练和分布式训练时所需时间的比值，扩展效率则是指加速比和节点数目的比值，也用于表示计算资源的利用率。随着节点数目的增加，通信时间在整体训练时间中的占比逐渐变大。当节点数目达到一定规模时，通信将成为性能瓶颈，从而导致加速比和扩展效率变差，资源利用率严重降低，这与使用分布式训练的初衷背道而驰。因此，需要一种工具帮助分析分布式训练的性能瓶颈，并确定合适的节点数目，在保证加速比的同时尽可能节约计算资源。
@@ -12,151 +12,91 @@
 本章其他小结的内容安排如下：2.2节对分布式深度学习的训练时间进行建模并分析了影响训练时间的特征；2.3节介绍了本章提出的分布式深度学习训练时间预测方法的各部分；2.4节基于真实测量结果对本章所提出方法的效果进行验证分析；2.5节对本章内容进行了总结。
 
 \section{问题描述}
-\subsection{分布式深度学习训练时间建模}
 
-在深度学习中，数据集通常是以某个批量大小按批次输入到神经网络中进行训练的，因此训练时间$T$可以表示为每次迭代所需时间$T_{iter}$与总迭代次数$c_{iter}$的乘积：
-\begin{equation}
-    T=T_{iter}c_{iter},
-\end{equation}
-其中总迭代次数为处理整个数据集所需迭代次数（通常称为一个训练周期）与训练周期数的乘积。由于深度学习任务的训练通常采用固定的训练周期数，如100、200等，并且当批量大小给定时，一个训练周期的迭代次数也随之确定，因此预测分布式深度学习的训练时间通常指预测其一次迭代所需的训练时间。
+\subsection{集合通信算子}
 
-如\autoref{fig:Fig2-1}所示，基于数据并行的分布式训练的每次迭代由三个关键步骤组成。首先，每个节点执行一个数据拷贝过程。因为神经网络每次迭代训练一个批量的数据样本，该过程则是将每次迭代的样本从CPU的动态随机存取存储器（DRAM）拷贝到GPU的视频随机存取存储器（VRAM），从而用于GPU上模型的训练。然后，每个节点并行执行本地神经网络模型的前向传播、反向传播和模型参数更新过程。接下来，各节点之间交换更新后的模型参数，以实现参数同步。因此，分布式训练的迭代时间包括：（1）数据拷贝时间；（2）节点本地计算时间；（3）节点之间的通信时间。
+集合通信是在并行计算环境中多个进程或节点之间协调和交换数据的一类操作，在大模型场景下，是每个计算节点间同步和交换参数的操作，一个指定的集合通信算子确定了每个计算节点需要发送和接收的数据。常用集合通信算子如\autoref{fig:collective}所示。
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter2/fig2-1-training_step.pdf}
-    \caption{\label{fig:Fig2-1}分布式训练的执行流程}
+    \includegraphics[width=1\linewidth]{figure/chapter2/collective.pdf}
+    \caption{\label{fig:collective}集合通信算子示意图}
 \end{figure}
 
-根据上述训练过程，本文将分布式训练的迭代时间建模为如下数学表达形式：
-\begin{equation}
-    \label{tab:iter_time_fomula}
-    \begin{aligned}
-        &T_{iter}=T_{copy}+f(T_{comp},T_{comm}),\\
-        &T_{comp}:=\left( T_{comp}^{layer_1}(\boldsymbol{c}_{nn}^{layer_1},\boldsymbol{c}_{gpu}),...,T_{comp}^{layer_l}(\boldsymbol{c}_{nn}^{layer_l},\boldsymbol{c}_{gpu}) \right), \\
-        &T_{comm}:=\left( T_{comm}^{layer_1}(\boldsymbol{c}_{cluster}),...,T_{comm}^{layer_l}(\boldsymbol{c}_{cluster}) \right).
-    \end{aligned}
-\end{equation}
-其中$T_{copy}$是数据拷贝时间，$T_{comp}$和$T_{comm}$分别是各神经网络层的计算时间和通信时间的集合，$l$是神经网络的层数，$\boldsymbol{c}_{nn}^{layer_i}$是第$i$个神经网络层的特征，$\boldsymbol{c}_{gpu}$是GPU的硬件特征，$\boldsymbol{c}_{cluster}$是GPU集群的通信特征。在大多数深度学习框架中，为了充分利用计算资源和通信带宽并加快分布式训练的速度，通常将计算和通信并行执行\cite{pei2019iteration, lin2020topology, shi2018performance}，本章用$f$来表征这一并行关系。由于数据拷贝时间可以直接利用每个批量的数据样量除以CPU和GPU之间的通信带宽得到，并且该时间在每次迭代中通常保持不变，因此本章的主要目标是预测\autoref{tab:iter_time_fomula}中的$f(T_{comp},T_{comm})$。
+分布式训练中常用的集合通信算子有AllReduce、ReduceScatter、AllGather、AlltoAll等，其中AllReduce是最常用的算子，AllReduce算子将所有节点的数据进行规约（如求和、求平均等），并将结果分发到所有节点上。在分布式训练中，AllReduce通常用于同步各节点的模型参数或梯度，从而保证每个节点在每次迭代后都拥有一致的模型参数。AllReduce可以看作是ReduceScatter和AllGather两个算子的组合，首先通过ReduceScatter将所有节点的数据进行规约并分发到各节点上，然后通过AllGather将规约后的结果汇总到所有节点上。AllReduce的大部分算法实现也可以拆分成ReduceScatter和AllGather两部分，因此大部分经典研究都是针对AllReduce算子的。除此之外，随着大模型架构的发展，AlltoAll开始广泛应用于分布式训练场景中，如模型并行训练中不同节点间的特征交换和混合专家模型（Mixture of Experts，MOE）中的dispatch和combine操作等。
 
-\subsection{计算时间关键特征分析}
+\subsection{集合通信算算法}
+集合通信算法是指实现集合通信算子的具体方法，不同的算法在通信步骤、数据传输方式和节点间协调等方面有所不同。常见的集合通信算法包括环形算法、树形算法和层级算法等。这些算法通过优化数据传输路径和减少通信开销，提高了集合通信的效率和性能。在分布式训练中，选择合适的集合通信算法对于提高训练速度和资源利用率具有重要意义。
 
-分布式训练每次迭代的计算时间主要由神经网络结构和GPU的硬件性能决定。本章以近年来在图像领域广泛使用的卷积神经网络（Convolutional Neural Network，CNN）为例，分析了该类神经网络中常见的卷积层、池化层、全连接层和批归一化层的主要特征，并通过机理分析进行了特征扩充。由于大多数神经网络层的计算可以看作矩阵相乘，因此本章的分析和建模方法同样适用于其他基于矩阵相乘的神经网络层。
-%分析了该类神经网络中常见的卷积层、全连接层、池化层和批归一化层的主要特征
+Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的规约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，减少通信延迟。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
 
-卷积神经网络\cite{lecun2010convolutional}是一类在计算机视觉和模式识别领域取得显著成功的深度学习模型。其设计灵感源于生物学中对动物视觉系统的理解，通过层层堆叠的卷积层、池化层和全连接层，实现对输入数据的逐层抽象和表示学习。其大致结构如\autoref{fig:Fig2-2}所示。
+PairWise算法是一种常用的AlltoAll算子实现方法，它通过在每个通信步骤中让节点与另一个节点交换数据块，逐步完成所有节点间的数据交换。PairWise算法的优点在于其简单性和易于实现，但在大规模集群中可能会导致通信冲突和带宽浪费。为了提高AlltoAll的性能，现有研究提出了多种优化算法，如基于拓扑感知的调度算法和分层通信算法等，这些算法通过优化数据传输路径和减少通信冲突，提高了AlltoAll的效率。
 
-\begin{figure}[!htbp]   
+\subsection{物理拓扑}
+
+物理拓扑描述了计算节点之间的底层物理连接关系，可以由一组图给定。高性能计算集群系统的群物理拓扑中往往存在着明显的多级异构链路，链路信息包含了各链路的带宽以及时延等特性。图\autoref{fig:DGX1}给出了NVIDIA DGX-1系统的机内物理拓扑结构示意图。该系统包含8个计算节点，每个节点配备了8个NVIDIA V100 GPU。节点之间通过高速互连网络NVLink和PCIe进行连接。多个DGX-1系统可以通过以太网或InfiniBand等网络进行互连，形成更大规模的集群系统。通过Infiniband互连的124机DGX-1集群拓扑结构如图\autoref{fig:DGX1-cluster}所示。
+
+\begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.9\linewidth]{figure/chapter2/fig2-2-cnn-architecture.pdf}
-    \caption{\label{fig:Fig2-2}卷积神经网络结构示意图}
+    \subfigure[机内物理拓扑结构\label{fig:DGX1}]{
+        \includegraphics[width=0.45\linewidth]{figure/chapter2/DGX1.pdf}
+    }
+    \subfigure[124机集群物理拓扑结构\label{fig:DGX1-cluster}]{
+        \includegraphics[width=0.45\linewidth]{figure/chapter2/DGX1-cluster.pdf}
+    }
+    \caption{DGX-1系统物理拓扑结构示意图\cite{nvidia_dgx1_blog}}
+    \label{fig:DGX1-system}
 \end{figure}
 
-卷积层是卷积神经网络的核心组件之一，其主要作用是通过局部感受野内的权重共享卷积操作，从输入数据中提取特征。卷积操作本质上是一种线性图像滤波过程，在该过程中，首先选择具有特定规格大小的卷积核，卷积核的数量决定了卷积后产生的特征图的通道数量。随后，对特征图周围添加额外的像素值（padding）以避免边缘信息的丢失。接下来，卷积核以预定的步长对输入特征图进行从左到右、从上到下的扫描。在每次扫描中，卷积核上的数值与相应位置的图像像素值相乘，并将结果求和。最终，计算结果被映射到输出特征图上的对应位置，形成输出特征图。
+\subsection{时间扩展网络TEN}
 
-池化层是卷积神经网络的另一核心组件，又被称为降采样层，其主要作用是通过使用池化核对卷积层输出的特征图进行下采样，从而降低特征图的维度，减少模型过拟合的风险。在池化操作中，池化核沿着输入数据滑动，将每个池化区域内的数值进行聚合，生成一个新的特征值，从而形成输出的池化特征图。最常见的池化操作有最大池化和平均池化两种。在最大池化中，每个池化区域的最大值被选为该区域池化后的特征采样值；而在平均池化中，池化区域的平均值被作为特征采样值。
+时间扩展网络TEN（Time-expanded Network）是一种用于表示动态网络的静态网络模型，通过在时间维度上扩展原始网络来捕捉网络中随时间变化的动态特性。在TEN中，原始网络中的每个节点在不同时间点上被复制为多个时间节点，这些时间节点之间通过有向边连接，表示节点在不同时间点上的状态变化。TEN可以用于分析和优化动态网络中的各种问题，如最短路径、最大流等。Won等人\cite{won2024tacos}在2023年将TEN引入集合通信领域。TEN可以用一组包含时序的有向无环图表示集合通信算子在系统物理拓扑上的具体通信过程，也就是具体的集合通信算法。
 
-全连接层是卷积神经网络的一个关键组件，用于整合和提取高阶特征，起到全局感知的作用。在全连接层中，每个神经元与前一层的所有神经元相连接，形成全连接的网络结构。这种结构特点使得全连接层的参数量在卷积神经网络中占很大比重。
+对于一个给定的物理拓扑，时间扩展网络TEN的构建方式是将其沿着时间维度进行展开，用不同时间下节点间的有向边表示时间序列中可用的节点间传输链路，\autoref{fig:ten}给出了一个简单物理拓扑转换为TEN的示例。
 
-批归一化层是卷积神经网络中的一项重要技术，其原理在于对每个批次的输入数据进行归一化处理，以加速网络的训练过程并提高模型的泛化性能。在批归一化中，每个特征通道的均值和方差被计算，并通过缩放和平移操作调整数据分布，使其保持在较稳定的范围内。
-
-此外，由于激活函数和优化器分别在卷积神经网络的前向传播和反向传播过程其中起到增强卷积神经网络的非线性表达能力和调整神经网络的权重的作用，这两个特征也被用于预测模型的建立。在考虑众多GPU硬件性能对计算时间的影响时，本文主要关注GPU内存大小、GPU内存带宽、GPU浮点数运算性能、GPU内核数和GPU时钟频率这几个特征。综上所述，影响卷积神经网络计算时间的基本特征如\autoref{tab:features-of-CNN}所示。
-
-\begin{table}[!htbp]
-\center
-\caption{影响卷积神经网络计算时间的基本特征}
-\label{tab:features-of-CNN}
-\setlength{\tabcolsep}{3mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-\scalebox{0.9}{
-    \begin{tabular}{llp{11cm}}
-        \toprule[2pt]
-      特征          & 符号 & 描述 \\ 
-      \midrule[1pt]
-      输入尺寸        &  $m_{in}$      &  卷积层/池化层/批归一化层的输入特征图的宽度和高度。 \\
-      输出尺寸       & $m_{out}$      &  卷积层/池化层/批归一化层的输出特征图的宽度和高度。 \\
-      批大小               &     $b$        &  一次迭代训练的样本数。 \\
-      输入通道数            &   $c_{in}$     &  卷积层/池化层/批归一化层的输入特征图的通道数。  \\
-      输出通道数           &     $c_{out}$  &  卷积层/池化层/批归一化层的输出特征图的通道数。 \\
-      卷积核/池化核大小              &     $k$        &  卷积层/池化层的卷积核/池化核的宽度和高度。          \\
-      边界填充大小                 &     $p$        &  在卷积层/池化层的输入特征图的周围添加的额外边界大小。 \\
-      步幅大小                  &     $s$        & 卷积核/池化核在水平和垂直方向上每次移动的距离            \\
-      池化层类型             &     -           &  池化层的类型，包括最大池化、平均池化等。            \\ 
-      偏置项                     &     $bias$          & 每个神经元的输出上添加的常数值。            \\
-      激活函数类型        &     -          &  激活函数的类型，包括ReLU、Sigmoid、Tanh等。           \\
-      优化器类型                &     -          & 模型参数更新使用的算法，包括随机梯度下降（SGD）、动量优化（Momentum）等。             \\
-      输入维度          &    $d_{in}$    &  全连接层的输入特征维度。           \\
-      输出维度         &    $d_{out}$   &  全连接层的输出数据维度。           \\
-      GPU内存大小               &    -           &  GPU的可用内存容量，也成为显存。           \\ 
-      GPU内存带宽     & -              &  GPU上的内存系统传输数据的速度，单位GB/s。 \\
-      GPU浮点数运算性能 &      -   &  GPU每秒能够执行的浮点运算次数（FLOPS）。  \\
-      GPU内核数          &        -       &  GPU中的处理单元数量。 \\
-      GPU时钟频率          &       -        &  GPU的处理器核心运行时的时钟速率，单位Hz。   \\
-      \bottomrule[2pt]
-    %   \hline
-    %   Communication Data Size    &        -     &  The size of data communicated between GPUs.\\
-    %   Communication Bandwidth    &       -     &  The maximum number of floating point numbers that can be transmitted per second. \\
-    %   Number of GPUs    &        -     &  The number of GPUs used for distributed training.\\
-    %   Communication Topology    &        -     &  The topology describes which neighbors each node can communicate with.\\
-    %   Consensus Protocol    &        -     &  Data exchange protocol used in distributed training.\\
-    %   Physical Link Type    &        -     &  Transmission path of data communicated between GPUs.\\
-    %   \hline
-    \end{tabular}
-}}
-\end{table}
-
-除了\autoref{tab:features-of-CNN}中展示的基本特征，本章还通过分析卷积神经网络的执行机理引入了一些影响计算时间的关键特征，以提高预测模型的精度。这些特征包括卷积核的内存占用量$mem_w$，卷积层输入数据的内存占用量$mem_{in}$和输出数据的内存占用量$mem_{out}$，卷积层的浮点数运算次数$ops_{conv}$以及全连接层的浮点数运算次数$ops_{fc}$。基于\autoref{tab:features_fomula}可以得到这些额外引入的关键特征：
-\begin{equation}
-    \label{tab:features_fomula}
-    \begin{aligned}
-        &mem_w=\begin{cases}
-            k^2c_{in}c_{out}+c_{out},&bias=1\\
-            k^2c_{in}c_{out},&bias=0\\
-        \end{cases},\\
-        &mem_{in}=bm_{in}^2c_{in}, \hspace{0.2in} mem_{out}=bm_{out}^2c_{out},\\
-        &m_{out}=\lfloor \frac{m_{in}+2p-k}{s} \rfloor +1,\\
-        &ops_{conv}=bm_{out}^2k^2c_{in}c_{out}, \hspace{0.2in} ops_{fc}=bd_{in}d_{out}.
-    \end{aligned}
-\end{equation}
-其中各个符号的定义可以在\autoref{tab:features-of-CNN}中找到。
-
-\subsection{通信时间关键特征分析} \label{section2-2-3}
-
-分布式训练每次迭代的通信时间主要由GPU集群的通信配置决定，包括通信数据量、节点（GPU）之间的通信带宽、节点的数目、集群拓扑结构、分布式训练架构和连接GPU的物理链路类型。下面具体分析这些因素对通信时间的影响。
-
-一般而言，分布式训练的通信时间随通信数据量的增加而增大。不过其变化关系并不是线性的，因为真实的通信带宽并不是固定且等于最大通信带宽的，而是会随着通信数据量变化。本章将真实的通信带宽称为实时吞吐量。如\autoref{fig:Fig2-3}所示，在实际测量中，实时吞吐量与通信数据量的对数之间呈现类似Sigmoid函数的关系。
-
-\begin{figure}[!htbp]   
+\begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter2/fig2-3-throughput.pdf}
-    \caption{\label{fig:Fig2-3}实时吞吐量随通信数据量的变化}
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/TEN.pdf}
+    \caption{\label{fig:ten}示例物理拓扑与对应时间扩展网络TEN示意图}
 \end{figure}
 
-节点数目对通信时间的影响取决于分布式训练架构和集群的拓扑结构。在参数服务器（Parameter Server，简称PS）架构中，每个工作者节点需要将数据发送给参数服务器节点，因此通信时间会随着工作者节点数目的增加而增大，进而导致参数服务器节的通信开销成为性能瓶颈。在全归约（All-Reduce）架构中，以Ring All-Reduce算法为例（算法细节在\autoref{subsection_2_3_3}中），随着节点数目的增加，数据传输时间将先增加然后趋于稳定，从而实现数据传输时间几乎不依赖于节点数目，但由于Ring All-Reduce的实现需要数据在各节点间依次传递，因此通信时延将随着节点数目线性增加。这里的通信时延指数据传输时间之外的通信时间，包括排队延迟、通信协议开销等。在去中心化的分布式（Gossip）架构中，由于每个节点只与邻居节点进行通信，所以通信时间与拓扑结构密切相关，具体而言，每次迭代的通信时间取决于拓扑中节点的最大度。并且通常情况下，节点数目越多，拓扑越稠密，通信时间越大。
+我们可以在TEN上直观地表示出集合通信算法的执行过程。\autoref{fig:ten-ring-allgather}给出了Ring AllGather算法的TEN表示。在该TEN中，每个节点在不同时间点上被复制为多个时间节点，表示节点在不同时间点上的状态变化。节点间的有向边表示节点间的数据传输过程，边上的色块表示传输的数据块，图中可以清晰地看到Ring AllGather算法中数据块的传输顺序和环状的传输路径。
 
-在GPU之间进行通信时，不同类型的物理链路会导致不同的通信带宽，进而影响通信时间。在本章中，主要考虑如\autoref{fig:Fig2-4}所示的标准服务器架构中常见的三种物理链路类型：PIX、NODE和SYS。其中PIX指挂载在同一个PCIe Bridge（Switch）上的两个GPU之间的通信链路，相当于图中的GPU1到GPU2；NODE指单个非一致性内存访问节点（NUMA node）内经过Host Bridge PCIe总线的通信链路，相当于图中的GPU1到GPU3；SYS指通过QPI（PCIe+QPI总线）跨NUMA node间GPU通信的链路，相当于图中的GPU1到GPU5。对于其他类型的链路，例如跨服务器的链路、NVLink等，本章的分析和建模方法也同样适用，但是由于用于实验测试的系统的限制，本章的介绍中不涵盖其他类型的物理链路。
-
-\begin{figure}[!htbp]   
+\begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/fig2-4-server_architecture.pdf}
-    \caption{\label{fig:Fig2-4}标准服务器架构}
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/TEN-Ring-AllGather.pdf}
+    \caption{\label{fig:ten-ring-allgather}Ring AllGather算法的TEN表示}
 \end{figure}
 
+\subsection{基于TEN的集合通信算法合成器：TACOS}
 
-\section{分布式深度学习训练时间预测方法}
+Won等人\cite{won2024tacos}提出了TACOS，其可以在无需人工指导或干预的情况下，自主合成网络拓扑上的集合通信算法。TACOS使用TEN表示将集合通信算法合成问题建模为数据块与链路的匹配问题，采用基于贪婪的启发式匹配方法，在约束下最大化链路与数据块的匹配数量。
+
+TACOS的求解原理较为简单，输入包含转换为TEN的物理拓扑，以及目标集合通信算子，其中目标集合通信算子通过初始前置条件和最终后置条件描述。前置条件表示当前时刻节点上目前有哪些可用的数据块，后置条件表示当前时刻节点上还需要收集哪些数据块。整个求解过程迭代运行，不断增加时间t，在每个时刻基于贪婪的启发方法匹配链路与后置条件所需的数据块，直到所有节点的后置条件完全满足。\autoref{fig:tacos}给出了示例非对称四节点物理拓扑上 AllGather算子的端到端合成过程。
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter2/TACOS.pdf}
+    \caption{\label{fig:tacos}示例非对称四节点物理拓扑上 AllGather算子的TACOS合成过程}
+\end{figure}
+
+TACOS可以高效地合成直连拓扑上的Allgather算子，并且适用于非对称异构的网络环境。然而TACOS算法存在两个严重的局限性：不直接支持交换机拓扑，尤其是多层交换机拓扑；不支持AlltoAll算子的合成。
+
+\section{交换机拓扑感知的通用集合通信算法合成器}
 \subsection{方法概述}
 
-本章提出了一种新的训练时间预测方法，将其称为面向一般拓扑的分布式深度学习训练时间预测（Training Time Prediction of Distributed Deep Learning over General Topology，PreTopo）。\autoref{fig:Fig2-5}为PreTopo的框架图，可以看到，PreTopo主要由三个部分组成：
+本章提出了一种新的集合通信算法合成方法，我们将其称为交换机拓扑感知的通用集合通信算法合成器（Fabric-Topology-Aware General Collective Algorithm Synthesizer，FTACAS）。\autoref{fig:Fig2-5}为FTACAS的框架图，FTACAS主要由以下三个部分组成：
 \begin{itemize}
-    \item 计算时间预测。由于神经网络的不同层和模块通过直接连接进行交互，同时保持计算和功能的独立性，因此PreTopo将神经网络模型分解为单个神经网络层的组合，逐层预测神经网络的计算时间。在预测模型的建立过程中，首先对每种类型的神经网络层的特征空间进行采样，然后根据采样的特征搭建单层神经网络并测试其计算时间。接下来使用\autoref{tab:features_fomula}对特征进行扩充，并将每种类型的神经网络层的特征和对应的测试时间作为基准测试数据集，用于训练特定的多层感知器模型（MLP）。最后使用这些多层感知器模型即可预测一个新的神经网络的计算时间。
-    \item 通信时间预测。首先分析实时吞吐量随通信数据量的变化并建立单链路通信时间预测模型。然后基于对分布式训练中常用的集合通信原语的执行机理的分析，结合单链路模型建立多GPU通信时间预测模型。最后通过分析在特定分布式训练架构上利用各种拓扑结构进行通信所需的通信次数以及每次参与通信的GPU集合，并利用已经建立的单链路模型和多GPU模型，建立适用于一般拓扑的通信时间预测模型。
-    \item 计算与通信的并行性分析。在得到各神经网络层的计算时间和通信时间之后，PreTopo为集群中的每个节点和每条边建立对应的操作队列和设备时间，并根据分布式训练的执行流程依次将每个计算操作和通信操作加入到其操作队列中，然后更新相应的设备时间。最后基于每个操作开始执行和结束执行的设备时间提取关键路径，进而预测分布式训练的迭代时间。
+    \item 
+    \item 
+    \item 
 \end{itemize}
-\autoref{Algorithm-PreTopo}总结了PreTopo的执行流程。
+\autoref{Algorithm-FTACAS}总结了FTACAS的执行流程。
 
 \begin{figure}[!htbp]   
     \centering
     \includegraphics[width=0.8\linewidth]{figure/chapter2/fig2-5-framework.pdf}
-    \caption{\label{fig:Fig2-5}PreTopo框架图}
+    \caption{\label{fig:Fig2-5}FTACAS框架图}
 \end{figure}
 
 \begin{center}

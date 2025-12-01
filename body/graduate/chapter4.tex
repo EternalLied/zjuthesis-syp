@@ -1,428 +1,1172 @@
-\chapter{带宽自适应的通信数据压缩}
+\chapter{去中心化架构下的通信拓扑优化}
 \section{引言}
-在分布式深度学习中，减少通信数据量是降低通信开销最直接的方式，可以在参数同步拓扑优化的基础上进一步减少通信时间，提高训练效率。目前用于减少通信数据量的主要手段是通信数据压缩，包括量化和稀疏化。由于数据压缩往往是有损压缩，会导致信息量的丢失，从而不可避免地影响模型精度，并且压缩程度越高，对模型精度的影响越大，甚至可能会导致模型无法收敛。为了降低压缩对模型精度的影响，一些现有的方法引入了差分压缩和压缩误差补偿等策略，然而压缩程度过高时模型精度还是会有所下降。另外现有的方法对不同节点采用相同的压缩程度，这使得在进行同步训练时，带宽不同的链路上通信时间不同，从而导致通信带宽较大的链路利用率较低，造成资源的浪费。
 
-针对上述问题，本章提出了带宽自适应的量化分布式随机梯度下降算法（BA-QDSG D）和带宽自适应的量化分布式随机梯度跟踪算法（BA-QDSGT）。首先，基于差分压缩和压缩误差补偿实现量化分布式随机梯度下降算法和量化分布式随机梯度跟踪算法。然后在此基础上引入带宽自适应策略，根据带宽矩阵调整每条边上通信数据的压缩程度，以降低某些带宽较高的边上的数据压缩误差，提高模型精度，同时提高通信资源的利用率。最后在Cifar10数据集上进行分布式深度学习实验，验证了本章提出的带宽自适应的通信数据压缩方法的有效性。
+在分析了分布式深度学习的性能瓶颈之后，优化性能瓶颈成为需要解决的关键问题，即优化分布式训练的通信过程，以缩短训练时间，提高训练效率。在分布式深度学习中，参数同步拓扑决定了哪些GPU之间可以进行通信，因而对训练时间有着重要的影响。具体而言，参数同步拓扑从两个方面影响分布式深度学习的训练时间。一方面，参数同步拓扑的度决定了每次迭代所需的通信时间，此处拓扑的度指拓扑中节点的邻居数。在基于去中心化的分布式（Gossip）架构的同步算法中，各节点同时与邻居节点进行通信，当各节点的可用带宽相同时，邻居数目最多的节点的通信时间即为每次迭代所需的通信时间。另一方面，参数同步拓扑的权重矩阵和连通性决定了一致性的速度，进而影响分布式训练的迭代复杂度。在数据并行的分布式训练中，由于每个节点利用不同的本地数据集训练模型，因此各节点的模型参数不同。为了实现与单机训练相同的效果，需要对参数同步拓扑的权重矩阵进行设计以保证模型参数能够收敛到一致，并且收敛的速度取决于权重矩阵的选取。另外，拓扑的连通性决定了数据的融合速度，因此一致性速度也取决于拓扑的连通性。通常情况下，一致性速度越快，迭代复杂度越低，即算法收敛所需的迭代次数越少。为了缩短分布式深度学习的训练时间，需要在减少每次迭代所需通信时间的同时，尽可能地加快一致性速度，因此研究参数同步拓扑的优化至关重要。
 
-本章其他小结的内容安排如下：4.2节介绍了分布式深度学习中两种经典的基于去中心化架构的算法，分布式随机梯度下降算法（DSGD）和分布式随机梯度跟踪算法（DSGT）；4.3节介绍了本章采用的量化策略并提出了带宽自适应的量化分布式训练算法；4.4节基于Cifar10数据集上的分布式深度学习实验对提出的算法进行验证分析；4.5节对本章内容进行了总结。
+一般而言，参数同步拓扑对每次迭代所需通信时间和一致性速度的作用相反。即在稀疏的拓扑中，节点的度较低而连通性较差，使得每次迭代的通信时间较短，但是一致性速度较慢，反之同理。因此，在参数同步拓扑的设计时，需要权衡对二者的影响，这使得设计高效的参数同步拓扑的难度大大增加。在现有的关于参数同步拓扑设计的方法中，大多数采用直接设计的方式得到参数同步拓扑，无法保证其权重矩阵的最优性，而基于优化问题求解的方法往往通过简化优化目标或求解过程来得到一个局部空间内的最优解，并且优化问题的设计存在不适用于分布式深度学习场景和没有考虑通信开销的问题。
 
-\section{分布式训练算法}
-\subsection{分布式随机梯度下降算法} \label{subsection-4-2-1}
-分布式随机梯度下降算法（Distributed Stochastic Gradient Descent，简称DSGD）是最早提出的基于去中心化的分布式（Gossip）架构的优化算法，该算法是随机梯度下降算法（Stochastic Gradient Descent，简称SGD）的一种变体，旨在通过将计算任务分布到多个计算节点或设备上来提高训练效率。在该算法中，节点只对参数进行通信，并利用本地随机梯度对融合后的参数进行更新。正是由于该算法原理简单，并且拥有可以媲美集中式算法的性能而被广泛研究。
+因此，针对上述问题，同时考虑到近年来对基于Gossip架构的分布式训练算法的广泛研究以及Gossip架构上拓扑设计的灵活性，本章基于Gossip架构提出了一种面向高效通信的参数同步拓扑优化方法，实现同时优化拓扑结构和权重矩阵。首先，以拓扑的一致性速度为优化目标，分别对同构带宽场景和异构带宽场景下的参数同步拓扑优化问题进行设计。然后提出基于ADMM算法和模拟退火算法的优化问题求解框架，其中基于模拟退火算法生成的拓扑结构作为ADMM算法求解优化问题的初始拓扑。最后，将求解得到的参数同步拓扑分别应用到线性平均一致问题和分布式深度学习中，以验证本章提出方法的有效性。
 
-DSGD算法的实现过程可以简单地描述为三个步骤：1）随机采样本地数据计算梯度；2）通信并融合模型参数；3）本地随机梯度搜索。其中本地随机梯度搜索是在模型参数融合之后进行的，当然也可以在模型参数融合之前进行本地随机梯度搜索，本章仅研究前一种算法实现。根据上述实现过程，DSGD算法的原理可以表示为如下形式：
+本章其他小结的内容安排如下：3.2节介绍了典型的线性平均一致问题并分别描述了同构带宽和异构带宽场景下的拓扑优化问题；3.3节介绍了本章提出的参数同步拓扑优化问题求解框架；3.4节通过不同场景下的实验对本章所提出方法的有效性进行验证分析；3.5节对本章内容进行了总结。
+
+\section{问题描述}\label{section3-2}
+\subsection{典型线性平均一致问题} \label{section3-2-1}
+
+给定一个由$n$个节点和$e$条边组成的拓扑图$\mathcal{G} \left( \mathcal{N} ,\mathcal{E} \right) $，其节点集为$\mathcal{N}$，边集为$\mathcal{E}$，其中每条边$\left\{ i,j \right\} \in \mathcal{E}$是无向边，每个节点的邻居由$\mathcal{N} _i=\left\{ j|\left\{ i,j \right\} \in \mathcal{E} \right\}$表示。拓扑中的每个节点维持一个初始数据$\boldsymbol{x}_{i,0} \in \mathbb{R}^p$（行向量，本章中除特别强调为行向量的变量，其余均为列向量），例如神经网络的模型参数，并且拓扑中的每个节点可以和邻居节点进行通信。
+
+线性平均一致是在上述给定条件下，通过\autoref{tab:LA_problem_node}的迭代过程使得每个节点的数据最终都收敛到所有节点初始数据的平均值$\frac{1}{n}\sum_{i=1}^n{\boldsymbol{x}_{i,0}}$：
 \begin{equation}
-    \label{tab:DSGD-equation}
+    \label{tab:LA_problem_node}
+    \boldsymbol{x}_{i,k+1} =W_{ii}\boldsymbol{x}_{i,k} +\sum_{j\in \mathcal{N} _i}{W_{ij}\boldsymbol{x}_{j,k}},\ \ \ i=1,...,n,
+\end{equation}
+其中$k=0,1,2,...$是离散时间序列，表示迭代次数，$W_{ij}$是节点$i$和节点$j$之间的边$\left\{ i,j \right\}$的权重，当$j\notin \mathcal{N} _i$时，$W_{ij}$为0。令$\boldsymbol{x}_k =\left( \boldsymbol{x}_{1,k} ,...,\boldsymbol{x}_{n,k} \right)^T$表示由$n$个节点的数据组成的矩阵，则\autoref{tab:LA_problem_node}可以重新表述为：
+\begin{equation}
+    \label{tab:LA_problem_nodes}
     \begin{aligned}
-        \boldsymbol{x}_{k+1} =W\boldsymbol{x}_k -\gamma \nabla f\left( \boldsymbol{x}_k \right),
+        \boldsymbol{x}_{k+1} =W\boldsymbol{x}_k , \ W\in \mathcal{S},
     \end{aligned}
 \end{equation}
-其中$\boldsymbol{x}_k =\left( \boldsymbol{x}_{1,k} ,...,\boldsymbol{x}_{n,k} \right) ^T$，$\nabla f\left( \boldsymbol{x}_k \right) =\left( \nabla f_1\left( \boldsymbol{x}_{1,k} \right) ,...,\nabla f_n\left( \boldsymbol{x}_{n,k} \right) \right) ^T$，$\boldsymbol{x}_{i,k} $是节点$i$在第$k$次迭代的模型参数，$f_i\left( \cdot \right) $是节点$i$的本地损失函数，$\nabla f_i\left( \boldsymbol{x}_{i,k} \right) $是节点$i$在第$k$次迭代的本地随机梯度，$W\in \mathbb{R} ^{n\times n}$是权重矩阵，$\gamma$是步长。
+其中$W$是权重矩阵，$\mathcal{S} =\left\{ W\in \mathbb{R} ^{n\times n}|W_{ij}=0 \  \mathrm{if} \left\{ i,j \right\} \notin \mathcal{E} \ \mathrm{and} \  i\ne j \right\}$是底层拓扑结构对权重矩阵的约束。\autoref{tab:LA_problem_nodes}与经典的分布式梯度下降算法DGD\cite{nedic2009distributed}（算法细节见{subsection-4-2-1}）只相差一个梯度搜索项，因此可以看作是DGD的通信过程，\autoref{fig:Fig3-1}展示了5个节点上的线性平均一致问题的一次迭代的通信过程。
 
-由于Gossip架构的拓扑结构的约束，网络中的每个节点仅有本地数据以及部分邻居的信息，因此需要一个有效的通信机制来保障节点的本地信息能够在整个网络中流通，从而使各节点的模型参数最终收敛到一致。在DSGD算法中，通过令权重矩阵$W$满足\autoref{section3-2-1}中描述的条件即可实现模型参数的一致性。另外，与\autoref{section3-2-1}中介绍的线性平均一致问题的迭代过程相比，DSGD增加了一个本地随机梯度搜索项，即$\nabla f\left( \boldsymbol{x}_k \right)$，该步骤推动模型参数朝最优值更新，所以DSGD算法能够使得各节点的模型参数收敛到一致的最优解。
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.5\linewidth]{figure/chapter3/fig3-1-LA-procedure.pdf}
+    \caption{\label{fig:Fig3-1}线性平均一致问题的通信过程}
+\end{figure}
 
-基于以上介绍，DSGD算法的伪代码如下：
-\begin{center}
-    % \begin{minipage}{8.5cm}
-    \begin{algorithm}[!htbp]
-            \caption{节点$i$上的DSGD算法} 
-        %   \small
-            \label{Algorithm-DSGD} 
-            \begin{algorithmic}[1]
-            \REQUIRE{模型参数初始值$\boldsymbol{x}_{i,0}$，步长$\gamma$，权重矩阵$W$，迭代次数$K$}；
-            \ENSURE{所有节点模型参数的平均值$\frac{1}{n}\sum_{i=1}^n{\boldsymbol{x}_{i,K}}$}；
-            \FOR{$k=0,1,...,K-1$}
-                \STATE 从节点$i$的本地数据集中随机采样数据$\xi _{i,k} $；
-                \STATE 计算本地随机梯度：$\nabla f_i\left( \boldsymbol{x}_{i,k} \right) =\nabla f_i\left( \boldsymbol{x}_{i,k},\xi _{i,k} \right) $；
-                \STATE 与邻居节点通信，并利用本地模型参数和接收到的参数计算加权平均值：$\boldsymbol{x}_{i,k+\frac{1}{2}}=\sum_{j=1}^n{W_{ij}\boldsymbol{x}_{j,k}}$；
-                % \begin{align*}
-                %     \boldsymbol{x}_{i,k+\frac{1}{2}}=\sum_{j=1}^n{W_{ij}\boldsymbol{x}_{j,k}};
-                % \end{align*}
-                \STATE 更新本地模型参数：$\boldsymbol{x}_{i,k+1}=\boldsymbol{x}_{i,k+\frac{1}{2}}-\gamma \nabla f_i\left( \boldsymbol{x}_{i,k} \right) $。
-            \ENDFOR            
-            \end{algorithmic}
-    \end{algorithm}
-    % \end{minipage}
-\end{center}
-
-% \vspace{-5pt}
-\subsection{分布式随机梯度跟踪算法}
-虽然DSGD算法能够使得各节点的模型参数收敛到一致，但是由于各节点的本地数据集不同，因此在进行本地随机梯度搜索后，节点模型参数又将变得不一致。为了减小节点本地随机梯度搜索对一致性的影响，通常需要采用衰减的步长，即随着迭代次数的增加，步长逐渐趋向于零，对应算法中的$\nabla f\left( \boldsymbol{x}_k \right)$逐渐趋向于零，这必然会导致模型的收敛速度变慢。为了解决这一问题，分布式随机梯度跟踪算法（Distributed Stochastic Gradient Tracking，简称DSGT）被提了出来。该算法允许使用恒定的步长进行训练，同时能够保证各节点的模型参数收敛到一致的最优解。
-
-DSGT算法与DSGD算法的主要不同在于DSGT算法对每个节点引入了一个辅助变量用于跟踪所有节点本地目标函数的平均梯度，并且在训练过程中，不仅对模型参数进行通信和融合，也对该辅助变量进行通信和融合，然后使用该辅助变量代替随机梯度对本地模型参数进行更新。DSGT算法的原理可以表示为如下形式：
+为了实现线性平均一致，即$\underset{k\rightarrow \infty}{\lim}\boldsymbol{x}_k=\mathbf{1}\bar{\boldsymbol{x}}=\frac{\mathbf{1}}{n}\sum_{i=1}^n{\boldsymbol{x}_{i,0}}$，$W$需要满足如下充要条件\cite{xiao2004fast}：
 \begin{equation}
-    \label{tab:DSGT-equation}
-    \begin{aligned}
-        \boldsymbol{x}_{k+1}&=W\boldsymbol{x}_k-\gamma \boldsymbol{y}_k,
+    \label{tab:row_random}
+    \mathbf{1}^TW=\mathbf{1}^T,
+\end{equation}
+\begin{equation}
+    \label{tab:column_random}
+    W\mathbf{1}=\mathbf{1},
+\end{equation}
+\begin{equation}
+    \label{tab:spectral_radius}
+    \rho \left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) <1,
+\end{equation}
+其中$\mathbf{1}\in \mathbb{R}^n$为全1列向量，$\rho$表示矩阵的谱半径，\autoref{tab:row_random}和\autoref{tab:column_random}被称为双随机约束，满足这两个条件的矩阵被称为双随机矩阵。
+
+在满足上述条件的情况下，线性平均一致问题的一致性速度由渐进收敛因子表示：
+\begin{equation}
+    \label{tab:asymptotic_convergence_factor}
+    r_{\mathrm{asym}}(W)=\mathop {\mathrm{sup}} \limits_{\boldsymbol{x}_0\ne \bar{\boldsymbol{x}}}\lim_{k\rightarrow \infty} \left( \frac{\parallel \boldsymbol{x}_k-\bar{\boldsymbol{x}}\parallel _2}{\parallel \boldsymbol{x}_0-\bar{\boldsymbol{x}}\parallel _2} \right) ^{1/k}.
+\end{equation}
+渐进收敛因子越小，说明一致性速度越快。由$W$的双随机性，可以得到：
+\begin{equation}
+\begin{aligned}
+    \boldsymbol{x}_{k+1}-\bar{\boldsymbol{x}}&=\left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) \boldsymbol{x}_k 
+\\
+&=\left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) \left( \boldsymbol{x}_k -\bar{\boldsymbol{x}} \right) ,
+\end{aligned}
+\end{equation}
+于是\autoref{tab:asymptotic_convergence_factor}可以表示为：
+\begin{equation}
+\label{tab:asymptotic_convergence_factor_new}
+\begin{aligned}
+        r_{\mathrm{asym}}(W)&=\lim_{k\rightarrow \infty} {\left\| \left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right) ^k \right\| _2}^{1/k}
         \\
-        \boldsymbol{y}_{k+1}&=W\boldsymbol{y}_k+\nabla f\left( \boldsymbol{x}_{k+1} \right) -\nabla f\left( \boldsymbol{x}_k \right),
-    \end{aligned}
+        &=\rho \left( W-\frac{\mathbf{1}\mathbf{1}^T}{n} \right).
+\end{aligned}
 \end{equation}
-其中$\boldsymbol{y}_k=\left( \boldsymbol{y}_{1,k},...,\boldsymbol{y}_{n,k} \right) ^T$，$\boldsymbol{y}_{i,k}$是节点$i$用于跟踪平均梯度的辅助变量，其他变量的含义与\autoref{tab:DSGD-equation}中变量的含义相同。
-
-在每次迭代中，节点之间利用参数同步拓扑进行模型参数和辅助变量的融合，并且为了实现一致性，权重矩阵$W$同样需要满足\autoref{section3-2-1}中描述的条件。下面说明DSGT算法实现梯度跟踪的原理：
-
-由于权重矩阵$W$是双随机矩阵，则对\autoref{tab:DSGT-equation}的第二个等式两边同时左乘$\mathbf{1}^T$后，根据$\boldsymbol{y}_0=\nabla f\left( \boldsymbol{x}_0 \right)$，可以得到：
+由\autoref{tab:row_random}，\autoref{tab:column_random}和\autoref{tab:spectral_radius}可知，$W$的特征值满足：
 \begin{equation}
-    \label{tab:equ-4-3}
-    \begin{aligned}
-        \mathbf{1}^T\boldsymbol{y}_{k+1}&=\mathbf{1}^T\boldsymbol{y}_k+\mathbf{1}^T\nabla f\left( \boldsymbol{x}_{k+1} \right) -\mathbf{1}^T\nabla f\left( \boldsymbol{x}_k \right) 
+    1=\lambda _1\left( W \right) >\lambda _2\left( W \right) \geqslant ...\geqslant \lambda _n\left( W \right) >-1,
+\end{equation}
+于是\autoref{tab:asymptotic_convergence_factor_new}可以进一步表示为：
+\begin{equation}
+\label{tab:asymptotic_convergence_factor_newest}
+    r_{\mathrm{asym}}(W)=\max \left\{ \left| \lambda _2\left( W \right) \right|,\left| \lambda _n\left( W \right) \right| \right\}.
+\end{equation}
+
+因此，线性平均一致问题的一致性速度由权重矩阵的第二大特征值和最小特征值决定。基于以上介绍，以一致性速度为优化目标的权重矩阵优化问题可以描述为如下形式：
+\begin{equation}
+    \label{tab:LA_optimization_problem}
+    \begin{matrix}
+        \min&		\max \left\{ \left| \lambda _2\left( W \right) \right|,\left| \lambda _n\left( W \right) \right| \right\}\\
+        s.t.&		W\in \mathcal{S} , \ W=W^T, \ W\mathbf{1}=\mathbf{1}.\\
+    \end{matrix}
+\end{equation}
+
+
+上述线性平均一致问题即为分布式深度学习中研究的一致性协议，通过求解\autoref{tab:LA_optimization_problem}得到的拓扑可以作为参数同步拓扑，用于分布式深度学习的训练。
+
+\subsection{同构带宽下的拓扑优化问题}\label{subsection3-2-2}
+
+在实际分布式深度学习场景中，拓扑的设计需要考虑通信开销，以实现一致性速度和每次迭代所需通信时间的权衡。本小节考虑同构带宽场景下的通信开销，对\autoref{tab:LA_optimization_problem}描述的优化问题进行改进，以设计稀疏的参数同步拓扑。其中同构带宽指集群中每个节点的可用带宽相同。
+
+为了保证拓扑的稀疏性，对优化问题引入边的数目的约束。此外，为了同时对拓扑结构和权重矩阵进行优化，将底层拓扑结构设置为全连接拓扑，此时$\mathcal{S}$为实数域上所有$n$维权重矩阵的集合，因此约束条件$W\in \mathcal{S}$可以去掉，进而得到如下优化问题形式：
+\begin{equation}
+    \label{tab:equ-3-12}
+    \begin{matrix}
+        \underset{\mathbf{g}}{\min}&		\max \left\{ \left| \lambda _2\left( W \right) \right|,\left| \lambda _n\left( W \right) \right| \right\}\\
+        s.t.&		\begin{array}{c}
+        W=W^T, \ W\mathbf{1}=\mathbf{1},\\
+        \mathbf{g}\ge 0, \ \mathbf{Card}\left( \mathbf{g} \right) \le r,\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+其中$\mathbf{g}\in \mathbb{R}^e$是拓扑中边的权重，$e=\frac{n\left( n-1 \right)}{2}$，$\mathbf{Card}$表示向量中不为0的元素的数量，$r\le e\in \mathbb{N}$是对边的数目的约束。Gao等人\cite{gao2011cardinality}将形如\autoref{tab:equ-3-12}的优化问题称为基于基数约束的优化问题（Cardinality Constrained Optimization Problems，简称CCOPs）。
+
+为了降低问题的求解难度，首先基于拓扑图的拉普拉斯矩阵对\autoref{tab:equ-3-12}进行转换。根据拉普拉斯矩阵$L$与权重矩阵$W$的关系以及拓扑的对称性，可以得到：
+\begin{equation}
+    \label{tab:equ-3-13}
+    W=I-L=I-A\mathbf{diag}\left( \mathbf{g} \right) A^T,
+\end{equation}
+其中，$I$是单位阵，$A\in \mathbb{R} ^{n\times m}$是关联矩阵，表示节点和边之间的关系，其定义如下：
+\begin{equation}
+    \label{tab:equ-3-14}
+    A_{il}=\left\{ \begin{matrix}
+        1&		\mathrm{if}\ \mathrm{edge}\ l\,\,\mathrm{starts}\ \mathrm{from}\ \mathrm{node}\ i,\\
+        \begin{array}{c}
+        -1\\
+        0\\
+    \end{array}&		\begin{array}{c}
+        \mathrm{if}\ \mathrm{edge}\ l\,\,\mathrm{ends}\ \mathrm{from}\ \mathrm{node}\ i,\\
+        \mathrm{otherwise}.\\
+    \end{array}\\
+    \end{matrix} \right.
+\end{equation}
+对于本章研究的无向拓扑，其每条边的方向任意给定即可，得到的关联矩阵不变。由上述关联矩阵$A$的定义可知，其每一列元素的和为0，因此由\autoref{tab:equ-3-13}定义的$W$自动满足对称性和双随机性。并且$L$的特征值满足：
+\begin{equation}
+    \label{tab:equ-3-15}
+    0=\lambda _n\left( L \right) <\lambda _{n-1}\left( L \right) \leqslant ...\leqslant \lambda _1\left( L \right) <2.
+\end{equation}
+于是，\autoref{tab:equ-3-12}可以转换为：
+\begin{equation}
+    \label{tab:equ-3-16}
+    \begin{matrix}
+        \underset{\mathbf{g}}{\min}&		\max \left\{ \left| 1-\lambda _{n-1}\left( L \right) \right|,\left| 1-\lambda _1\left( L \right) \right| \right\}\\
+        s.t.&		\mathbf{g}\ge 0,\ \mathbf{Card}\left( \mathbf{g} \right) \le r,\\
+    \end{matrix}.
+\end{equation}
+
+由于\autoref{tab:equ-3-16}中拉普拉斯矩阵的特征值不是优化变量$\mathbf{g}$的显示函数，并且求解带优化变量的矩阵特征值十分复杂，因此本节基于如下引理对优化问题进行转换：
+
+\textbf{\fangsong 引理1：} 对于一个给定的拉普拉斯矩阵$L$，其特征值满足\autoref{tab:equ-3-15}，如果$\alpha \geqslant \lambda _{n-1}\left( L \right)$，则$L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succcurlyeq \lambda _{n-1}\left( L \right) I$。
+
+证明：
+
+根据拉普拉斯矩阵的定义式可知，$L$的最小特征值$\lambda _n\left( L \right)=0$对应的特征向量为$\mathbf{1}$。于是，定义正交阵$P=\left( \boldsymbol{p}_1,\boldsymbol{p}_2,...,\boldsymbol{p}_{n-1},\mathbf{1}/\sqrt{n} \right)$，其中每个列向量为单位向量，并且满足${\boldsymbol{p}_i}^T\mathbf{1}=0\left( i=1,2,...,n-1 \right) $和${\boldsymbol{p}_i}^T\boldsymbol{p}_j=0\left( i\ne j \right) $，可以得到：
+\begin{equation}
+    \label{tab:equ-3-17}
+    L\sim P^TLP\sim P^T\left[ \begin{matrix}
+        \lambda _1\left( L \right)&		0&		0\\
+        0&		\ddots&		0\\
+        0&		0&		\lambda _n\left( L \right)\\
+    \end{matrix} \right] P,
+\end{equation}
+其中$\sim$表示矩阵相似。
+
+很显然，$\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}$有一个特征值等于$\alpha$，其对应的特征向量为$\mathbf{1}$，并且其余特征值均为0。假设$\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}$的$n$个特征向量为$P=\left( \boldsymbol{p}_1,\boldsymbol{p}_2,...,\boldsymbol{p}_{n-1},\mathbf{1}/\sqrt{n} \right) $，可以得到：
+\begin{equation}
+    \label{tab:equ-3-18}
+    P^T\left( L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n} \right) P\sim P^T\left[ \begin{matrix}
+        \lambda _1\left( L \right)&		0&		0\\
+        0&		\ddots&		0\\
+        0&		0&		\lambda _n\left( L \right) +\alpha\\
+    \end{matrix} \right] P.
+\end{equation}
+因此，$L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succcurlyeq \lambda _{n-1}\left( L \right) I$当且仅当$\alpha \geqslant \lambda _{n-1}\left( L \right)$。
+
+基于引理1，通过引入辅助变量$\tilde{\lambda}$，可以将特征值的求解转换为线性矩阵不等式（Linear Matrix Inequality，简称LMI）约束，进而将\autoref{tab:equ-3-16}转换为如下形式的优化问题：
+\begin{equation}
+    \label{tab:equ-3-19}
+    \begin{matrix}
+        \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
+        s.t.&		\begin{array}{c}
+        \mathbf{g}\ge 0,\tilde{\lambda}>0,\mathbf{Card}\left( \mathbf{g} \right) \le r,\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda} I,\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right) I,\\
+        \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+其中$\mathrm{diag}$表示矩阵对角线元素组成的列向量，$\succeq$表示左边矩阵的特征值全部大于等于右边矩阵，$\curlyeqprec$则表示小于等于。关于拉普拉斯矩阵的两个LMI约束能够保证$\lambda _{n-1}\left( L \right)$和$\lambda _1\left( L \right)$同时向1靠近，从而实现最小化渐进收敛因子，即最大化一致性速度。最后一个不等式约束是为了保证最终得到的权重矩阵中所有元素都不小于0，因为通常情况下，分布式深度学习中用于参数同步的权重不为负数。
+
+\autoref{tab:equ-3-19}即为同构带宽下的拓扑优化问题，由于引入了对边的数目的约束以保证拓扑的稀疏性，因此通过求解该问题得到的权重矩阵能够比较好地权衡一致性速度和每次迭代所需通信时间。
+
+\subsection{异构带宽下的拓扑优化问题}\label{subsection3-2-3}
+
+同构带宽场景是比较理想的场景，因为在实际分布式深度学习任务的训练中，由于系统硬件条件的限制或者其他训练任务的影响，可用带宽往往是异构的。本小节针对节点带宽异构、服务器内部链路带宽异构和服务器间交换机端口带宽异构三种异构带宽场景下的拓扑优化问题进行设计，通过保证带宽的最优分配，实现一致性速度和每次迭代所需通信时间的权衡。
+
+下面首先提出一种带宽分配策略，根据节点（或者链路、端口，后面将以节点为例进行说明，并在必要时区分节点、链路和端口）的带宽，为每个节点分配指定数目的边，以保证每条边上的可用带宽尽可能大。给定$n$个节点的带宽为$\boldsymbol{b}=\left( b_1,...,b_n \right)^T$，待分配带宽的边的数目为$r$，每个节点上边的数目的上限为$\bar{\boldsymbol{e}}=\left( \bar{e}_1,...,\bar{e}_n \right)^T$，令每个节点上边的数目为$\boldsymbol{e}=\left( e_1,...,e_n \right)^T$，单位带宽为$b_{unit}$，根据以下步骤分配每条边的带宽：
+\begin{itemize}
+    \item[1）] 初始化单位带宽和每个节点上边的数目：
+    \begin{equation}
+        \begin{aligned}
+        \label{tab:equ-3-20}
+        b_{unit}&=\underset{i\in \left\{ 1,...,n \right\}}{\min}\,\,b_i,
         \\
-        &=\mathbf{1}^T\nabla f\left( \boldsymbol{x}_{k+1} \right) .
-    \end{aligned}
-\end{equation}
-然后由DSGT算法的一致性，每个节点的辅助变量最终收敛到相同的值，则有：
+        e_i&=\min \left( \lfloor \frac{b_i}{b_{unit}} \rfloor ,\bar{e}_i \right) ,\ i=1,...,n.
+        \end{aligned}
+    \end{equation}
+    \item[2）] 计算总边数：
+    \begin{equation}
+        \begin{aligned}
+        \label{tab:equ-3-21}
+        \mathrm{edge}\_\mathrm{count}=\left\{ \begin{matrix}
+            \frac{1}{2}\sum_{i=1}^n{e_i}&		\text{给定的带宽为节点}/\text{端口的带宽}\\
+            \sum_{i=1}^n{e_i}&		\text{给定的带宽为链路的带宽}\\
+        \end{matrix}. \right.
+        \end{aligned}
+    \end{equation}
+    \item[3）] 如果总边数小于$r$，则计算新的单位带宽，并更新每个节点上边的数目：
+    \begin{equation}
+        \begin{aligned}
+        \label{tab:equ-3-22}
+        b_{unit}&=\underset{i\in \left\{ 1,...,n \right\}}{\max}\,\,\frac{b_i}{e_i+1},\\
+        e_i&=\min \left( \lfloor \frac{b_i}{b_{unit}} \rfloor ,\bar{e}_i \right) ,\ i=1,...,n,
+        \end{aligned}
+    \end{equation}
+    回到步骤2）。
+    \item[4）] 如果总边数大于等于$r$，则不断将边数最多的节点上边的数目减1，并利用\autoref{tab:equ-3-21}计算总边数，直到总边数等于$r$。
+    
+\end{itemize}
+
+步骤4）的作用是保证总边数符合给定的条件，同时使不同节点上边的数目尽可能均匀。上述带宽分配策略能够保证最终每条边上的可用带宽是最优的。基于该分配策略，接下来分别对三种异构带宽场景下的拓扑优化问题进行设计。
+
+\textbf{1. 节点带宽异构}
+
+在该场景下，每个节点具有不同的可用带宽。假设节点数为$n$，节点的可用带宽为$\boldsymbol{b}=\left( b_1,...,b_n \right)^T$。根据上述带宽分配策略，可以得到每个节点上分配的边的数目$\boldsymbol{e}=\left( e_1,...,e_n \right)^T$。由于节点上的边数等于节点的度，于是定义对节点度的约束：
 \begin{equation}
-    \label{tab:equ-4-4}
-    \boldsymbol{y}_{i,k}=\frac{1}{n}\mathbf{1}^T\nabla f\left( \boldsymbol{x}_k \right) ,\  i=1,...,n,
-\end{equation}
-从而实现对全局平均梯度的跟踪。因此，随着迭代次数的增加，每个节点的本地模型参数最终将朝着相同的方向更新，并且当算法收敛时，节点参数达到最优值$\boldsymbol{x}^*$，平均梯度$\mathbf{1}^T\nabla f\left( \boldsymbol{x}^* \right) =\mathbf{0}$。
-
-根据以上分析，DSGT算法通过引入辅助变量实现了梯度跟踪，避免了节点本地梯度搜索对一致性的影响，因此可以使用恒定的步长，从而保证了算法的收敛速度。DSGT算法的伪代码如下：
-% \vspace{-15pt}
-\begin{center}
-    % \begin{minipage}{8.5cm}
-    \begin{algorithm}[!htbp]
-            \caption{节点$i$上的DSGT算法} 
-        %   \small
-            \label{Algorithm-DSGT} 
-            \begin{algorithmic}[1]
-            \REQUIRE{模型参数初始值$\boldsymbol{x}_{i,0}$，辅助变量初始值$\boldsymbol{y}_{i,0}=\nabla f_i\left( \boldsymbol{x}_{i,0} \right) $，步长$\gamma$，权重矩阵$W$，迭代次数$K$}；
-            \ENSURE{所有节点模型参数的平均值$\frac{1}{n}\sum_{i=1}^n{\boldsymbol{x}_{i,K}}$}；
-            \FOR{$k=0,1,...,K-1$}
-                \STATE 与邻居节点通信模型参数，并利用本地模型参数和接收到的参数计算加权平均值：$\boldsymbol{x}_{i,k+\frac{1}{2}}=\sum_{j=1}^n{W_{ij}\boldsymbol{x}_{j,k}}$；
-                % \begin{align*}
-                %     \boldsymbol{x}_{i,k+\frac{1}{2}}=\sum_{j=1}^n{W_{ij}\boldsymbol{x}_{j,k}};
-                % \end{align*}
-                \STATE 利用辅助变量$\boldsymbol{y}_{i,k}$更新本地模型参数：$\boldsymbol{x}_{i,k+1}=\boldsymbol{x}_{i,k+\frac{1}{2}}-\gamma \boldsymbol{y}_{i,k}$；
-                \STATE 与邻居节点通信辅助变量，并利用本地辅助变量和接收到的辅助变量计算加权平均值：$\boldsymbol{y}_{i,k+\frac{1}{2}}=\sum_{j=1}^n{W_{ij}\boldsymbol{y}_{j,k}}$；
-                % \begin{align*}
-                %     \boldsymbol{y}_{i,k+\frac{1}{2}}=\sum_{j=1}^n{W_{ij}\boldsymbol{y}_{j,k}};
-                % \end{align*}
-                \STATE 从节点$i$的本地数据集中随机采样数据$\xi _{i,k+1} $；
-                \STATE 计算本地随机梯度：$\nabla f_i\left( \boldsymbol{x}_{i,k+1} \right) =\nabla f_i\left( \boldsymbol{x}_{i,k+1},\xi _{i,k+1} \right) $；
-                \STATE 更新辅助变量：$\boldsymbol{y}_{i,k+1}=\boldsymbol{y}_{i,k+\frac{1}{2}}+\nabla f_i\left( \boldsymbol{x}_{i,k+1} \right) -\nabla f_i\left( \boldsymbol{x}_{i,k} \right) $。
-            \ENDFOR            
-            \end{algorithmic}
-    \end{algorithm}
-    % \end{minipage}
-\end{center}
-
-
-\section{带宽自适应的量化分布式训练算法}
-本节在DSGD算法和DSGT算法的基础上提出了带宽自适应的量化分布式随机梯度下降算法（Bandwidth Adaptive Quantized Distributed Stochastic Gradient Descent，简称BA-QDSGD）和带宽自适应的量化分布式随机梯度跟踪算法（Bandwidth Adaptive Quantized Distributed Stochastic Gradient Tracking，简称BA-QDSGT）。首先将介绍本节使用的量化策略，然后介绍基于差分压缩和压缩误差补偿的量化算法，并在此基础上引入带宽自适应策略，设计带宽自适应的量化算法。
-
-\subsection{量化策略设计}
-在分布式深度学习中，通常使用32比特浮点数来表示模型的参数和梯度，量化是在节点之间通信模型参数或梯度之前将待通信的数据压缩至更低的比特数，从而减少通信的数据量。对于任意一个32比特的浮点数向量$\boldsymbol{v}\in \mathbb{R} ^d$，本节使用下式对其每一维度的元素$v_i$进行量化：
-\begin{equation}
-    \label{tab:equ-4-5}
-    Q_{\ell}\left( v_i \right) =\left\| \boldsymbol{v} \right\| _{\infty}\cdot \mathrm{sign}\left( v_i \right) \cdot \varphi _i(\boldsymbol{v},\ell ).
-\end{equation}
-其中$\left\| \boldsymbol{v} \right\| _{\infty}$是向量$\boldsymbol{v}$的无穷范数，$\mathrm{sign}\left( \cdot \right) $是符号函数，$\varphi _i(\boldsymbol{v},\ell )$是如下定义的独立随机变量：
-\begin{equation}
-    \label{tab:equ-4-6}
-    \varphi _i(\boldsymbol{v},\ell )=\begin{cases}
-        \frac{s}{\ell}&		\,\,\mathrm{with}\  \mathrm{probability}\  1+s-\frac{\left| v_i \right|}{\left\| \boldsymbol{v}_{\infty} \right\|}\ell\\
-        \frac{s+1}{\ell}&		\,\,\mathrm{otherwise}\\
-    \end{cases},
-\end{equation}
-其中$s$为满足$0\leqslant s<\ell $的整数，并且$\frac{v_i}{\left\| \boldsymbol{v} \right\| _{\infty}}\in \left[ \frac{s}{\ell},\frac{s+1}{\ell} \right] $，$\ell$一般定义为$2^{\mathrm{b}-1}$，表明使用该量化方法后，向量的每一维度只需要使用$\mathrm{b}$个比特就可以表示。因此$\mathrm{b}$的值衡量了量化的程度，$\mathrm{b}$越小则说明量化的程度越高，相应的量化精度越低。
-
-在使用\autoref{tab:equ-4-5}对向量进行量化后，可以得到：
-\begin{equation}
-    \label{tab:equ-4-7}
     \begin{aligned}
-        E\left[ Q_{\ell}\left( v_i \right) \right] &=\left\| \boldsymbol{v} \right\| _{\infty}\cdot \mathrm{sign}\left( v_i \right) \left[ \frac{s}{\ell}\times \left( 1+s-\frac{\left| v_i \right|}{\left\| \boldsymbol{v} \right\| _{\infty}}\ell \right) +\frac{s+1}{\ell}\left( \frac{\left| v_i \right|}{\left\| \boldsymbol{v} \right\| _{\infty}}\ell -s \right) \right]\\
-        &=\left\| \boldsymbol{v} \right\| _{\infty}\cdot \mathrm{sign}\left( v_i \right) \frac{v_i}{\left\| \boldsymbol{v} \right\| _{\infty}}\\
-        &=v_i\\
-    \end{aligned}.
-\end{equation}
-该式说明量化后向量中每一维度的元素的期望等于原向量对应位置元素的值，并且Liu等人\cite{liu2020linear}证明了该量化策略可以保证量化后的向量与原向量距离的方差是有界的，因此在一定量化程度下该量化策略可以保持分布式深度学习算法的收敛性。
-
-进一步地，为了便于通信，将\autoref{tab:equ-4-5}改写为如下形式：
-\begin{equation}
-    \label{tab:equ-4-8}
-    Q_{\ell}\left( \boldsymbol{v} \right) =\frac{\left\| \boldsymbol{v} \right\| _{\infty}}{2^{\mathrm{b}-1}}\cdot \mathrm{sign}\left( \boldsymbol{v} \right) \odot \lfloor \frac{2^{\mathrm{b}-1}\left| \boldsymbol{v} \right|}{\left\| \boldsymbol{v} \right\| _{\infty}}+\boldsymbol{w} \rfloor ,
-\end{equation}
-其中$\odot$为哈达玛积，$\lfloor \cdot \rfloor $表示对元素向下取整，$\boldsymbol{w}\in \mathbb{R} ^d$是扰动向量，其每一维度的元素符合如下分布：
-\begin{equation}
-    \label{tab:equ-4-9}
-    w_i=\begin{cases}
-        0&		\,\,\mathrm{with} \mathrm{probability} 1+s-\frac{\left| v_i \right|}{\left\| \boldsymbol{v}_{\infty} \right\|}\ell\\
-        1&		\,\,\mathrm{otherwise}\\
-    \end{cases}.
-\end{equation}
-
-然后，在每次通信时可以将量化后的向量分为幅值、符号向量和整数向量三部分进行通信，其中幅值$\frac{\left\| \boldsymbol{v} \right\| _{\infty}}{2^{b-1}}$为浮点数标量，符号向量$\mathrm{sign}\left( \boldsymbol{v} \right)$中的元素为±1和0，该部分表示为8比特整数向量，整数向量$\lfloor \frac{2^{\mathrm{b}-1}\left| \boldsymbol{v} \right|}{\left\| \boldsymbol{v} \right\| _{\infty}}+\boldsymbol{w} \rfloor$中的元素为小于$2^\mathrm{b}$的整数，该部分在$\mathrm{b}=16$时表示为16比特整数向量，在$\mathrm{b}=1/2/4/8$时表示为8比特整数向量。
-
-%接下来介绍转换方法，添加一张图
-对于符号向量和$\mathrm{b}=1/2/4$时的整数向量，为了降低通信开销，将多个元素组合成一个8比特的整数进行通信。下面以$\mathrm{b}=4$为例进行说明，如\autoref{fig:Fig4-1}所示，向量$\boldsymbol{v}$被量化为4比特整数向量后，每两个元素一组将4比特整数向量拼接为新的8比特整数向量，然后对该向量进行通信，并在接收到数据后，通过整除和取余操作将数据还原成原来的4比特向量。其中，拼接操作通过下式实现：
-\begin{equation}
-    \label{tab:equ-4-10}
-    v^{_{8bit}}=16\times v_{1}^{4bit}+v_{2}^{4bit}.
-\end{equation}
-还原操作通过下式实现：
-\begin{equation}
-    \label{tab:equ-4-11}
-    \begin{aligned}
-        v_{1}^{4bit}=\lfloor \frac{v^{_{8bit}}}{16} \rfloor 
+    \label{tab:equ-3-23}
+    \mathbf{card}\left( \boldsymbol{m}_i\mathbf{g} \right) &=e_i,\ i=1,...,n,
     \\
-    v_{2}^{4bit}=v^{_{8bit}}\%16.
+    \boldsymbol{m}_i&=\mathrm{abs}\left( A_{i,:} \right) ,
     \end{aligned}
 \end{equation}
+其中$\boldsymbol{m}_i\in \mathbb{R} ^{e}$是节点$i$上的边的掩码向量，$A_{i,:}$是\autoref{tab:equ-3-14}中定义的关联矩阵的第$i$行，$\mathrm{abs}$表示对每个元素取绝对值。
+
+将对节点度的约束引入到\autoref{tab:equ-3-19}中，同时去掉对边的数目的约束，可以得到:
+\begin{equation}
+    \label{tab:equ-3-24}
+    \begin{matrix}
+        \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
+        s.t.&		\begin{array}{c}
+        \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
+        \mathbf{card}\left( \boldsymbol{m}_i\mathbf{g} \right) =e_i, i=1,...,n,\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda} I,\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right)  I,\\
+        \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+考虑到约束条件中有$n$个基数约束，不易于求解，于是引入整数变量对优化问题进行改进，得到如下形式：
+\begin{equation}
+    \label{tab:equ-3-25}
+    \begin{matrix}
+        \underset{\mathbf{g},\tilde{\lambda}}{\min}&		-\tilde{\lambda}\\
+        s.t.&		\begin{array}{c}
+        \mathbf{g}\ge 0,\tilde{\lambda}>0,\\
+        \mathbf{z}\in \left\{ 0,1 \right\} ^e,\mathbf{g}\leqslant \mathbf{z},M\mathbf{z}=\boldsymbol{e},\\
+        L+\frac{\alpha \mathbf{1}\mathbf{1}^T}{n}\succeq \tilde{\lambda} I,\\
+        L\curlyeqprec \left( 2-\tilde{\lambda} \right)  I,\\
+        \mathrm{diag}\left( L \right) \leqslant \mathbf{1}.\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+其中$\mathbf{z}$是引入的整数变量，用于标识每条边是否存在，$M=\mathrm{abs}\left( A\right)$是掩码矩阵。求解该优化问题即可得到节点带宽异构场景下的参数同步拓扑。
+
+\textbf{2. 服务器内部链路带宽异构}
+
+该场景指\autoref{fig:Fig2-4}所示的标准服务器架构中，三种类型的物理链路具有不同的可用带宽，假设分别为$b_{PIX}$，$b_{NODE}$和$b_{SYS}$。根据服务器架构的特点，三种物理链路上边的数目的上限分别为1，4和16。于是基于本节的带宽分配策略，可以得到三种类型的物理链路上分配的边的数目$e_{PIX}$，$e_{NODE}$和$e_{SYS}$。将\autoref{tab:equ-3-25}中对节点度的约束替换为对物理链路上边的数目的约束，即可得到服务器内部链路带宽异构场景下的优化问题。其中约束向量$\boldsymbol{e}$替换为$\left( e_{PIX1},e_{PIX2},e_{PIX3},e_{PIX4},e_{NODE1},e_{NODE2},e_{SYS} \right) ^T$，表示服务器内所有物理链路上边的数目，掩码矩阵$M$替换为：
+\begin{equation}
+    \begin{aligned}
+    \label{tab:equ-3-26}
+    M=\left[ \begin{array}{c}
+        \boldsymbol{m}_{PIX1}\\
+        \boldsymbol{m}_{PIX2}\\
+        \boldsymbol{m}_{PIX3}\\
+        \boldsymbol{m}_{PIX4}\\
+        \boldsymbol{m}_{NODE1}\\
+        \boldsymbol{m}_{NODE2}\\
+        \boldsymbol{m}_{SYS}\\
+    \end{array} \right] =\left[ \begin{matrix}
+            1000000000000000000000000000\\
+            0000000000000100000000000000\\
+            0000000000000000000000100000\\
+            0000000000000000000000000001\\
+            0110000110000000000000000000\\
+            0000000000000000000000011110\\
+            0001111001111011111111000000\\
+    \end{matrix} \right].
+    \end{aligned}
+\end{equation}
+求解替换$M$和$\boldsymbol{e}$后的优化问题即可得到服务器内部链路带宽异构场景下的参数同步拓扑。
+
+\textbf{3. 服务器间交换机端口带宽异构}
+
+本节考虑底层物理拓扑采用BCube拓扑\cite{guo2009bcube}时的异构带宽场景。如\autoref{fig:Fig3-2}所示，BCube拓扑是以服务器为中心的拓扑结构，采用多级交换机将服务器连接起来，因此该场景下的节点指服务器。若有$k$级交换机，每个交换机有$p$个端口，则服务器数目$n$需满足$n=p^k$，每个层级的交换机数目为$p^{k-1}$，且每个服务器需配备$k$个网卡，分别与每个层级中的一个交换机相连。
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.5\linewidth]{figure/chapter4/fig4-1-quantize.pdf}
-    \caption{\label{fig:Fig4-1}数据量化流程}
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-2-BCube.pdf}
+    \caption{\label{fig:Fig3-2}BCube拓扑结构}
 \end{figure}
 
-\subsection{带宽自适应的量化分布式训练算法设计}
-本小节通过对DSGD算法和DSGT算法引入差分压缩和压缩误差补偿实现量化分布式随机梯度下降算法和量化分布式随机梯度跟踪算法的设计，设计过程如\autoref{fig:Fig4-2}所示。首先，对模型参数/梯度引入对应的状态变量。然后使用上一小节中介绍的量化策略对模型参数/梯度与状态变量的差进行压缩，这一步则是差分压缩。接下来将状态变量与量化后的值求和得到对模型参数/梯度的估计值，该估计值被用于节点与邻居节点间的通信。模型参数/梯度与该估计值的差可以看作是差分压缩导致的误差，压缩误差补偿则利用该误差对融合后的模型参数/梯度进行修正。
+在该场景下，不同层级的交换机具有不同的端口带宽。假设$k$级交换机的端口带宽为$\boldsymbol{b}=\left( b_{s_0},...,b_{s_{k-1}} \right) ^T$，根据BCube的结构特点，每个交换机端口上边的数目的上限为$p-1$（此处的边指连接在同一个交换机上的服务器之间的边）。于是基于本节的带宽分配策略，可以得到每个层级的交换机端口上分配的边的数目为$\boldsymbol{e}=\left( e_{s_0},...,e_{s_{k-1}} \right)^T$。将\autoref{tab:equ-3-25}中对节点度的约束替换为对交换机端口上边的数目的约束，即可得到服务器间交换机端口带宽异构场景下的优化问题。其中约束向量$\boldsymbol{e}$替换为$\left( e_{s_0}\mathbf{1}^T,...,e_{s_{k-1}}\mathbf{1}^T \right) ^T$，表示所有交换机端口上边的数目，掩码矩阵$\mathbf{1}\in \mathbb{R} ^n$，$M$替换为：
+\begin{equation}
+    \label{tab:equ-3-27}
+    \mathrm{M}=\left[ \begin{array}{c}
+        M_{s_0}\\
+        \vdots\\
+        M_{s_{k-1}}\\
+    \end{array} \right] =\left[ \begin{array}{c}
+        \left( \boldsymbol{m}_{s_0p_1},...,\boldsymbol{m}_{s_0p_n} \right) ^T\\
+        \vdots\\
+        \left( \boldsymbol{m}_{s_{k-1}p_1},...,\boldsymbol{m}_{s_{k-1}p_n} \right) ^T\\
+    \end{array} \right] 
+\end{equation}
+其中$M_{s_i}\in \mathbb{R} ^{n\times e},\ i=0,...,k-1$是第$i$级交换机上所有端口的掩码向量构成的矩阵，$\boldsymbol{m}_{s_ip_j}\in \mathbb{R} ^e,\ i=0,...,k-1,\ j=1,...,n$是第$i$级交换机上第$j$个端口的边的掩码向量。求解替换$M$和$\boldsymbol{e}$后的优化问题即可得到服务器间交换机端口带宽异构场景下的参数同步拓扑。
+
+% 综上所述，同构带宽场景下的参数同步拓扑优化问题考虑了对边的数目的约束，以设计稀疏的拓扑结构；而异构带宽场景下，通过对带宽分配策略进行设计，以保证每条边上带宽的最优分配，进而分别引入了对节点度的约束、对服务器内部链路上边的数目的约束和对服务器间交换机端口上边的数目的约束
+
+\section{参数同步拓扑优化问题求解框架}
+为了求解上一节中描述的参数同步拓扑优化问题，本节提出了如\autoref{fig:Fig3-0}所示的求解框架。将四种场景下的优化问题进行适当变换后，提出定制化的ADMM算法对优化问题进行求解，本节将求解得到的参数同步拓扑称为T-ADMM（Topology Based on ADMM）。进一步地，基于模拟退火算法生成拓扑结构，并将生成的拓扑结构作为ADMM算法求解节点带宽异构和服务器间交换机端口带宽异构场景下的优化问题的初始拓扑，以改进这两种场景下的优化问题求解结果，本节将改进的拓扑求解结果称为T-SA-ADMM（Topology Based on SA and ADMM）。下面分别介绍基于ADMM的拓扑优化问题求解方法和基于模拟退火算法的拓扑生成方法。
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter4/fig4-2-error-quantize.pdf}
-    \caption{\label{fig:Fig4-2}差分压缩与压缩误差补偿设计}
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/framework.pdf}
+    \caption{\label{fig:Fig3-0}参数同步拓扑优化问题求解框架}
 \end{figure}
 
-进一步地，考虑在实际分布式深度学习任务的训练中，拓扑中不同边上的可用带宽可能不同，因此引入带宽矩阵$B$对算法进行改进。给定如下带宽矩阵，首先计算单位带宽$b_{unit}=\underset{i,j\in \left\{ 1,...,n \right\}}{\min}\,\,b_{ij}$。然后每个节点$i$计算其每条出边的带宽与单位带宽的比值$\frac{b_{ij}}{b_{unit}},\ j=1,...,n$，并找到满足$2^{m_{ij}}\leqslant \frac{b_{ij}}{b_{unit}}$的最大的$m_{ij}$。接下来根据设定的量化比特数$\mathrm{b}$，调整边$\left\{ i,j \right\}$上的量化比特数为$\mathrm{b}\times 2^{m_{ij}}$，并在进行通信前，根据对应的量化比特数对数据进行量化。通过引入如上改进，提高了高带宽边上的量化比特数，减小了对应的压缩误差，从而降低了量化对模型精度的影响。此外，上述改进方式能够使不同边上的通信时间尽量保持一致，而不会增加整体的通信时间，从而提高了资源的利用率。
+\subsection{基于ADMM的拓扑优化问题求解方法}
+
+% 本节使用交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）求解\autoref{section3-2}中描述的参数同步拓扑优化问题。
+交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）主要用于解决约束优化问题，该方法的基本思想是通过将原始问题分解为子问题，并通过交替的方式逐步求解这些子问题进而求解整个问题。下面首先介绍ADMM算法求解基于基数约束的优化问题（CCOP）的基本原理，然后将本章研究的不同场景下的参数同步拓扑优化问题进行适当变换，并提出用于求解这些问题的定制化的ADMM算法。
+
+\textbf{1. 基于ADMM求解CCOP的原理}
+
+对于一般的CCOP：
 \begin{equation}
-    \label{tab:equ-4-12}
-    B=\left[ \begin{matrix}
-        b_{11}&		b_{12}&		\cdots&		b_{1n}\\
-        b_{21}&		b_{22}&		\cdots&		b_{2n}\\
-        \vdots&		\vdots&		\ddots&		\vdots\\
-        b_{n1}&		b_{n2}&		\cdots&		b_{nn}\\
-    \end{matrix} \right] 
+    \label{tab:equ-3-28}
+    \begin{matrix}
+        \underset{\mathbf{x}}{\min}&		f(\mathbf{x})\\
+        \,\,s.t.&		\mathbf{x}\in \mathcal{C} ,\ |\mathbf{x}|_0\le r,\\
+    \end{matrix}
+\end{equation}
+其中$\mathbf{x}\in \mathbb{R}^p$是优化变量，$f(\mathbf{x})$是可微的凸函数，$\mathcal{C}$是凸且非空的可行域，$\left| \mathbf{x} \right|_0$表示$\mathbf{x}$中非零元素的数量，$r\le p\in \mathbb{N} $。引入辅助变量$\mathbf{x}_1$将问题转换为如下形式：
+\begin{equation}
+    \label{tab:equ-3-29}
+    \begin{matrix}
+        \underset{\mathbf{x},\mathbf{x}_1}{\min}&		f(\mathbf{x})\\
+        \,\,s.t.&		\begin{array}{c}
+        \mathbf{x}\in \mathcal{C} , \ |\mathbf{x}_1|_0\le r,\\
+        \mathbf{x}=\mathbf{x}_1.\\
+    \end{array}\\
+    \end{matrix}
 \end{equation}
 
-结合差分压缩、压缩误差补偿以及带宽自适应策略，本节提出的BA-QDSGD算法和BA-QDSGT算法的伪代码如\autoref{Algorithm-BA-QDSGD}和\autoref{Algorithm-BA-QDSGT}所示。
+\autoref{tab:equ-3-29}对应的增广拉格朗日函数为：
+\begin{equation}
+    \label{tab:equ-3-30}
+    \mathcal{L} =f(\mathbf{x})+\langle \boldsymbol{\mu },\mathbf{x}-\mathbf{x}_1\rangle +\frac{\rho}{2}\parallel \mathbf{x}-\mathbf{x}_1\parallel_{2}^{2},
+\end{equation}
+其中$\boldsymbol{\mu } \in \mathbb{R} ^e$是相应的对偶变量，$\rho$是惩罚项的权重。则基于ADMM求解\autoref{tab:equ-3-29}的过程为交替更新$\mathbf{x}_1$和$\mathbf{x}$，然后更新对偶变量$\mu$，具体算法如下：
 
+\begin{center}
+% \begin{minipage}{8.5cm}
+\begin{algorithm}[!htbp]
+        \caption{ADMM求解一般CCOP的流程} 
+    %   \small
+        \label{Algorithm-ADMM-CCOP} 
+        \begin{algorithmic}[1]
+        \REQUIRE{$f(\mathbf{x}),\mathcal{C},r,\rho$，初始值$\mathbf{x}^0,\mathbf{x}_{1}^{0},\boldsymbol{\mu }^0$，算法收敛误差$\epsilon$}；
+        \ENSURE{\autoref{tab:equ-3-29}的局部最优解$\mathbf{x}$和$\mathbf{x}_1$}；
+        \STATE 令$k=0$；
+        \WHILE{$\left\| \mathbf{x}^k-\mathbf{x}_{1}^{k} \right\| _{F}^{2}>\epsilon $}
+            \STATE 更新$\mathbf{x}_1$：
+            \begin{equation}
+                \label{tab:equ-3-31}
+                \mathbf{x}_{1}^{k+1}\coloneqq \mathrm{arg}\min_{|\mathbf{x}_1|_0\le r} \left\| \mathbf{x}^k-\mathbf{x}_1+\frac{\boldsymbol{\mu }^k}{\rho} \right\| _{F}^{2}\text{；}
+            \end{equation}
+            \STATE 更新$\mathbf{x}$：
+            \begin{equation}
+                \label{tab:equ-3-32}
+                \mathbf{x}^{k+1}\coloneqq \mathrm{arg}\min_{\mathbf{x}\in \mathcal{C}} f(\mathbf{x})+\frac{\rho}{2}\left\| \mathbf{x}-\mathbf{x}_{1}^{k+1}+\frac{\boldsymbol{\mu }^k}{\rho} \right\| _{F}^{2}\text{；}
+            \end{equation}
+            \STATE 更新$\boldsymbol{\mu }$：
+            \begin{equation}
+                \label{tab:equ-3-33}
+                \boldsymbol{\mu }^{k+1}:=\boldsymbol{\mu }^k+\rho \left( \mathbf{x}^{k+1}-\mathbf{x}_{1}^{k+1} \right)\text{；}
+            \end{equation}
+            \STATE 令$k=k+1$；
+        \ENDWHILE
+        \STATE 确定$\mathbf{x}$和$\mathbf{x}_1$的求解结果。
+        \end{algorithmic}
+\end{algorithm}
+% \end{minipage}
+\end{center}
+
+从\autoref{Algorithm-ADMM-CCOP}中可以看到，ADMM每次迭代中变量的更新过程由三个子问题组成。通过求解\autoref{tab:equ-3-31}中的子问题，可以得到：
+\begin{equation}
+    \label{tab:equ-3-34}
+    \mathbf{x}_{1}^{k+1}=\mathrm{Proj}_{\left\{ \mathbf{x}_1||\mathbf{x}_1|_0\le r \right\}}\left( \mathbf{x}^k+\frac{\boldsymbol{\mu }^k}{\rho} \right), 
+\end{equation}
+其中$\mathrm{Proj}$表示将向量投影到可行域中。为了使$\mathbf{x}_1$满足基数约束，根据Boyd等人的理论\cite{boyd2011distributed}，可以通过保留$\mathbf{x}_1$中最大的$r$个元素，并将其他元素置为0，得到$\mathbf{x}_{1}^{k+1}$。
+
+\autoref{tab:equ-3-32}中$\mathbf{x}$的更新过程为求解一个强凸问题，当$f(\mathbf{x})=\boldsymbol{c}^T\mathbf{x},\ \boldsymbol{c}\in \mathbb{R} ^p$时，求解该子问题可以得到：
+\begin{equation}
+    \label{tab:equ-3-35}
+    \mathbf{x}^{k+1}=\mathrm{Proj}_{\mathcal{C}}\left( \mathbf{x}_{1}^{k+1}-\frac{\boldsymbol{\mu }^k+\boldsymbol{c}}{\rho} \right). 
+\end{equation}
+进一步地，当$\mathcal{C} \coloneqq \left\{ \mathbf{x}\in \mathbb{R} ^p|A\mathbf{x}=\boldsymbol{b}\ \\ ,A\in \mathbb{R} ^{q\times p},\boldsymbol{b}\in \mathbb{R} ^q \right\} $时，\autoref{tab:equ-3-35}是一个线性等式约束的强凸二次规划问题，于是可以通过求解如下线性等式得到$\mathbf{x}^{k+1}$：
+\begin{equation}
+    \label{tab:equ-3-36}
+    \left[ \begin{matrix}
+        I_{p\times p}&		A^T\\
+        A&		\mathbf{0}_{q\times q}\\
+    \end{matrix} \right] \left[ \begin{array}{c}
+        \mathbf{x}^{k+1}\\
+        \boldsymbol{\lambda }\\
+    \end{array} \right] =\left[ \begin{array}{c}
+        \mathbf{x}_{1}^{k+1}-\small{\frac{\left( \boldsymbol{\mu }^k+\boldsymbol{c} \right)}{\rho}}\\
+        \boldsymbol{b}\\
+    \end{array} \right].
+\end{equation}
+其中$\boldsymbol{\lambda }$是与线性等式约束相关的对偶变量。
+
+\textbf{2. 定制化的ADMM算法}
+
+为了使用ADMM算法求解同构带宽下的拓扑优化问题（\autoref{tab:equ-3-19}）和异构带宽下的拓扑优化问题（\autoref{tab:equ-3-25}），首先将优化问题转换为上述具有线性目标函数和线性约束的形式。下面以同构带宽下的拓扑优化问题为例进行详细说明，异构带宽下的优化问题可以使用相同的转换方法。
+
+令$\mathbf{x}=\left( \mathbf{g}^T,\tilde{\lambda} \right) ^T$，$\mathcal{B} ^+\left( \mathbf{x} \right) =L+\tilde{\lambda} I$，$\mathcal{B} ^-\left( \mathbf{x} \right) =L-\tilde{\lambda} I$，$B_0=\frac{\alpha 11^T}{n}$，以及通过分析可以得出$D\mathbf{x}=\mathrm{diag}\left( L \right) $，其中$ D=\left( \mathrm{abs} \left( A \right) ,\mathbf{0} \right) ,\mathbf{0}\in \mathbb{R} ^n$，于是\autoref{tab:equ-3-19}可以转换为如下形式：
+\begin{equation}
+    \label{tab:equ-3-37}
+    \begin{matrix}
+        \underset{\mathbf{x}}{\min}&		\boldsymbol{c}^T\mathbf{x}\\
+        s.t.&		\begin{array}{c}
+        \mathbf{x}\ge 0,|\mathbf{x}_{:e}|_0\le r,\\
+        \mathcal{B} ^-\left( \mathbf{x} \right) +B_0\succeq \mathbf{0},\\
+        \mathcal{B} ^+\left( \mathbf{x} \right) \preceq 2 I,\\
+        D\mathbf{x}\leqslant \mathbf{1},\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+其中$\boldsymbol{c}\in \mathbb{R} ^{e+1}$，$\mathbf{x}_{:e}$表示$\mathbf{x}$的前$e$个元素。
+
+接下来引入辅助变量$\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1$，将不等式约束转换为等式约束，得到如下形式：
+\begin{equation}
+    \label{tab:equ-3-38}
+    \begin{matrix}
+        \underset{\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1}{\min}&		\boldsymbol{c}^T\mathbf{x}\\
+        s.t.&		\begin{array}{c}
+        \mathcal{B} ^-\left( \mathbf{x} \right) +B_0+S=\mathbf{0},\\
+        \mathcal{B} ^+\left( \mathbf{x} \right) +T=2I,\\
+        D\mathbf{x}+\mathbf{y}=\mathbf{1},\\
+        \mathbf{x}=\mathbf{x}_1,\mathbf{x}_1\ge 0,|\left( \mathbf{x}_1 \right) _{:e}|_0\le r,\\
+        S=S_1,S_1\preceq \mathbf{0},\\
+        \mathbf{y}=\mathbf{y}_1,\mathbf{y}_1\ge 0,T=T_1,T_1\succcurlyeq \mathbf{0}.\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+相应的增广拉格朗日函数为：
+\begin{equation}
+    \begin{aligned}
+    \label{tab:equ-3-39}
+    \mathcal{L} &=\boldsymbol{c}^T\mathbf{x}+\left< \boldsymbol{\mu },\mathbf{x}-\mathbf{x}_1 \right> +\frac{\rho}{2}\left\| \mathbf{x}-\mathbf{x}_1 \right\| _{F}^{2}+\left< \varLambda ,S-S_1 \right> +\frac{\rho}{2}\left\| S-S_1 \right\| _{F}^{2}
+    \\
+    &+\left< \boldsymbol{\sigma },\mathbf{y}-\mathbf{y}_1 \right> +\frac{\rho}{2}\left\| \mathbf{y}-\mathbf{y}_{\mathbf{1}} \right\| _{F}^{2}+\left< \varGamma ,T-T_1 \right> +\frac{\rho}{2}\left\| T-T_1 \right\| _{F}^{2},
+    \end{aligned}
+\end{equation}
+其中$\boldsymbol{\mu },\varLambda ,\boldsymbol{\sigma },\varGamma$为对偶变量。使用ADMM求解\autoref{tab:equ-3-38}，并令$\mathcal{X} =\left( \mathbf{x}_1,S_1,\mathbf{y}_1,T_1 \right) $，$\mathcal{Y} =\left( \mathbf{x},S,\mathbf{y},T \right) $，$\mathcal{D} =\left( \boldsymbol{\mu },\varLambda ,\boldsymbol{\sigma },\varGamma \right) $，可以得到如下变量更新过程：
+\begin{equation}
+    \begin{aligned}
+        \label{tab:equ-3-40}
+        \mathcal{X} ^{k+1}&\coloneqq \mathrm{arg}\min_{\mathcal{X} \in \mathcal{C} _{\mathcal{X}}} \mathcal{L} \left( \mathcal{X} ,\mathcal{Y} ^k;\mathcal{D} ^k \right)\\
+        &=\mathrm{arg}\min_{\mathbf{x}_1\in \mathcal{C} _{\mathbf{x}_1}} \mathcal{L} \left( \mathcal{X} ,\mathcal{Y} ^k;\mathcal{D} ^k \right) +\mathrm{arg}\min_{S_1\in \mathcal{C} _{S_1}} \mathcal{L} _1\left( \mathcal{X} ,\mathcal{Y} ^k;\mathcal{D} ^k \right)\\
+        &+\mathrm{arg}\min_{\mathbf{y}_1\in \mathcal{C} _{\mathbf{y}_1}} \mathcal{L} \left( \mathcal{X} ,\mathcal{Y} ^k;\mathcal{D} ^k \right) +\mathrm{arg}\min_{T_1\in \mathcal{C} _{T_1}} \mathcal{L} _1\left( \mathcal{X} ,\mathcal{Y} ^k;\mathcal{D} ^k \right)\\
+        \mathcal{Y} ^{k+1}&\coloneqq \mathrm{arg}\min_{\mathcal{Y} \in \mathcal{C} _{\mathcal{Y}}} \mathcal{L} \left( \mathcal{X} ^{k+1},\mathcal{Y} ;\mathcal{D} ^k \right)\\
+        \boldsymbol{\mu }^{k+1}&\coloneqq \boldsymbol{\mu }^k+\rho \left( \mathbf{x}^{k+1}-\mathbf{x}_{1}^{k+1} \right)\\
+        \varLambda ^{k+1}&\coloneqq \varLambda ^k+\rho \left( S^{k+1}-S_{1}^{k+1} \right)\\
+        \boldsymbol{\sigma }^{k+1}&\coloneqq \boldsymbol{\sigma }^k+\rho \left( \mathbf{y}^{k+1}-\mathbf{y}_{1}^{k+1} \right)\\
+        \varGamma ^{k+1}&\coloneqq \varGamma ^k+\rho \left( T^{k+1}-T_{1}^{k+1} \right)\\
+    \end{aligned}
+\end{equation}
+其中，$\mathbf{x}_1,S_1,\mathbf{y}_1,T_1$的更新可以分别进行，于是可以得到：
+\begin{equation}
+    \label{tab:equ-3-41}
+    \begin{aligned}
+        \mathbf{x}_{1}^{k+1}&=\mathrm{Proj}_{\left\{ \mathbf{x}_1||\left( \mathbf{x}_1 \right) _{:e}|_0\le r \right\}}\left( \mathrm{Proj}_{\left\{ \mathbf{x}_1|\mathbf{x}_1\geqslant 0 \right\}}\left( \mathbf{x}^k+\frac{\boldsymbol{\mu }^k}{\rho} \right) \right) 
+        \\
+        S_{1}^{k+1}&=\mathrm{Proj}_{\left\{ S_1|S_1\preceq \mathbf{0} \right\}}\left( S^k+\frac{\varLambda ^k}{\rho} \right) 
+        \\
+        \mathbf{y}_{1}^{k+1}&=\mathrm{Proj}_{\left\{ \mathbf{y}_1|\mathbf{y}_1\geqslant 0 \right\}}\left( \mathbf{y}^k+\frac{\boldsymbol{\mu }^k}{\rho} \right) 
+        \\
+        T_{1}^{k+1}&=\mathrm{Proj}_{\left\{ T_1|T_1\succcurlyeq \mathbf{0} \right\}}\left( T^k+\frac{\varGamma ^k}{\rho} \right) 
+    \end{aligned}
+\end{equation}
+其中对于$\mathbf{x}_1\geqslant 0$和$\mathbf{y}_1\geqslant 0$，通过保留其中大于等于0的元素并将其他元素置为0进行映射；对于$|\left( \mathbf{x}_1 \right) _{:e}|_0\le r$，通过保留$\mathbf{x}_1$前$e$个元素中最大的$r$个元素并将其他元素置为0进行映射；对于$S_1\preceq \mathbf{0}$，通过下式进行映射：
+\begin{equation}
+    \label{tab:equ-3-42}
+    S_1=U\mathrm{Diag}\left( \min \left( \mathrm{diag}\left( \varSigma \right) ,0 \right) \right) U^T.
+\end{equation}
+其中$U$和$\varSigma$是对$S_1$进行特征值分解得到的单位特征向量和特征值对应的矩阵，$\mathrm{diag}$表示由矩阵的对角线元素构成的向量，$\mathrm{Diag}$表示由向量作为对角线元素得到的矩阵。对于$T_1\succcurlyeq \mathbf{0}$，映射方法与\autoref{tab:equ-3-42}相同。
+
+\autoref{tab:equ-3-40}中对于$\mathbf{x},S,\mathbf{y},T$的更新参考\autoref{tab:equ-3-36}可以得到：
+\begin{equation}
+    \label{tab:equ-3-43}
+    \left[ \begin{matrix}
+        I&		\tilde{A}^T\\
+        \tilde{A}&		\mathbf{0}_{q\times q}\\
+    \end{matrix} \right] \left[ \begin{array}{c}
+        \mathbf{x}_{P}^{k+1}\\
+        \boldsymbol{\lambda }\\
+    \end{array} \right] =\left[ \begin{array}{c}
+        \mathbf{x}_{1}^{k+1}-\frac{\boldsymbol{\mu }^k+\boldsymbol{c}}{\rho}\\
+        \mathrm{vec}\left( S_{1}^{k+1}-\frac{\Lambda ^k}{\rho} \right)\\
+        \mathbf{y}_{1}^{k+1}-\frac{\boldsymbol{\sigma }^k}{\rho}\\
+        \mathrm{vec}\left( T_{1}^{k+1}-\frac{\varGamma ^k}{\rho} \right)\\
+        \mathrm{vec}\left( -B_0 \right)\\
+        \mathrm{vec}\left( 2I \right)\\
+        \mathbf{1}\\
+    \end{array} \right], 
+\end{equation}
+其中
+\begin{equation}
+    \label{tab:equ-3-44}
+    \begin{aligned}
+        \mathbf{x}_P&=\left( \mathbf{x}^T,\mathrm{vec}\left( S \right) ^T,\mathbf{y}^T,\mathrm{vec}\left( T \right) ^T \right) ^T, \\
+        \tilde{A}&=\left[ \begin{matrix}
+            \begin{array}{c}
+            \tilde{B}^-\\
+            \tilde{B}^+\\
+            D\\
+        \end{array}&		\begin{array}{c}
+            I_{n^2}\\
+            \mathbf{0}_{n^2\times n^2}\\
+            \mathbf{0}_{n\times n^2}\\
+        \end{array}&		\begin{array}{c}
+            \mathbf{0}_{n^2\times n}\\
+            \mathbf{0}_{n^2\times n}\\
+            I_n\\
+        \end{array}&		\begin{array}{c}
+            \mathbf{0}_{n^2\times n^2}\\
+            I_{n^2}\\
+            \mathbf{0}_{n\times n^2}\\
+        \end{array}\\
+        \end{matrix} \right] ,
+    \end{aligned}
+\end{equation}
+并且$\tilde{B}^-\mathbf{x}=\mathrm{vec}\left( \mathcal{B} ^-\left( \mathbf{x} \right) \right)$，$\tilde{B}^+\mathbf{x}=\mathrm{vec}\left( \mathcal{B} ^+\left( \mathbf{x} \right) \right)$，$\mathrm{vec}$表示将矩阵按列展开成一维向量。求解\autoref{tab:equ-3-43}即可得到$\mathbf{x},S,\mathbf{y},T$的更新值。
+
+以上即为同构带宽下的拓扑优化问题的求解过程。类似地，引入辅助变量$\mathbf{x}_1,S,S_1,$ $\mathbf{y},\mathbf{y}_1,T,T_1,\mathbf{z},\mathbf{z_1},\mathbf{\nu },\mathbf{\nu }_1$，对异构带宽下的拓扑优化问题\autoref{tab:equ-3-25}进行转换，得到如下形式：
+\begin{equation}
+    \label{tab:equ-3-45}
+    \begin{matrix}
+        \underset{\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1,\mathbf{z},\mathbf{z}_1,\mathbf{\nu },\mathbf{\nu }_1}{\min}&		\boldsymbol{c}^T\mathbf{x}\\
+        s.t.&		\begin{array}{c}
+        \mathcal{B} ^-\left( \mathbf{x} \right) +B_0+S=\mathbf{0},\\
+        \mathcal{B} ^+\left( \mathbf{x} \right) +T=2I,\\
+        D\mathbf{x}+\mathbf{y}=\mathbf{1},\\
+        M\mathbf{z}=\boldsymbol{e},\\
+        \mathbf{g}-\mathbf{z}+\mathbf{\nu }=\mathbf{0},\\
+        \mathbf{x}=\mathbf{x}_1,\mathbf{x}_1\ge 0,\\
+        S=S_1,S_1\preceq \mathbf{0},\\
+        \mathbf{y}=\mathbf{y}_1,\mathbf{y}_1\ge 0,T=T_1,T_1\succcurlyeq \mathbf{0},\\
+        \mathbf{z}=\mathbf{z}_1,\mathbf{z}_1\in \left\{ 0,1 \right\} ^m,\mathbf{\nu }=\mathbf{\nu }_1,\mathbf{\nu }_1\ge 0.\\
+    \end{array}\\
+    \end{matrix}
+\end{equation}
+相应的增广拉格朗日函数为：
+\begin{equation}
+    \begin{aligned}
+    \label{tab:equ-3-46}
+    \mathcal{L} &=\boldsymbol{c}^T\mathbf{x}+\left< \boldsymbol{\mu },\mathbf{x}-\mathbf{x}_1 \right> +\frac{\rho}{2}\left\| \mathbf{x}-\mathbf{x}_1 \right\| _{F}^{2}+\left< \varLambda ,S-S_1 \right> +\frac{\rho}{2}\left\| S-S_1 \right\| _{F}^{2}
+\\
+&+\left< \boldsymbol{\sigma },\mathbf{y}-\mathbf{y}_1 \right> +\frac{\rho}{2}\left\| \mathbf{y}-\mathbf{y}_1 \right\| _{F}^{2}+\left< \varGamma ,T-T_1 \right> +\frac{\rho}{2}\left\| T-T_1 \right\| _{F}^{2}
+\\
+&+\left< \boldsymbol{\iota },\mathbf{z}-\mathbf{z}_1 \right> +\frac{\rho}{2}\left\| \mathbf{z}-\mathbf{z}_1 \right\| _{F}^{2}+\left< \boldsymbol{\kappa },\mathbf{\nu }-\mathbf{\nu }_1 \right> +\frac{\rho}{2}\left\| \mathbf{\nu }-\mathbf{\nu }_1 \right\| _{F}^{2}.
+    \end{aligned}
+\end{equation}
+
+进而得到变量$\mathbf{x}_1,S_1,\mathbf{y}_1,T_1,\mathbf{z}_1,\mathbf{\nu }_1$的更新过程：
+\begin{equation}
+    \label{tab:equ-3-47}
+    \begin{aligned}
+        \mathbf{x}_{1}^{k+1}&=\mathrm{Proj}_{\left\{ \mathbf{x}_1||\left( \mathbf{x}_1 \right) _{:e}|_0\le r \right\}}\left( \mathrm{Proj}_{\left\{ \mathbf{x}_1|\mathbf{x}_1\geqslant 0 \right\}}\left( \mathbf{x}^k+\frac{\boldsymbol{\mu }^k}{\rho} \right) \right) 
+        \\
+        S_{1}^{k+1}&=\mathrm{Proj}_{\left\{ S_1|S_1\preceq \mathbf{0} \right\}}\left( S^k+\frac{\varLambda ^k}{\rho} \right) 
+        \\
+        \mathbf{y}_{1}^{k+1}&=\mathrm{Proj}_{\left\{ \mathbf{y}_1|\mathbf{y}_1\geqslant 0 \right\}}\left( \mathbf{y}^k+\frac{\boldsymbol{\mu }^k}{\rho} \right) 
+        \\
+        T_{1}^{k+1}&=\mathrm{Proj}_{\left\{ T_1|T_1\succcurlyeq \mathbf{0} \right\}}\left( T^k+\frac{\varGamma ^k}{\rho} \right)\\
+        \mathbf{z}_{1}^{k+1}&=\mathrm{Proj}_{\left\{ \mathbf{z}_1|\mathbf{z}_1\in \left\{ 0,1 \right\} ^m \right\}}\left( \mathbf{z}^k+\frac{\boldsymbol{\iota }^k}{\rho} \right)
+        \\
+        \mathbf{\nu }_{1}^{k+1}&=\mathrm{Proj}_{\left\{ \mathbf{\nu }_1|\mathbf{\nu }_1\geqslant 0 \right\}}\left( \mathbf{\nu }^k+\frac{\boldsymbol{\kappa }^k}{\rho} \right)
+    \end{aligned}
+\end{equation}
+其中，对于$\mathbf{z}_1\in \left\{ 0,1 \right\} ^m$，考虑到映射后的结果需要符合边的数目的约束，因此通过将$\mathbf{z}_1$中最大的$r$个元素置为1，并将其他元素置为0进行映射。
+
+变量$\mathbf{x},S,\mathbf{y},T,\mathbf{z},\mathbf{\nu }$的更新结果通过求解下式得到：
+\begin{equation}
+    \label{tab:equ-3-48}
+    \left[ \begin{matrix}
+        I&		\tilde{A}^T\\
+        \tilde{A}&		0_{q\times q}\\
+    \end{matrix} \right] \left[ \begin{array}{c}
+        \mathbf{x}_{P}^{k+1}\\
+        \boldsymbol{\lambda }\\
+    \end{array} \right] =\left[ \begin{array}{c}
+        \mathbf{x}_{1}^{k+1}-\frac{\boldsymbol{\mu }^k+\boldsymbol{c}}{\rho}\\
+        \mathrm{vec}\left( S_{1}^{k+1}-\frac{\Lambda ^k}{\rho} \right)\\
+        \mathbf{y}_{1}^{k+1}-\frac{\boldsymbol{\sigma }^k}{\rho}\\
+        \mathrm{vec}\left( T_{1}^{k+1}-\frac{\varGamma ^k}{\rho} \right)\\
+        \mathbf{z}_{1}^{k+1}-\frac{\boldsymbol{\iota }^k}{\rho}\\
+        \mathbf{\nu }_{1}^{k+1}-\frac{\boldsymbol{\kappa }^k}{\rho}\\
+        \mathrm{vec}\left( -B_0 \right)\\
+        \mathrm{vec}\left( 2I \right)\\
+        \mathbf{1}\\
+        \boldsymbol{e}\\
+        \mathbf{0}\\
+    \end{array} \right] , 
+\end{equation}
+其中
+\begin{equation}
+    \label{tab:equ-3-49}
+    \begin{aligned}
+        \mathbf{x}_P&=\left( \mathbf{x}^T,\mathrm{vec}\left( S \right) ^T,\mathbf{y}^T,\mathrm{vec}\left( T \right) ^T,\mathbf{z}^T,\mathbf{\nu }^T \right) ^T,\\
+        \tilde{A}&=\left[ \begin{matrix}
+        \begin{array}{l}
+        \tilde{B}^-\\
+        \tilde{B}^+\\
+        D\\
+        0_{m\times \left( e+1 \right)}\\
+        I\_\\
+    \end{array}&		\begin{array}{c}
+        I_{n^2}\\
+        \mathbf{0}_{n^2\times n^2}\\
+        \mathbf{0}_{n\times n^2}\\
+        \mathbf{0}_{m\times n^2}\\
+        \mathbf{0}_{e\times n^2}\\
+    \end{array}&		\begin{array}{c}
+        \mathbf{0}_{n^2\times n}\\
+        \mathbf{0}_{n^2\times n}\\
+        I_n\\
+        \mathbf{0}_{m\times n}\\
+        \mathbf{0}_{e\times n}\\
+    \end{array}&		\begin{array}{c}
+        \mathbf{0}_{n^2\times n^2}\\
+        I_{n^2}\\
+        \mathbf{0}_{n\times n^2}\\
+        \mathbf{0}_{m\times n^2}\\
+        \mathbf{0}_{e\times n^2}\\
+    \end{array}&		\begin{array}{c}
+        \mathbf{0}_{n^2\times e}\\
+        \mathbf{0}_{n^2\times e}\\
+        \mathbf{0}_{n\times e}\\
+        M\\
+        -I_e\\
+    \end{array}&		\begin{array}{c}
+        \mathbf{0}_{n^2\times e}\\
+        \mathbf{0}_{n^2\times e}\\
+        \mathbf{0}_{n\times e}\\
+        \mathbf{0}_{m\times e}\\
+        I_e\\
+    \end{array}\\
+    \end{matrix} \right] ,\\
+    \end{aligned}
+\end{equation}
+其中$I\_=\left( I_e,\mathbf{0}_e \right) $，$m$为约束向量$\boldsymbol{e}$的维度。
+
+对偶变量$\boldsymbol{\mu },\varLambda ,\boldsymbol{\sigma },\varGamma ,\boldsymbol{\iota },\boldsymbol{\kappa }$的更新过程：
+\begin{equation}
+    \label{tab:equ-3-50}
+    \begin{aligned}
+        \boldsymbol{\mu }^{k+1}&\coloneqq \boldsymbol{\mu }^k+\rho \left( \mathbf{x}^{k+1}-\mathbf{x}_{1}^{k+1} \right)\\
+	\varLambda ^{k+1}&\coloneqq \varLambda ^k+\rho \left( S^{k+1}-S_{1}^{k+1} \right)\\
+	\boldsymbol{\sigma }^{k+1}&\coloneqq \boldsymbol{\sigma }^k+\rho \left( \mathbf{y}^{k+1}-\mathbf{y}_{1}^{k+1} \right)\\
+	\varGamma ^{k+1}&\coloneqq \varSigma ^k+\rho \left( T^{k+1}-T_{1}^{k+1} \right)\\
+	\boldsymbol{\iota }^{k+1}&\coloneqq \boldsymbol{\iota }^k+\rho \left( \mathbf{z}^{k+1}-\mathbf{z}_{1}^{k+1} \right)\\
+	\boldsymbol{\kappa }^{k+1}&\coloneqq \boldsymbol{\kappa }^k+\rho \left( \mathbf{\nu }^{k+1}-\mathbf{\nu }_{1}^{k+1} \right)\\
+    \end{aligned}
+\end{equation}
+
+
+基于上述分析，总结利用定制化的ADMM算法求解参数同步拓扑优化问题的流程如\autoref{Algorithm-T-ADMM}所示。
+
+\begin{center}
+% \begin{minipage}{8.5cm}
+\begin{algorithm}[!htbp]
+        \caption{定制化的ADMM求解参数同步拓扑优化问题的流程} 
+    %   \small
+        \label{Algorithm-T-ADMM} 
+        \begin{algorithmic}[1]
+        \REQUIRE{$n,r,\rho,\alpha$，初始值$\mathbf{x}^0,\mathbf{x}_{1}^{0},S^0,S_{1}^{0},\mathbf{y}^0,\mathbf{y}_{1}^{0},T^0,T_{1}^{0},\boldsymbol{\mu }^0,\varLambda ^0,\boldsymbol{\sigma }^0,\varGamma ^0$，算法收敛误差$\epsilon$，异构带宽场景还需初始值$\mathbf{z}^0,\mathbf{z}_{1}^{0},\mathbf{\nu }^0,\mathbf{\nu }_{1}^{0},\boldsymbol{\iota }^0,\boldsymbol{\kappa }^0$}；
+        \ENSURE{同构带宽场景为\autoref{tab:equ-3-38}的局部最优解$\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1$，异构带宽场景为\autoref{tab:equ-3-45}的局部最优解，还包括$\mathbf{z},\mathbf{z}_1,\mathbf{\nu },\mathbf{\nu }_1$}；
+        \STATE 令$k=0$；
+        \IF{优化问题是同构带宽场景下的拓扑优化问题：}
+        \WHILE{$\left\| \mathbf{x}^k-\mathbf{x}_{1}^{k} \right\| _{F}^{2}+\left\| S^k-S_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{y}^k-\mathbf{y}_{1}^{k} \right\| _{F}^{2}+\left\| T^k-T_{1}^{k} \right\| _{F}^{2}>\epsilon $}
+            \STATE 基于\autoref{tab:equ-3-41}更新$\mathbf{x}_1,S_1,\mathbf{y}_1,T_1$；
+            \STATE 求解\autoref{tab:equ-3-43}以更新$\mathbf{x},S,\mathbf{y},T$；
+            \STATE 基于\autoref{tab:equ-3-40}更新$\boldsymbol{\mu },\varLambda ,\boldsymbol{\sigma },\varGamma$；
+            \STATE 令$k=k+1$；
+        \ENDWHILE
+        \STATE 确定$\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1$的求解结果。
+        \ELSE 
+        \WHILE{$\left\| \mathbf{x}^k-\mathbf{x}_{1}^{k} \right\| _{F}^{2}+\left\| S^k-S_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{y}^k-\mathbf{y}_{1}^{k} \right\| _{F}^{2}+\left\| T^k-T_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{z}^k-\mathbf{z}_{1}^{k} \right\| _{F}^{2}+\left\| \mathbf{\nu }^k-\mathbf{\nu }_{1}^{k} \right\| _{F}^{2}>\epsilon $}
+            \STATE 基于\autoref{tab:equ-3-47}更新$\mathbf{x}_1,S_1,\mathbf{y}_1,T_1,\mathbf{z}_1,\mathbf{\nu }_1$；
+            \STATE 求解\autoref{tab:equ-3-48}以更新$\mathbf{x},S,\mathbf{y},T,\mathbf{z},\mathbf{\nu }$；
+            \STATE 基于\autoref{tab:equ-3-50}更新$\boldsymbol{\mu },\varLambda ,\boldsymbol{\sigma },\varGamma,\boldsymbol{\iota },\boldsymbol{\kappa }$；
+            \STATE 令$k=k+1$；
+        \ENDWHILE
+        \STATE 确定$\mathbf{x},\mathbf{x}_1,S,S_1,\mathbf{y},\mathbf{y}_1,T,T_1,\mathbf{z},\mathbf{z}_1,\mathbf{\nu },\mathbf{\nu }_1$的求解结果。
+        \ENDIF
+        
+        \end{algorithmic}
+\end{algorithm}
+% \end{minipage}
+\end{center}
+
+\subsection{基于模拟退火算法的拓扑生成方法}
+
+由于\autoref{section3-2}中描述的参数同步拓扑优化问题是非凸问题，因此使用\autoref{Algorithm-T-ADMM}求解得到的结果取决于初始值的选取，特别是当节点数目较大时，随机给定\autoref{Algorithm-T-ADMM}的初始值容易使算法陷入局部最优解，从而无法得到一致性速度更快的参数同步拓扑。根据Koibuchi等人\cite{koibuchi2016optical}对高性能计算系统中网络拓扑的介绍，具有较小平均最短路径长度（Average Shortest Path Length，简称ASPL）的网络拓扑通常能够实现较低的延时，从而使系统具有更好的性能。平均最短路径长度指拓扑中所有节点之间最短路径长度的平均值，\autoref{fig:Fig3-3}是平均最短路径长度的一个示例。相较于随机初始化的拓扑结构，具有较小ASPL的拓扑作为初始拓扑可以在一定程度上帮助\autoref{Algorithm-T-ADMM}优化出一致性速度更快的参数同步拓扑。
+%是异构带宽场景下的优化问题，由于引入了离散变量，
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-3-ASPL-example.pdf}
+    \caption{\label{fig:Fig3-3}平均最短路径长度示例}
+\end{figure}
+
+寻找具有最小ASPL的无向拓扑的问题在图论中被称为ODP（order/degree problem）\cite{koibuchi2016optical}，此类问题要求拓扑满足给定的节点数目和节点度。虽然ODP的定义很简单，但是因为满足给定节点数和节点度的拓扑非常多，所以该问题有很多局部最优点。本小节基于Nakao等人的工作\cite{nakao2019method, nakao2020parallelization, nakao2021graph}，使用模拟退火算法求解ODP。
+
+模拟退火算法（Simulated Annealing，简称SA）是一种启发式优化算法，它通过模拟固体在高温时的随机运动，逐渐冷却以达到能量最低点，来搜索问题的全局最优解或近似最优解。SA以一定概率接受较差解的特性使它能够跳出局部最优解，有效地进行全局搜索。另外，与其他进化算法相比，SA更简单、更通用，因此更容易应用于实际问题。
+
+基于SA求解ODP主要包括七个步骤：1）初始化，生成初始拓扑并计算初始能量值，即ASPL值；2）突变，生成新的拓扑；3）评估，计算新生成拓扑与当前拓扑的能量差；4）接受条件，根据能量差计算接受概率并判断是否接受新拓扑；5）更新，如果判断为接受则利用新拓扑更新解；6）冷却，基于退火公式降低温度参数；7）算法终止条件，判断是否终止SA执行。在初始化之后，算法将迭代执行步骤2）到步骤6），直到达到设定的迭代次数则终止算法。下面具体介绍上述算法执行过程中的前六步。
+
+\textbf{1）初始化}
+
+根据节点数目和节点的度随机生成一个初始拓扑，并计算该初始拓扑的ASPL值。考虑到计算ASPL的过程需要获得每个节点到其他所有节点的最短路径，为了减少计算时间，基于位运算计算ASPL，计算过程如\autoref{Algorithm-ASPL}所示。\autoref{fig:Fig3-4}展示了计算\autoref{fig:Fig3-3}中拓扑的ASPL时邻接矩阵$\mathrm{A}$的变化。
 \begin{center}
     % \begin{minipage}{8.5cm}
     \begin{algorithm}[!htbp]
-            \caption{节点$i$上的BA-QDSGD算法的伪代码} 
+            \caption{ASPL计算过程} 
         %   \small
-            \label{Algorithm-BA-QDSGD} 
+            \label{Algorithm-ASPL} 
             \begin{algorithmic}[1]
-            \REQUIRE{模型参数初始值$\boldsymbol{x}_{i,0}$，状态变量初始值$H_{i,x,0}=\mathbf{0}$，参数$\left( \alpha ,\eta \right) $，步长$\gamma$，权重矩阵$W$，带宽矩阵$B$，量化比特数$\mathrm{b}$，迭代次数$K$}；
-            \ENSURE{所有节点模型参数的平均值$\frac{1}{n}\sum_{i=1}^n{\boldsymbol{x}_{i,K}}$}；
-            \STATE 初始化参数状态变量的加权平均值：$H_{i,x,w,0}=\sum_{j=1}^n{W_{ij}}H_{j,x,0}=\mathbf{0}$；
-            \FOR{$k=0,1,...,K-1$}
-                \STATE 根据带宽矩阵和量化比特数对参数进行差分压缩：\\\begin{center}$Q_{i,j,x,k}=compress\left( \boldsymbol{x}_{i,k}-H_{i,x,k},B,\mathrm{b} \right) ,\ j\in \mathcal{N} _{i}^{out} $；\end{center}
-                \STATE 计算参数估计值：$\hat{\boldsymbol{x}}_{i,k}=H_{i,x,k}+Q_{i,i,x,k}$；
-                \STATE 利用参数同步拓扑对压缩后的值进行通信，并将加权平均值与$H_{i,x,w,k}$求和得到$\hat{\boldsymbol{x}}_{i,w,k}$：\\\begin{center}$\hat{\boldsymbol{x}}_{i,w,k}=H_{i,x,w,k}+\sum_{j=1}^n{W_{ij}}Q_{j,i,x,k}$；\end{center}
-                \STATE 更新参数对应的状态变量：\\\begin{center}$H_{i,x,k+1}=\alpha H_{i,x,k}+\left( 1-\alpha \right) \hat{\boldsymbol{x}}_{i,k},$\\$H_{i,x,w,k+1}=\alpha H_{i,x,w,k}+\left( 1-\alpha \right) \hat{\boldsymbol{x}}_{i,w,k}$；\end{center}
-                \STATE 更新参数：$\boldsymbol{x}_{i,k+1}=\boldsymbol{x}_{i,k}-\eta \left( \hat{\boldsymbol{x}}_{i,k}-\hat{\boldsymbol{x}}_{i,w,k} \right) -\gamma \nabla f_i\left( \boldsymbol{x}_{i,k} \right) $。
-            \ENDFOR            
+            \REQUIRE{节点数$n$和每个节点的邻居$\mathcal{N}_i$}；
+            \ENSURE{ASPL值}；
+            \STATE 初始化拓扑的直径$\mathrm{diameter}=1$，所有节点之间的距离和$\mathrm{distance}=n(n-1)$；
+            \STATE 初始化邻接矩阵$\mathrm{A}^0=\left( 2^{n-1},...,1 \right) ^T,\mathrm{B}^0=\mathrm{A}^0$，其中$\mathrm{A}^k$的第$i\left(i=1,...,n\right)$个元素的最低位$n$个比特表示节点$i$在距离$k$以内是否能够到达其他节点；
+            \FOR{$k=1,...,n-1$}
+                \FOR{$i=1,...,n$}
+                    \STATE $\mathrm{B}^k\left[ i \right] =\mathrm{B}^{k-1}\left[ i \right] $；
+                    \FOR{$j\in\mathcal{N}_i$}
+                        \STATE $\mathrm{B}^k\left[ i \right] =\mathrm{B}^k\left[ i \right] |\mathrm{A}^{k-1}\left[ j \right] $；
+                    \ENDFOR
+                \ENDFOR
+                \IF{$\mathrm{B}^k=\mathrm{A}^{k-1}$}
+                    \STATE 拓扑不连通，结束执行；
+                \ENDIF
+                \STATE 令$\mathrm{num}=0$表示邻接矩阵$\mathrm{B}^k$中比特值为1的数量；
+                \FOR{$i=1,...,n$}
+                    \STATE 统计$\mathrm{B}^k\left[ i \right]$的二进制形式中1的数量$\mathrm{num}_i$；
+                    \STATE $\mathrm{num}=\mathrm{num}+\mathrm{num}_i$；
+                \ENDFOR
+                \IF{$\mathrm{num}=n\times n$}
+                    \STATE 结束循环；
+                \ENDIF
+                \STATE $\mathrm{A}^k=\mathrm{B}^k$；
+                \STATE $\mathrm{diameter}++$；
+                \STATE $\mathrm{distance}=\mathrm{distance}+\left( n\times n-\mathrm{num} \right) $；
+            \ENDFOR
+            \STATE $ASPL=\frac{\mathrm{dis}\tan\mathrm{ce}}{n\left( n-1 \right)}$。
             \end{algorithmic}
     \end{algorithm}
-    % \end{minipage}
+% \end{minipage}
 \end{center}
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter3/fig3-4-ASPL-example2.pdf}
+    \caption{\label{fig:Fig3-4}ASPL计算过程中邻接矩阵的变化}
+\end{figure}
 
+\textbf{2）突变}
 
+为了生成新的拓扑，使用\autoref{fig:Fig3-5}所示的2-opt方法对拓扑中的边进行突变。首先从拓扑中随机选取两条边，然后使用这两条边的端点生成两条新的边，生成结果有两种：第一种是分别将1和4、2和3连接；第二种是分别将1和3、2和4连接。随机选择两种突变结果中的一种用于得到新的拓扑，这种突变方式能够保证每个节点的度始终不变。为了避免突变后的拓扑与当前拓扑相同，需要保证随机选取的两条边没有公共端点，另外如果经过突变生成的边在当前拓扑中已经存在，则需要重新进行突变。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.6\linewidth]{figure/chapter3/fig3-5-2opt.pdf}
+    \caption{\label{fig:Fig3-5}基于2-opt的突变}
+\end{figure}
+
+\textbf{3）评估}
+
+利用\autoref{Algorithm-ASPL}计算新生成拓扑的能量值$E\left( \mathcal{G} _{new} \right) $，并计算与当前拓扑的能量差，为了便于温度参数的计算，使用$n\times \left(n-1\right)$对能量差进行缩放。
+\begin{equation}
+    \label{tab:equ-3-51}
+    \varDelta E=\left( E\left( \mathcal{G} _{new} \right) -E\left( \mathcal{G} _{k} \right) \right) \times \left( n^2-n \right) ,
+\end{equation}
+其中$\mathcal{G} _{k}$为SA执行到第$k$次迭代时的拓扑。
+
+\textbf{4）接受条件}
+
+在得到能量差之后，基于下式计算接受新拓扑的概率：
+\begin{equation}
+    \label{tab:equ-3-52}
+    \mathrm{Prob}=\left\{ \begin{array}{c}
+        1\\
+        \exp \left( -\frac{\varDelta E}{T_k} \right)\\
+    \end{array} \right. ,
+\end{equation}
+其中$T_k$是第$k$次迭代的温度参数值，$T_k$越大，接受概率越大。当新拓扑的ASPL值小于当前拓扑时，直接接受新拓扑，否则根据概率值决定是否接受。
+
+\textbf{5）更新}
+
+如果接受新拓扑，则令新拓扑为当前拓扑。
+
+\textbf{6）冷却}
+
+基于\autoref{tab:equ-3-53}中的指数退火公式降低温度参数$T_k$，其中$\beta$是冷却率。根据给定的初始温度$T_0$，终止温度$T_N$以及迭代次数$N$，可以得到冷却率$\beta =\left( \frac{T_N}{T_0} \right) ^{\frac{1}{N}}$。
+\begin{equation}
+    \label{tab:equ-3-53}
+    T_{k+1} = \beta \times T_{k}.
+\end{equation}
+
+综上所述，基于SA生成拓扑的算法流程如下。
 \begin{center}
     % \begin{minipage}{8.5cm}
     \begin{algorithm}[!htbp]
-            \caption{节点$i$上的BA-QDSGT算法的伪代码} 
-        %   \small
-            \label{Algorithm-BA-QDSGT} 
-            \begin{algorithmic}[1]
-            \REQUIRE{模型参数初始值$\boldsymbol{x}_{i,0}$，辅助变量初始值$\boldsymbol{y}_{i,0}=\nabla f_i\left( \boldsymbol{x}_{i,0} \right) $，状态变量初始值$H_{i,x,0}=\mathbf{0}$和$H_{i,y,0}=\mathbf{0}$，参数$\left( \alpha ,\eta \right) $，步长$\gamma$，权重矩阵$W$，带宽矩阵$B$，量化比特数$\mathrm{b}$，迭代次数$K$}；
-            \ENSURE{所有节点模型参数的平均值$\frac{1}{n}\sum_{i=1}^n{\boldsymbol{x}_{i,K}}$}；
-            \STATE 初始化参数状态变量的加权平均值：$H_{i,x,w,0}=\sum_{j=1}^n{W_{ij}}H_{j,x,0}=\mathbf{0}$；
-            \STATE 初始化梯度状态变量的加权平均值：$H_{i,y,w,0}=\sum_{j=1}^n{W_{ij}}H_{j,y,0}=\mathbf{0}$；
-            \FOR{$k=0,1,...,K-1$}
-                \STATE 根据带宽矩阵和量化比特数对参数进行差分压缩：\\\begin{center}$Q_{i,j,x,k}=compress\left( \boldsymbol{x}_{i,k}-H_{i,x,k},B,\mathrm{b} \right) ,\ j\in \mathcal{N} _{i}^{out} $；\end{center}
-                \STATE 计算参数估计值：$\hat{\boldsymbol{x}}_{i,k}=H_{i,x,k}+Q_{i,i,x,k}$；
-                \STATE 利用参数同步拓扑对压缩后的值进行通信，并将加权平均值与$H_{i,x,w,k}$求和得到$\hat{\boldsymbol{x}}_{i,w,k}$：$\hat{\boldsymbol{x}}_{i,w,k}=H_{i,x,w,k}+\sum_{j=1}^n{W_{ij}}Q_{j,i,x,k}$；
-                \STATE 更新参数对应的状态变量：\\\begin{center}$H_{i,x,k+1}=\alpha H_{i,x,k}+\left( 1-\alpha \right) \hat{\boldsymbol{x}}_{i,k},$\\$H_{i,x,w,k+1}=\alpha H_{i,x,w,k}+\left( 1-\alpha \right) \hat{\boldsymbol{x}}_{i,w,k}$；\end{center}
-                \STATE 更新参数：$\boldsymbol{x}_{i,k+1}=\boldsymbol{x}_{i,k}-\eta \left( \hat{\boldsymbol{x}}_{i,k}-\hat{\boldsymbol{x}}_{i,w,k} \right) -\gamma \boldsymbol{y}_{i,k}$；
-
-                \STATE 根据带宽矩阵和量化比特数对梯度进行差分压缩：\\\begin{center}$Q_{i,j,y,k}=compress\left( \boldsymbol{y}_{i,k}-H_{i,y,k},B,\mathrm{b} \right) ,\ j\in \mathcal{N} _{i}^{out} $；\end{center}
-                \STATE 计算梯度估计值：$\hat{\boldsymbol{y}}_{i,k}=H_{i,y,k}+Q_{i,i,y,k}$；
-                \STATE 利用参数同步拓扑对压缩后的值进行通信，并将加权平均值与$H_{i,y,w,k}$求和得到$\hat{\boldsymbol{y}}_{i,w,k}$：$\hat{\boldsymbol{y}}_{i,w,k}=H_{i,y,w,k}+\sum_{j=1}^n{W_{ij}}Q_{j,i,y,k}$；
-                \STATE 更新梯度对应的状态变量：\\\begin{center}$H_{i,y,k+1}=\alpha H_{i,y,k}+\left( 1-\alpha \right) \hat{\boldsymbol{y}}_{i,k},$\\$H_{i,y,w,k+1}=\alpha H_{i,y,w,k}+\left( 1-\alpha \right) \hat{\boldsymbol{y}}_{i,w,k}$；\end{center}
-                \STATE 更新梯度：$\boldsymbol{y}_{i,k+1}=\boldsymbol{y}_{i,k}-\eta \left( \hat{\boldsymbol{y}}_{i,k}-\hat{\boldsymbol{y}}_{i,w,k} \right) +\nabla f_i\left( \boldsymbol{x}_{i,k+1} \right) -\nabla f_i\left( \boldsymbol{x}_{i,k} \right) $。
-            \ENDFOR            
-            \end{algorithmic}
+        \caption{基于SA生成拓扑的算法流程} 
+    %   \small
+        \label{Algorithm-SA} 
+        \begin{algorithmic}[1]
+        \REQUIRE{节点数目$n$，节点的度$\boldsymbol{d}$}，迭代次数$N$，初始温度参数$T_0$，冷却率$\beta$；
+        \ENSURE{生成的拓扑结构$\mathcal{G}$}；
+        \STATE 初始化拓扑结构$\mathcal{G}_0$和能量值$E\left(\mathcal{G}_0\right)$；
+        \FOR{$k=1,...,N$}
+            \STATE 基于2-opt突变生成新的拓扑$\mathcal{G} _{new}$；
+            \STATE 基于\autoref{tab:equ-3-51}评估新拓扑与当前拓扑的能量差；
+            \STATE 基于\autoref{tab:equ-3-52}计算接受新拓扑的概率，并判断是否接受新拓扑；
+            \IF{接受新拓扑}
+                \STATE 更新当前拓扑；
+                \STATE 基于\autoref{tab:equ-3-53}调整温度参数；
+            \ENDIF
+        \ENDFOR
+        \STATE 得到生成的拓扑结构$\mathcal{G}$。
+    \end{algorithmic}
     \end{algorithm}
-    % \end{minipage}
+% \end{minipage}
 \end{center}
 
-算法中的$compress$函数为\autoref{tab:equ-4-8}的压缩函数，$H_{i,x}$和$H_{i,y}$是节点$i$用于实现差分压缩而引入的状态变量，$Q_{i,j,x}$和$Q_{i,j,y}$是根据边$\left\{ i,j \right\} $上的量化比特数进行差分压缩得到的结果，$\mathcal{N} _{i}^{out}$是节点$i$的出邻居。随着算法的运行，$H_{i,x}$和$H_{i,y}$最终将分别收敛到参数$\boldsymbol{x}_i$和辅助变量$\boldsymbol{y}_i$，从而使得由差分压缩导致的误差消失。此外，将BA-QDSGT算法中$n$个节点的参数更新公式合并可以得到：
-\begin{equation}
-    \label{tab:equ-4-13}
-    \boldsymbol{x}_{k+1}=\boldsymbol{x}_k-\eta \left( I-W \right) \hat{\boldsymbol{x}}_k-\gamma \boldsymbol{y}_k.
-\end{equation}
-对于BA-QDSGD算法，式中的$\boldsymbol{y}_k$替换为$\nabla f\left( \boldsymbol{x}_k \right) $。令参数压缩误差$\boldsymbol{e}_{x,k}=\boldsymbol{x}_k-\hat{\boldsymbol{x}}_k$，则有：
-\begin{equation}
-    \label{tab:equ-4-14}
-    \begin{aligned}
-        \boldsymbol{x}_{k+1}&=\boldsymbol{x}_k-\eta \left( I-W \right) \left( \boldsymbol{x}_k-\boldsymbol{e}_{x,k} \right) -\gamma \boldsymbol{y}_k
-        \\
-        &=\left[ \left( 1-\eta \right) +\eta W \right] \boldsymbol{x}_k-\gamma \boldsymbol{y}_k+\eta \left( I-W \right) \boldsymbol{e}_{x,k}.
-    \end{aligned}
-\end{equation}
-式中的最后一项$\eta \left( I-W \right) \boldsymbol{e}_{x,k}$说明每个节点会将其压缩误差在本地累加，同时随着参数发送给其他节点，从而实现全局压缩误差补偿。同样地，辅助变量$\boldsymbol{y}$也会实现压缩误差补偿。
-
-BA-QDSGT算法的另一个比较重要的特点是保证了梯度跟踪方法的有效性，将$n$个节点的梯度更新公式合并可以得到：
-\begin{equation}
-    \label{tab:equ-4-15}
-    \boldsymbol{y}_{k+1}=\boldsymbol{y}_k-\eta \left( I-W \right) \hat{\boldsymbol{y}}_k+\nabla f\left( \boldsymbol{x}_{k+1} \right) -\nabla f\left( \boldsymbol{x}_k \right) .
-\end{equation}
-对等式两边同时左乘$\mathbf{1}^T$后，得到：
-\begin{equation}
-    \label{tab:equ-4-16}
-    \begin{aligned}
-        1^T\boldsymbol{y}_{k+1}&=1^T\left( \boldsymbol{y}_k-\eta \left( I-W \right) \hat{\boldsymbol{y}}_k+\nabla f\left( \boldsymbol{x}_{k+1} \right) -\nabla f\left( \boldsymbol{x}_k \right) \right) 
-        \\
-        &=1^T\boldsymbol{y}_k+1^T\nabla f\left( \boldsymbol{x}_{k+1} \right) -1^T\nabla f\left( \boldsymbol{x}_k \right) 
-        \\
-        &=1^T\nabla f\left( \boldsymbol{x}_{k+1} \right) .
-    \end{aligned}
-\end{equation}
-这说明当辅助变量收敛到一致时，所有节点都能够跟踪全局平均梯度，从而保证本地参数朝相同方向更新。
+由于ODP问题要求拓扑中节点的度给定，在\autoref{section3-2}描述的参数同步拓扑优化问题中，节点带宽异构和服务器间交换机端口带宽异构两种场景下对边的数目的约束都可以看作是对节点度的约束，因此本章将基于SA生成的拓扑结构作为这两种场景的初始拓扑结构，用于改进最终求解得到的参数同步拓扑，并且实验结果中也证明了基于SA生成初始拓扑的有效性。对于同构带宽和服务器内部链路带宽异构场景，则随机初始化拓扑，其优化问题求解结果同样优于现有的参数同步拓扑。
 
 \section{算力分析}
-本节对提出的BA-QDSGD算法和BA-QDSGT算法的有效性进行验证，并与现有的分布式训练算法进行对比分析。所有实验都是在同一个硬件系统上完成的，该系统配备了2个Intel Xeon Gold 6226R处理器和8个NVIDIA GeForce RTX 2080 Ti，每个GPU有11GB显存。该硬件系统采用\autoref{fig:Fig2-4}所示的标准服务器架构。本节的实验使用pytorch实现。
+本节对提出的参数同步拓扑优化方法的有效性进行验证，并与现有的参数同步拓扑进行对比分析。所有实验都是在同一个硬件系统上完成的，该系统配备了2个Intel Xeon Gold 6226R处理器和8个NVIDIA GeForce RTX 2080 Ti，每个GPU有11GB显存。该硬件系统采用\autoref{fig:Fig2-4}所示的标准服务器架构。本节的实验使用pytorch实现。
 
 \subsection{实验设置}
-本节选用Cifar10数据集和ResNet-18模型进行分布式深度学习实验。为了增加通信时间以进一步体现量化方法的性能，本节对ResNet-18模型进行了微调，在输出层之前增加三个神经元数目分别为4096、4096和512的全连接层，从而使模型参数量增加至32154186。在训练开始之前，每个节点从每个类别的训练数据中随机采样相同数量的样本构成本地训练数据集。实验的超参数中批大小设置为32（每个节点），初始学习率设置为0.1，并分别在第30个训练周期和第60个训练周期将学习率缩小10倍，训练周期数设置为100，动量因子设置为0.9，权重衰减设置为0.0001。另外，BA-QDSGD算法和BA-QDSGT算法中的参数$\alpha$设置为0.5，$\eta$设置为1。
+为了充分评估基于本章提出的方法获得的参数同步拓扑的性能，本节分别进行了一致性实验和分布式深度学习实验。一致性实验是指在给定拓扑上执行\autoref{section3-2-1}中描述的线性平均一致迭代过程，并根据一致性误差随时间的变化评估考虑通信开销时拓扑的一致性速度。在分布式深度学习实验中，训练算法使用分布式随机梯度下降算法（算法细节见{subsection-4-2-1}），数据集选用Cifar10和Cifar100图像分类数据集，神经网络模型采用ResNet-18。Cifar10和Cifar100数据集均包含60000张32×32像素的彩色图像。其中，Cifar10数据集涵盖10个类别，每个类别有6000张图像；而Cifar100数据集则包含100个类别，每个类别有600张图像。在这60000张图像中，50000张被用作训练数据，另外10000张用于测试。在训练开始之前，每个节点从每个类别的训练数据中随机采样相同数量的样本构成本地训练数据集。实验的超参数中批大小设置为32（每个节点），学习率设置为0.05，动量因子设置为0.9，权重衰减设置为0.0001，训练周期数设置为100。
+%介绍数据划分方式
+%为了充分验证参数同步拓扑对分布式深度学习的影响，本章对实验数据进行同构划分和异构划分。其中同构划分指每个节点从每个类别的数据中随机采样相同数量的样本构成本地训练数据集，从而保证不同节点的本地数据符合独立同分布。而异构划分指每个节点仅随机采样部分类别的数据，构成本地训练数据集，从而使每个节点的本地数据不为独立同分布。在异构的数据上进行训练能够更好地表现出一致性速度对模型收敛速度和模型精度的影响。本章的异构划分方式中，每个节点从Cifar10数据集中随机采样7个类别的数据，而从Cifar100数据集中随机采样80个类别的数据。图以Cifar10为例展示了每个节点上采样的数据类别。
 
-实验中采用的参数同步拓扑基于第三章的优化方法得到，根据第二章的测试结果，服务器内部三种物理链路的带宽比为$e_{PIX}:e_{NODE}:e_{SYS}=9.76GB/s:11.05GB/s:11.03GB/s$，令边的数目分别为9和16，基于\autoref{Algorithm-T-ADMM}得到如\autoref{fig:Fig4-3}所示的两个参数同步拓扑。本节的分布式深度学习实验将在这两个参数同步拓扑上进行。
+另外在参数同步拓扑优化问题求解时，ADMM算法的收敛误差$\epsilon$设置为0.0001，惩罚项的权重$\rho$设置为10，$\alpha$设置为1，SA的迭代次数$N$设置为100000，初始温度参数$T_0$设置为使ASPL值最大的拓扑以50\%的概率被接受的温度值，对于不同的场景，该温度值不同，终止温度参数$T_N$设置为比当前拓扑ASPL值更大的拓扑以不大于0.01\%的概率被接受的温度值，由于采用2-opt进行突变时，比当前拓扑ASPL值更大的拓扑与当前拓扑的能量差至少为2，因此基于\autoref{tab:equ-3-52}设置终止温度参数为0.22。
+
+本节将优化得到的参数同步拓扑与五种现有的参数同步拓扑进行了对比，包括环形拓扑、网格拓扑（2D-grid）、2D-torus、指数拓扑和随机拓扑，\autoref{fig:Fig3-6}展示了8个节点上这五种拓扑的结构。其中前三种拓扑的权重矩阵基于Metropolis规则\cite{nedic2018network}生成：
+\begin{equation}
+    \label{tab:equ-3-54}
+    W_{ij}=\frac{1}{2\max \left\{ d_i,d_j \right\}} \ i,j\in \left\{ 1,...,n \right\} 
+\end{equation}
+式中$d_i$表示节点$i$的度。指数拓扑为有向拓扑，其每个节点将数据乘以$\frac{1}{d_{out}+1}$后发送给出邻居和节点本身，$d_{out}$为节点的出度。随机拓扑的每条边以0.5的概率生成，并且边的权重等于$\frac{1}{d_{\max}}$，$d_{\max}$为拓扑的最大度（无向拓扑中指度最大的节点的度），例如图\autoref{random-topo}中$d_{\max}=5$。本章研究和对比的拓扑中，除指数拓扑外均为无向拓扑，由于Gossip架构上一条无向边可以看作两条有向边，并且本章考虑的边的数目为无向边的数目，因此令指数拓扑中边的数目为有向边数目的$\frac{1}{2}$。
 
 \begin{figure}[!htbp]
     \centering
-    \subfigure[$r=9$]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-3-topo1.pdf}
+    \subfigure[环形拓扑]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-1-different-topo.pdf}
     }
-    \subfigure[$r=16$]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-3-topo2.pdf}
+    \subfigure[网格拓扑]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-2-different-topo.pdf}
     }
-    \caption{\label{fig:Fig4-3}分布式深度学习实验采用的参数同步拓扑}
+    \subfigure[2D-Torus]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-3-different-topo.pdf}
+    }
+    \subfigure[指数拓扑]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-4-different-topo.pdf}
+    }
+    \subfigure[随机拓扑]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-5-different-topo.pdf}
+        \label{random-topo}
+    }
+    \caption{\label{fig:Fig3-6}现有的参数同步拓扑}
 \end{figure}
 
-本节对比的分布式训练算法包括DSGD算法、DSGT算法、Choco-SGD算法\cite{koloskova2019decentralized}和C-GT算法\cite{li2021compressed}。其中Choco-SGD算法和C-GT算法分别对DSGD算法和DSGT算法引入了差分压缩和压缩误差补偿策略。对比实验分两组进行，第一组实验对比无梯度跟踪的算法，包括DSGD算法、Choco-SGD算法和本章提出的BA-QDSGD算法；第二组对比有梯度跟踪的算法，包括DSGT算法、C-GT算法和本章提出的BA-QDSGT算法。
+为了模拟不同的带宽场景，本节采用第二章中获得计算时间和通信时间的方法，测试了在单个2080Ti上训练ResNet-18一次迭代的计算时间和在带宽为9.76GB/s的链路上通信ResNet-18的模型参数的通信时间，分别为15.21ms和5.01ms，并以测试结果为基准，对不同场景下一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放。缩放方式如下：
+\begin{itemize}
+    \item 首先计算拓扑中每条边的可用带宽，并确定其中最小的可用带宽，假设为$b_{min}$；
+    \item 对于一致性实验，根据9.76与$b_{min}$的比值对迭代时间进行缩放：
+    \begin{equation}
+        \label{tab:equ-3-55}
+        t_{iter}=\frac{9.76}{b_{min}}\times 5.01;
+    \end{equation}
+    \item 对于分布式深度学习实验，根据9.76与$b_{min}$的比值对每次迭代的通信时间进行缩放，并基于批大小和节点数获得一个训练周期所需的迭代次数$c_{iter}$，进而计算一个训练周期所需时间：
+    \begin{equation}
+        \label{tab:equ-3-56}
+        t_{epoch}=\left( \frac{9.76}{b_{min}}\times 5.01+15.21 \right) \times c_{iter}.
+    \end{equation}
+\end{itemize}
 
 \subsection{实验结果与分析}
-本小节首先在两种参数同步拓扑上验证了本章提出的BA-QDSGD算法和BA-QDS GT算法的收敛性。根据服务器上的实际物理链路带宽以及两种参数同步的结构，可以得到两种参数同步拓扑对应的带宽矩阵为：
-\begin{figure}[!htbp]
-    \centering
-    \subfigure{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-4-matrix1.pdf}
-    }
-    \subfigure{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-4-matrix2.pdf}
-    }
-    \caption{\label{fig:Fig4-4}两种参数同步拓扑对应的带宽矩阵}
-\end{figure}
+本小节从以下几个方面设计实验以验证本章提出的参数同步拓扑优化方法的有效性：实验1在8个节点上验证了本章提出的定制化ADMM算法求解参数同步拓扑优化问题的收敛性；实验2通过一致性实验和分布式深度学习实验，对比了同构带宽场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能；实验3通过一致性实验和分布式深度学习实验，对比了节点带宽异构场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能；实验4通过一致性实验和分布式深度学习实验，对比了服务器内部链路带宽异构场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能；实验5通过一致性实验和分布式深度学习实验，对比了服务器间交换机端口带宽异构场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能。
 
-令量化比特数$\mathrm{b}$分别等于2、4和8，在两种参数同步拓扑上利用本章提出的算法和对比的算法进行分布式深度学习实验，得到如\autoref{fig:Fig4-5}至\autoref{fig:Fig4-8}所示的实验结果。每组实验结果中，左子图为损失函数值随训练周期数的变化，右子图为测试准确率随训练周期数的变化\footnote{损失函数值和测试准确率均为所有节点的平均值。}。可以看到对于设定的量化比特数，本章提出的BA-QDSGD算法和BA-QDSGT算法均能够收敛，并且损失函数值和测试准确率能够达到与没有采用量化策略的DSGD算法和DSGT算法相同的数值结果。另外不难发现，当量化比特数为2时，本节对比的量化分布式训练算法Choco-SGD算法和C-GT算法都会出现测试准确率下降的情况，而BA-QDSGD算法和BA-QDSGT算法仍然保持较高的测试准确率，这说明通过引入带宽自适应策略提高某些高带宽边上的量化比特数能够提高模型精度。此外，在$r=9$对应的参数同步拓扑上有梯度跟踪的算法的实验结果中，量化比特数为4时C-GT算法和BA-QDSGT算法的测试准确率出现了一定程度的下降，这是因为同时对模型参数和梯度相关的辅助变量进行量化使得模型精度受到了影响，而在$r=16$对应的参数同步拓扑上该现象消失了，因为该拓扑比$r=9$对应的参数同步拓扑更稠密，一致性速度更快，从而减轻了量化导致的精度损失。
+\textbf{实验1：}为了验证定制化ADMM算法求解参数同步拓扑优化问题的收敛性，本节以同构带宽场景下的拓扑优化问题为例，令节点数目为8，边的数目为12，求解得到的拓扑和相应的权重矩阵如\autoref{fig:Fig3-7}所示，其中边的粗细表示边的权重大小，边越粗权重越大。可以看到，优化得到的参数同步拓扑中每个节点的度均为3，并且边的权重具有一定的对称性。优化问题求解过程中优化目标值$\tilde{\lambda}$和变量收敛误差随迭代次数的变化如\autoref{fig:Fig3-8}所示。其中优化目标值随迭代次数不断增加，并在达到最优值后保持不变，而且每组变量的误差也能够在1000次迭代后达到$10^{-5}$以下，从而充分说明了\autoref{Algorithm-T-ADMM}的收敛性。
 
 \begin{figure}[!htbp]
     \centering
     \subfigure{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-5-SGD-loss-122.pdf}
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-6-1-topo-architecture.pdf}
     }
     \subfigure{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-5-SGD-acc-122.pdf}
+        \includegraphics[width=0.54\linewidth]{figure/chapter3/fig3-6-2-weight-matrix.pdf}
     }
-    \caption{\label{fig:Fig4-5}$r=9$对应的参数同步拓扑上无梯度跟踪的算法的实验结果}
+    \caption{\label{fig:Fig3-7}同构带宽场景下$n=8,r=12$时求解得到的参数同步拓扑}
 \end{figure}
 
 \begin{figure}[!htbp]
     \centering
-    \subfigure{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-5-SGD-loss-144.pdf}
+    \subfigure[优化目标]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-7-1-lambda_.pdf}
     }
-    \subfigure{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-5-SGD-acc-144.pdf}
+    \subfigure[收敛误差]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-7-2-resid.pdf}
     }
-    \caption{\label{fig:Fig4-6}$r=16$对应的参数同步拓扑上无梯度跟踪的算法的实验结果}
+    \caption{\label{fig:Fig3-8}优化目标和收敛误差随迭代次数的变化}
 \end{figure}
 
-\begin{figure}[!htbp]
+\textbf{实验2：}为了验证同构带宽场景下参数同步拓扑优化方法的有效性，本节将基于\autoref{Algorithm-T-ADMM}得到的参数同步拓扑（T-ADMM）与现有的参数同步拓扑进行比较。首先进行一致性实验：令节点数目为16，边的数目分别为16，24，32和54，随机初始化边的权重并求解得到不同边的数目对应的参数同步拓扑；然后，为每个节点随机初始化维度与ResNet-18模型参数量相同的数据（经统计，ResNet-18模型参数量为11689512）；在求解得到的参数同步拓扑和现有的参数同步拓扑上执行线性平均一致问题的迭代过程，并记录一致性误差$\left\| \boldsymbol{x}_k-\bar{\boldsymbol{x}} \right\| _2$随迭代次数$k$的变化。在同构带宽场景下，每个节点的带宽相同，假设为9.76GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\min \left( \frac{9.76}{d_i},\frac{9.76}{d_j} \right) $，$d_i$和$d_j$为节点$i$和节点$j$的度（指数拓扑中为节点的出度/入度）。对迭代时间进行缩放后，不同拓扑的一致性误差随时间的变化如\autoref{fig:Fig3-9}所示。图中$r$为边的数目，$d$为拓扑的最大度。可以看到，当边的数目相同时，T-ADMM的一致性速度均优于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时T-ADMM的一致性速度最快。在对比的拓扑中，指数拓扑的一致性速度最快，为了进一步比较T-ADMM与指数拓扑的性能，本节还在不同的节点数目上对比了两者的渐进收敛因子和一致性误差达到0.0001所需的收敛时间，实验结果如\autoref{tab:iso-bandwidth-consensus}所示。当节点数目从6增加到32时，T-ADMM的渐进收敛因子和收敛时间始终小于指数拓扑，充分说明了T-ADMM在一致性速度上优于指数拓扑。
+
+\begin{figure}[!htbp]   
     \centering
-    \subfigure{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-7-SGT-loss-122.pdf}
-    }
-    \subfigure{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-7-SGT-acc-122.pdf}
-    }
-    \caption{\label{fig:Fig4-7}$r=9$对应的参数同步拓扑上有梯度跟踪的算法的实验结果}
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-9-iso-bandwidth-consensus.pdf}
+    \caption{\label{fig:Fig3-9}同构带宽场景下一致性误差随时间的变化}
 \end{figure}
 
-\begin{figure}[!htbp]
-    \centering
-    \subfigure{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-7-SGT-loss-144.pdf}
-    }
-    \subfigure{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-7-SGT-acc-144.pdf}
-    }
-    \caption{\label{fig:Fig4-8}$r=16$对应的参数同步拓扑上有梯度跟踪的算法的实验结果}
-\end{figure}
-
-下面在两种参数同步拓扑上验证本章提出的BA-QDSGD算法和BA-QDSGT算法对分布式深度学习训练效率的提升。\autoref{fig:Fig4-9}和\autoref{fig:Fig4-10}为不同算法的测试准确率随时间的变化。可以看到，量化比特数越低，BA-QDSGD算法和BA-QDSGT算法的收敛速度越快，并且BA-QDSGD算法和BA-QDSGT算法的运行时间分别与相同量化比特数的Choco-SGD算法和C-GT算法的运行时间接近，这说明本章提出的带宽自适应策略对算法运行时间的影响不大。另外，从图中可以发现，当量化比特数为2时，BA-QDSGD算法和BA-QDSGT算法在相应的对比实验中均能够最快达到较高的测试准确率，高于量化比特数为2时的Choco-SGD算法和C-GT算法的测试准确率。进一步地，为了定量评估BA-QDSGD算法和BA-QDSGT算法的性能，\autoref{tab:SGD-accuracy-time}和\autoref{tab:SGT-accuracy-time}统计了各个算法的测试准确率达到85\%所需的时间。当四种量化算法不对通信数据进行量化时，则分别退化为对应的DSGD算法和DSGT算法。从表中可以看到，当量化比特数相同时，BA-QDSGD算法和BA-QDSGT算法的测试准确率达到85\%所需的时间分别少于Choco-SGD算法和C-GT算法，并且在每组实验中，BA-QDSGD算法和BA-QDSGT算法都是在量化比特数为4时能够最快达到85\%的测试准确率，这是因为量化比特数为2时，模型精度有所下降，而量化比特数为8时，通信时间有所增加，从而导致算法性能受到影响。另外BA-QDSGD算法所需的时间少于BA-QDSGT算法，原因在于本节对两种算法使用相同的步长调整策略，而BA-QDSGT算法中需要额外对与梯度相关的辅助变量进行量化和通信，从而增加了算法的训练时间。综上所述，本章提出的BA-QDSGD算法和BA-QDSGT算法能够在减少训练时间的同时，保证模型的精度，从而有效地提高分布式深度学习的训练效率。
-
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[$r=9$对应的参数同步拓扑上的实验结果]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-8-SGD-acc-time-122.pdf}
-    }
-    \subfigure[$r=16$对应的参数同步拓扑上的实验结果]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-8-SGD-acc-time-144.pdf}
-    }
-    \caption{\label{fig:Fig4-9}无梯度跟踪的算法的测试准确率随时间的变化}
-\end{figure}
-
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[$r=9$对应的参数同步拓扑上的实验结果]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-8-SGT-acc-time-122.pdf}
-    }
-    \subfigure[$r=16$对应的参数同步拓扑上的实验结果]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter4/fig4-8-SGT-acc-time-144.pdf}
-    }
-    \caption{\label{fig:Fig4-10}有梯度跟踪的算法的测试准确率随时间的变化}
-\end{figure}
-
-\begin{table}[!htbp]
+\begin{table}[!htpb]
     \center
-    \caption{ 无梯度跟踪的算法的测试准确率达到85\%所需的时间（s）}  %表的名字
-    \label{tab:SGD-accuracy-time}  %表的引用
-    \setlength{\tabcolsep}{2mm}{ %7可随机设置，调整表格整体长度到适合自己的大小为止
-        \begin{tabular}{cccccc}
-        \hline
-        \multirow{2}{*}{\begin{tabular}[c]{@{}c@{}}量化比特数\end{tabular}} & \multicolumn{2}{c}{$r=9$} &  & \multicolumn{2}{c}{$r=16$} \\ \cline{2-3} \cline{5-6} 
-        & Choco-SGD  & BA-QDSGD         &  & Choco-SGD    & BA-QDSGD          \\ \hline
-        不量化 (DSGD)  & 763.8   & 763.8  &  & 790.9     & 790.9   \\
-        2 & -   & \textbf{605.4}  &  & -     & \textbf{624}   \\
-        4  & 647.1   & \textbf{489.6}  &  & 679.2     & \textbf{604.5}   \\
-        8  & 555.7   & \textbf{538.2}  &  & 722.7     & \textbf{672.6}   \\ \hline
-        \end{tabular}
-    } %注意这里还有一个半括号
+    \caption{同构带宽场景下T-ADMM与指数拓扑在不同节点数目上的一致性速度}
+    \label{tab:iso-bandwidth-consensus}
+    \setlength{\tabcolsep}{1.5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|}
+      \hline
+      \multicolumn{2}{|c|}{节点数目}            & 6 & 8 & 10 & 12 & 14 & 16 & 18 & 20 & 22 & 24 & 26 & 28 & 30 & 32 \\ \hline
+      \multirow{2}{*}{渐进收敛因子} & 指数拓扑 & 0.5 & 0.5 & 0.6 & 0.6 & 0.6 & 0.6 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 \\ \cline{2-16}
+                                   & T-ADMM  & \textbf{0.33} &  \textbf{0.41} & \textbf{0.45} & \textbf{0.5} & \textbf{0.48} & \textbf{0.53} & \textbf{0.45} & \textbf{0.46} & \textbf{0.48} & \textbf{0.51} & \textbf{0.54} & \textbf{0.52} & \textbf{0.54} & \textbf{0.54} \\ \hline
+      \multirow{2}{*}{收敛时间/ms}     & 指数拓扑 & 210 & 210 & 381 & 381 & 381 & 381 & 576 & 576 & 576 & 576 & 576 & 576 & 576 & 576 \\ \cline{2-16}
+                                   & T-ADMM & \textbf{150} & \textbf{180} & \textbf{240} & \textbf{301} & \textbf{351} & \textbf{351} & \textbf{391} & \textbf{421} & \textbf{451} & \textbf{481} & \textbf{511} & \textbf{511} & \textbf{541} & \textbf{541} \\ \hline
+    \end{tabular}
+    }}
 \end{table}
 
-\begin{table}[!htbp]
+接下来在16个节点上利用求解得到的参数同步拓扑和现有的参数同步拓扑进行分布式深度学习实验，并根据\autoref{tab:equ-3-56}计算每个训练周期的时间，得到测试准确率\footnote{所有节点的测试准确率取平均值后，利用滑动窗口进行了光滑化，下文同理。}随时间的变化如\autoref{fig:Fig3-10}所示。从图中可以看到，当边的数目相同时，相同时间内T-ADMM上的预测准确率高于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时T-ADMM上的预测准确率最高。其中环形拓扑和T-ADMM（$r$=16，$d$=2）对应的曲线在250s左右消失的原因是这两个拓扑已经完成100个训练周期的训练。另外，为了定量评估不同参数同步拓扑对分布式深度学习训练性能的影响，统计了在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间\footnote{在本节的实验设置下，84\%和62\%为所有拓扑都能达到的相对较高的预测准确率值。}，如\autoref{tab:iso-bandwidth-accuracy-time}所示。可以看到，边的数目为32时求解得到的参数同步拓扑在Cifar10数据集和Cifar100数据集上预测准确率达到设定值所需的时间分别为110.1s和127.6s，均是所有拓扑中所需时间最少的，并且比环形拓扑和网格拓扑快了1倍左右，比随机拓扑快了1倍多。其他边的数目约束下的T-ADMM不如T-ADMM（$r$=32）的原因是当边的数目更少时拓扑更稀疏，一致性速度更慢，而当边的数目更多时，节点的度更大，每次迭代所需通信时间更多。
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Cifar10]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-10-1-iso-bandwidth-cifar10.pdf}
+    }
+    \subfigure[Cifar100]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-10-2-iso-bandwidth-cifar100.pdf}
+    }
+    \caption{\label{fig:Fig3-10}同构带宽场景下测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
     \center
-    \caption{ 有梯度跟踪的算法的测试准确率达到85\%所需的时间（s）}  %表的名字
-    \label{tab:SGT-accuracy-time}  %表的引用
-    \setlength{\tabcolsep}{4mm}{ %7可随机设置，调整表格整体长度到适合自己的大小为止
-        \begin{tabular}{cccccc}
-        \hline
-        \multirow{2}{*}{\begin{tabular}[c]{@{}c@{}}量化比特数\end{tabular}} & \multicolumn{2}{c}{$r=9$} &  & \multicolumn{2}{c}{$r=16$} \\ \cline{2-3} \cline{5-6} 
-        & C-GT  & BA-QDSGT         &  & C-GT    & BA-QDSGT          \\ \hline
-        不量化 (DSGT)  & 1234.5   & 1234.5  &  & 1825.8     & 1825.8   \\
-        2 & -   & \textbf{966.3}  &  & -     & \textbf{928.8}   \\
-        4  & 1600.2   & \textbf{964.8}  &  & 1082.1     & \textbf{1028.6}   \\
-        8  & 1280.4   & \textbf{1124.7}  &  & 1256.3     & \textbf{1118.4}   \\ \hline
-        \end{tabular}
-    } %注意这里还有一个半括号
+    \caption{同构带宽场景下测试准确率达到设定值所需的时间（单位：s）}
+    \label{tab:iso-bandwidth-accuracy-time}
+    \setlength{\tabcolsep}{1mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|}
+      \hline
+      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-ADMM} \\ ($r$=16)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=24)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=32)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=54)}\\ \hline
+      Cifar10 & 229.7 & 227.7 & 189.8 & 134.6 & 262.0 & 165.4 & 144.9 & \textbf{110.1} & 146.1 \\ \hline
+      Cifar100 & 234.7 & 269.1 & 200.1 & 151.8 & 345.1 & 177.8 & 172.5 & \textbf{127.6} & 183.9 \\ \hline
+    \end{tabular}
+    }}
 \end{table}
+
+\textbf{实验3：}下面验证节点带宽异构场景下参数同步拓扑优化方法的有效性。在与现有的参数同步拓扑进行对比前，首先对基于模拟退火算法（SA）生成\autoref{Algorithm-T-ADMM}的初始拓扑的有效性进行验证。改变节点数目和节点带宽的异构性，并分别随机初始化拓扑结构和使用SA生成初始拓扑结构，然后基于\autoref{Algorithm-T-ADMM}求解得到对应的参数同步拓扑，\autoref{tab:bandwidth-constraint-SA-compare}对比了使用两种方式得到的优化目标值$\tilde{\lambda}$和参数同步拓扑的渐进收敛因子。其中T-ADMM为随机初始化并求解优化问题得到的参数同步拓扑，T-SA-ADMM为使用SA生成初始拓扑结构并求解优化问题得到的参数同步拓扑，可以看到，当节点数目为6时，两种方法得到的结果相同，当节点数目增加至8和16时，对于大部分的节点带宽比，T-SA-ADMM得到的结果要优于T-ADMM，说明基于SA初始化拓扑结构确实能够改善求解结果。\autoref{fig:Fig3-11}是几种节点带宽比对应的T-SA-ADMM的拓扑结构图，其中边的粗细表示对应边的权重。
+
+\begin{table}[!htpb]
+    \center
+    \caption{节点带宽异构场景下T-ADMM与T-SA-ADMM的对比}
+    \label{tab:bandwidth-constraint-SA-compare}
+    \setlength{\tabcolsep}{3mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|}
+      \hline
+      \multirow{2}{*}{节点数目} & \multirow{2}{*}{节点带宽比} & \multirow{2}{*}{边的数目} & \multicolumn{2}{c}{$\tilde{\lambda}$} &  \multicolumn{2}{|c|}{渐进收敛因子}\\ \cline{4-7}
+      &&& T-ADMM &  T-SA-ADMM & T-ADMM &  T-SA-ADMM \\ \hline
+      6 & \makecell[c]{3:3:2:2:1:1} & 6 & 0.26 & 0.26 & 0.74 & 0.74 \\ \hline
+      6 & \makecell[c]{3:3:3:1:1:1} & 6 & 0.25 & 0.25 & 0.75 & 0.75 \\ \hline
+      8 & \makecell[c]{3:3:3:3:1:1:1:1} & 8& 0.20 & 0.20 & 0.80 & 0.80 \\ \hline
+      8 & \makecell[c]{3:3:3:3:2:2:2:2} & 10& 0.36 & \textbf{0.42} & 0.64 & \textbf{0.58} \\ \hline
+      16 & \makecell[c]{3:3:3:3:3:3:3:3 \\ :1:1:1:1:1:1:1:1} & 16& 0.04 & \textbf{0.09} & 0.96 & \textbf{0.91} \\ \hline
+      16 & \makecell[c]{3:3:3:3:3:3:3:3 \\ :2:2:2:2:2:2:2:2} & 20& 0.20 & \textbf{0.21} & 0.80 & \textbf{0.79} \\ \hline
+      16 & \makecell[c]{5:5:5:5:1:1:1:1 \\ :1:1:1:1:1:1:1:1} & 16& 0 & \textbf{0.08} & 1 & \textbf{0.92} \\ \hline
+      16 & \makecell[c]{8:8:1:1:1:1:1:1 \\ :1:1:1:1:1:1:1:1} & 16& 0.05 & 0.05 & 0.95 & 0.95 \\ \hline
+    \end{tabular}
+    }}
+\end{table}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[3:3:2:2:1:1 ($r=6$)]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-1.pdf}
+    }
+    \subfigure[3:3:3:1:1:1 ($r=6$)]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-2.pdf}
+    }
+    \subfigure[3:3:3:3:1:1:1:1 ($r=8$)]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-3.pdf}
+    }
+    \subfigure[3:3:3:3:2:2:2:2 ($r=10$)]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-4.pdf}
+    }
+    \subfigure[3:3:3:3:3:3:3:3:1:1:1:1:1:1:1:1 ($r=16$)]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-5.pdf}
+    }
+    \subfigure[5:5:5:5:1:1:1:1:1:1:1:1:1:1:1:1 ($r=16$)]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-6.pdf}
+    }
+    \caption{\label{fig:Fig3-11}不同节点带宽比对应的T-SA-ADMM的拓扑结构}
+\end{figure}
+
+%令边的数目分别为16，32和48，求解得到对应的参数同步拓扑。在求解得到的参数同步拓扑和现有的参数同步拓扑上进行一致性实验和分布式深度学习实验，
+接下来在16个节点上进行一致性实验和分布式深度学习实验，对比T-SA-ADMM与现有参数同步拓扑的性能。设置节点的带宽比为3:3:3:3:3:3:3:3:1:1:1:1:1:1:1:1，其中3对应的带宽为9.76GB/s，1对应的带宽为3.25GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\min \left( \frac{b_i}{d_i},\frac{b_j}{d_j} \right) $，$b_i$和$b_j$为节点$i$和节点$j$的带宽，$d_i$和$d_j$为节点$i$和节点$j$的度。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-12}和\autoref{fig:Fig3-13}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽3.25GB/s的比值。可以看到，一致性速度方面，边的数目为32和48时，T-SA-ADMM优于现有的参数同步拓扑，边的数目为16时，T-SA-ADMM的一致性速度略慢于指数拓扑，但是仍优于其他现有的参数同步拓扑。在分布式深度学习实验中，相同时间内不同边的数目对应的T-SA-ADMM上的预测准确率均高于现有的参数同步拓扑。虽然T-SA-ADMM（$r$=16，$b$=1）的一致性速度慢于指数拓扑，但是由于该拓扑中边的可用带宽更高，使得分布式深度学习一次迭代所需时间更短，从而可以在相同时间内执行更多次数的模型参数更新步骤，加快模型收敛速度。\autoref{tab:bandwidth-constraint-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间。其中不同边的数目对应的T-SA-ADMM所需的时间均明显少于现有的参数同步拓扑。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-12-bandwidth-constraint-consensus.pdf}
+    \caption{\label{fig:Fig3-12}节点带宽异构场景下一致性误差随时间的变化}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Cifar10]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-13-1-bandwidth-constraint-cifar10.pdf}
+    }
+    \subfigure[Cifar100]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-13-2-bandwidth-constraint-cifar100.pdf}
+    }
+    \caption{\label{fig:Fig3-13}节点带宽异构场景下测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
+    \center
+    \caption{节点带宽异构场景下测试准确率达到设定值所需的时间（单位：s）}
+    \label{tab:bandwidth-constraint-accuracy-time}
+    \setlength{\tabcolsep}{1mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|}
+      \hline
+      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=16)} & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=32)} & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=48)}\\ \hline
+      Cifar10 & 412.0 & 486.4 & 405.3 & 287.4 & 663.8 & 275.3 & \textbf{181.6} & 182.9 \\ \hline
+      Cifar100 & 420.9 & 574.9 & 427.5 & 324.3 & 874.26 & 239.76 & 248.1 & \textbf{194.7} \\ \hline
+    \end{tabular}
+    }}
+\end{table}
+
+\textbf{实验4：}下面验证服务器内部链路带宽异构场景下参数同步拓扑优化方法的有效性。由于SA不适用于该场景，因此随机初始化拓扑结构，并基于\autoref{Algorithm-T-ADMM}求解得到参数同步拓扑（T-ADMM）。\autoref{fig:Fig3-14}是不同链路带宽比对应的T-ADMM的拓扑结构图，其中边的粗细表示对应边的权重。接下来设置三种类型的物理链路上的带宽比为$b_{PIX}:b_{NODE}:b_{SYS}$=1:1:2，其中2对应的带宽为9.76GB/s，1对应的带宽为4.88GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\frac{b_{link}}{e_{link}}$，$b_{link}$为边$\left\{ i,j \right\} $所在物理链路的带宽，$e_{link}$为边$\left\{ i,j \right\} $所在物理链路上边的数目。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-15}和\autoref{fig:Fig3-16}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽4.88GB/s的比值。可以看到，相同时间内，T-ADMM的一致性误差和预测准确率均优于现有的参数同步拓扑。另外，在该场景下，指数拓扑的性能有所下降，因为指数拓扑中物理链路SYS上有10条边，导致边的最小可用带宽仅为0.976GB/s，从而大大增加了一致性实验的迭代时间和分布式深度学习实验的训练周期时间。\autoref{tab:bandwidth-constraint-intra-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到61\%所需的时间。其中除了Cifar10上2D-torus与T-ADMM（$r$=16）所需的时间接近外，不同边的数目对应的T-ADMM所需的时间均明显少于现有的参数同步拓扑。
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:1:1 ($r=7$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-1-topo.pdf}
+    }
+    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:1:2 ($r=8$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-2-topo.pdf}
+    }
+    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:2:4 ($r=12$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-3-topo.pdf}
+    }
+    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:4:4 ($r=16$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-4-topo.pdf}
+    }
+    \caption{\label{fig:Fig3-14}不同链路带宽比对应的T-ADMM的拓扑结构}
+\end{figure}
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-15-bandwidth-constraint-intra-consensus.pdf}
+    \caption{\label{fig:Fig3-15}服务器内部链路带宽异构场景下一致性误差随时间的变化}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Cifar10]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-16-1-bandwidth-constraint-intra-cifar10.pdf}
+    }
+    \subfigure[Cifar100]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-16-2-bandwidth-constraint-intra-cifar100.pdf}
+    }
+    \caption{\label{fig:Fig3-16}服务器内部链路带宽异构场景下测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
+    \center
+    \caption{服务器内部链路带宽异构场景下测试准确率达到设定值所需的时间（单位：s）}
+    \label{tab:bandwidth-constraint-intra-accuracy-time}
+    \setlength{\tabcolsep}{2mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|}
+      \hline
+      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-ADMM} \\ ($r$=8)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=12)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=16)}\\ \hline
+      Cifar10 & 484.1 & 662.4 & 407.1 & 754.0 & 754.0 & \textbf{266.8} & 276.0 & 407.6 \\ \hline
+      Cifar100 & 350.7 & 552.0 & 510.6 & 651.8 & 766.8 & \textbf{261.8} & 269.1 & 310.1 \\ \hline
+    \end{tabular}
+    }}
+\end{table}
+
+\textbf{实验5：}下面验证服务器间交换机端口带宽异构场景下参数同步拓扑优化方法的有效性。在该场景下，对交换机端口上边的数目的约束可以看作是对子拓扑中节点度的约束，因此基于SA生成初始拓扑结构的方法同样适用于该场景下优化问题的求解。设置节点数目为16，交换机层级数为2，每个交换机上的端口数为4，分别令不同层级上的交换机端口带宽比为1：2和2：3，求解优化问题得到的T-SA-ADMM的拓扑结构如\autoref{fig:Fig3-17}所示，其中边的粗细表示对应边的权重。接下来在交换机端口带宽比为1：2的场景下进行一致性实验和分布式深度学习实验，其中2对应的带宽为9.76GB/s，1对应的带宽为4.88GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\frac{b_{s_{ij}}}{e_{s_{ij}}}$，$b_{s_{ij}}$为边$\left\{ i,j \right\} $经过的交换机端口的带宽，$e_{s_{ij}}$为边$\left\{ i,j \right\} $经过的交换机端口上边的数目。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-18}和\autoref{fig:Fig3-19}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽4.88GB/s的比值。可以看到，相同时间内，T-SA-ADMM的一致性误差和预测准确率均优于现有的参数同步拓扑。\autoref{tab:bandwidth-constraint-inter-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间。很显然，不同边的数目对应的T-SA-ADMM所需的时间均明显少于现有的参数同步拓扑。
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[$b_{s_0}:b_{s_1}$=1:2 ($r=24$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-17-1-topo.pdf}
+    }
+    \subfigure[$b_{s_0}:b_{s_1}$=2:3 ($r=40$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-17-2-topo.pdf}
+    }
+    \caption{\label{fig:Fig3-17}不同交换机端口带宽比对应的T-SA-ADMM的拓扑结构}
+\end{figure}
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-18-bandwidth-constraint-inter-consensus.pdf}
+    \caption{\label{fig:Fig3-18}服务器间交换机端口带宽异构场景下一致性误差随时间的变化}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Cifar10]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-19-1-bandwidth-constraint-inter-cifar10.pdf}
+    }
+    \subfigure[Cifar100]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-19-2-bandwidth-constraint-inter-cifar100.pdf}
+    }
+    \caption{\label{fig:Fig3-19}服务器间交换机端口带宽异构场景下测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
+    \center
+    \caption{服务器间交换机端口带宽异构场景下测试准确率达到设定值所需的时间（单位：s）}
+    \label{tab:bandwidth-constraint-inter-accuracy-time}
+    \setlength{\tabcolsep}{2mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|}
+      \hline
+      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=24)} & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=48)} \\ \hline
+      Cifar10 & 320.8 & 227.7 & 189.7 & 134.5 & 262.0 & 101.3 & \textbf{86.25} \\ \hline
+      Cifar100 & 327.8 & 269.1 & 200.1 & 151.8 & 345.1 & 126.0 & \textbf{117.3} \\ \hline
+    \end{tabular}
+    }}
+\end{table}
+
 
 \section{本章小结}
-本章从减少分布式深度学习的通信数据量出发，研究了带宽自适应的量化分布式训练算法。首先，介绍了一种能够保持数据期望的量化策略，用于实现对通信数据的有效压缩。然后介绍基于差分压缩和压缩误差补偿的算法设计，同时提出基于带宽矩阵的带宽自适应策略，该策略增加了高带宽边上的量化比特数，减小了对应的压缩误差，从而降低了量化对模型精度的影响，同时该策略使不同带宽的边上的数据通信时间相近，而不会增加整体的通信时间。接下来，结合差分压缩、压缩误差补偿和带宽自适应策略设计了带宽自适应的量化分布式训练算法：BA-QDSGD算法和BA-QDSGT算法。最后在基于第三章的方法得到的参数同步拓扑上对比了BA-QDSGD算法和BA-QDSGT算法与现有的量化分布式训练算法的性能，证明了本章提出的算法能够在加快模型收敛速度的同时保证模型的精度，从而有效地提高分布式深度学习的训练效率。
-
+本章从优化分布式深度学习的通信性能出发，研究了参数同步拓扑优化方法。首先，本章分别分析了同构带宽、节点带宽异构、服务器内部链路带宽异构和服务器间交换机端口带宽异构四种场景下影响通信开销的主要因素，其中对于后面三种带宽异构场景，本章提出了一种带宽分配策略，以实现边上带宽的最优分配。然后，以一致性速度为优化目标，对四种场景分别引入通信相关的约束，设计了对应的参数同步拓扑优化问题。接下来提出了定制化的ADMM算法用于求解参数同步拓扑优化问题，为了改进求解得到的结果，本章还通过模拟退火算法生成ADMM算法的初始拓扑结构。最后，在四种场景下分别进行一致性实验和分布式深度学习实验，并与现有的参数同步拓扑进行对比。实验结果表明，基于本章提出的方法得到的参数同步拓扑在一致性速度上优于现有的参数同步拓扑，并且在分布式深度学习中，使用优化出的参数同步拓扑能够在更短的时间内达到设定的预测准确率，从而证明了本章提出的方法的有效性。

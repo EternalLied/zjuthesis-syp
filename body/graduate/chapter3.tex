@@ -6,7 +6,7 @@
 分布式训练任务中，常用的并行训练方式有数据并行（Data Parallelism，DP）、张量并行（Tensor Parallelism，TP）和、流水并行（Pipeline Parallelism，PP）和专家并行（Expert Parallelism，EP）等。
 在数据并行中，每个节点持有整个模型的副本，并在划分的本地数据集上进行训练，各本地梯度通过例如AllReduce的集合通信方式进行聚合，然后更新参数，以保持不同节点模型间的同步。然而，数据并行可能无法满足大规模模型的训练需求，这些模型可能超出设备的存储和计算能力，因此，模型并行的使用变得不可避免。模型并行包括张量并行、流水并行和专家并行等方式。
 张量并行是一种为Transformer模型的分布式训练提出的优化策略，它将权重矩阵在行或列维度上进行划分，并依靠AllReduce操作确保划分前后的数学等效性。张量并行可以有效减少单个节点的显存占用，但是节点间需要进行频繁的通信同步参数。
-流水并行则将神经网络模型切分为多个阶段，并将这些阶段分配到不同的计算节点上，每个节点处理模型的一个子集，并在前向和后向传播过程中与其他节点进行通信。流水并行存在着Bubble现象，即在某些时间段内，部分节点处于空闲状态，无法充分利用计算资源。为了解决这一问题，可以采用微批次（Micro-batch）技术，将输入数据划分为更小的批次，并在流水线中交错处理这些微批次，从而提高资源利用率和整体训练效率。
+流水并行则将神经网络模型切分为多个阶段，并将这些阶段分配到不同的计算节点上，每个节点处理模型的一个子集，并在前向和反向传播过程中与其他节点进行通信。流水并行存在着Bubble现象，即在某些时间段内，部分节点处于空闲状态，无法充分利用计算资源。为了解决这一问题，可以采用微批次（Micro-batch）技术，将输入数据划分为更小的批次，并在流水线中交错处理这些微批次，从而提高资源利用率和整体训练效率。
 专家并行是一种针对混合专家模型（Mixture of Experts，MOE）提出的并行策略，它将模型中的不同专家模块分配到不同的计算节点上，能够实现高效的模型训练和推理。
 各种并行训练模式示意图如\autoref{fig:parallel_pattern}所示。
 
@@ -24,7 +24,7 @@
     \caption{\label{fig:3D-parallel}数据并行、张量并行、流水并行结合的3D并行模式示意图}
 \end{figure}
 
-在数据并行中，由于模型的梯度本身就是分层计算的，因此可以通过重叠梯度计算和通信来实现计算与通信的并行优化，从而减少通信开销。在流水并行中，模型被划分为多个顺序执行的阶段，采用Micro-batch技术时，天然具有不同Micro-batch间的计算与通信的并行性。而对于张量并行，模型参数被划分到不同节点上，节点间需要频繁进行严格同步的参数交换以完成前向和后向传播，因此张量并行中的计算与通信并行是目前分布式训练任务中的一个重要挑战。
+在数据并行中，由于模型的梯度本身就是分层计算的，因此可以通过重叠梯度计算和通信来实现计算与通信的并行优化，从而减少通信开销。在流水并行中，模型被划分为多个顺序执行的阶段，采用Micro-batch技术时，天然具有不同Micro-batch间的计算与通信的并行性。而对于张量并行，模型参数被划分到不同节点上，节点间需要频繁进行严格同步的参数交换以完成前向和反向传播，因此张量并行中的计算与通信并行是目前分布式训练任务中的一个重要挑战。
 
 基于以上背景，本章针对分布式深度学习任务中的计算与通信并行优化问题，提出了一种针对张量并行的高效计算通信并行优化方法。我们通过Pytorch的上层接口实现了该方法，并在TP/DP混合并行的分布式训练任务中进行了性能验证。实验结果表明，本章所提出的方法能够有效减少Transformer模型的端到端训练时间，从而提升整体训练效率。
 
@@ -38,16 +38,26 @@ Transformer模型\cite{vaswani2017attention}是一种基于自注意力机制的
 \begin{figure}[!h]
     \centering
     \subfigure[Transformer整体模型架构\cite{vaswani2017attention}\label{fig:Transformer-overall}]{
-        \includegraphics[width=0.45\linewidth]{figure/chapter3/transformer.pdf}
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/transformer.pdf}
     }
     \subfigure[Transformer层模型结构\cite{shoeybi2019megatron}\label{fig:Transformer-layer}]{
-        \includegraphics[width=0.45\linewidth]{figure/chapter3/transformer_layer.pdf}
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/transformer_layer.pdf}
     }
     \caption{Transformer模型结构示意图}
     \label{fig:Transformer}
 \end{figure}
 
-\subsection{张量并行方法：Megatron}\label{subsection3-2-2}
+
+\subsection{数据并行} \label{section3-2-2}
+数据并行是一种常用的分布式训练策略，在数据并行中，每个计算节点持有整个模型的副本，并在划分的本地数据集上进行训练。各节点在本地计算梯度后，通过集合通信算子（如AllReduce）将本地梯度进行聚合，然后更新模型参数，以保持不同节点模型间的同步。 数据并行的主要优势在于其实现简单且易于扩展，适用于大多数神经网络模型。然而，随着模型规模的增大，单个节点可能无法容纳整个模型，导致数据并行面临存储和计算能力的限制。此外，数据并行中的通信开销也会随着节点数量的增加而显著上升，成为训练效率的瓶颈。因此，在实际应用中，数据并行常与其他并行方式（如张量并行、流水并行）结合使用，以充分利用计算资源并提升训练效率。数据并行训练模式的示意图如\autoref{fig:data_parallel}所示。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.5\linewidth]{figure/chapter3/DP.pdf}
+    \caption{\label{fig:data_parallel}数据并行训练模式示意图}
+\end{figure}
+
+\subsection{张量并行方法：Megatron}\label{subsection3-2-3}
 
 张量并行是一种通过在多个计算节点间划分神经网络模型的权重矩阵来实现分布式训练的方法。Megatron-LM（以下简称Megatron）\cite{shoeybi2019megatron}是NVIDIA提出的一种高效的张量并行训练框架，专门用于大规模Transformer模型的训练。Megatron-LM将Transformer模型的权重矩阵在行或列维度上进行划分，通过AllReduce操作确保划分前后的数学等效性，从而实现了高效的分布式训练。
 Megatron基于两种形式的矩阵分块乘法实现张量并行：列并行（Column Parallel，CP）与行并行（Row Parallel，RP）。列并行将权重矩阵按列划分，每个节点持有权重矩阵的一部分列，并在本地计算输入矩阵与该部分列的乘积，随后通过AllGather操作将各节点的计算结果进行汇总，得到完整的输出矩阵。行并行则将权重矩阵按行划分，同时将输入矩阵对应地按列切分，每个节点持有权重矩阵的一部分行，并在本地计算该部分行与输入矩阵对应部分列的乘积。随后通过AllReduce操作将各节点的计算结果进行汇总，得到完整的输出矩阵。
@@ -121,7 +131,7 @@ $$
 
 
 
-\subsection{TP/DP混合并行模式}\label{subsection3-2-3}
+\subsection{TP/DP混合并行模式}\label{subsection3-2-4}
 
 TP/DP混合并行模式结合了数据并行和张量并行的优势，以应对大规模模型训练中的计算和内存需求。在这种模式下，模型首先通过张量并行在多个节点间划分权重矩阵，然后在每个节点上使用数据并行处理不同的数据批次。这样，每个节点持有模型的一个子集，并在本地数据上进行训练，同时通过AllReduce操作同步参数和梯度。该模式下，所有节点被组织成多个数据并行组和张量并行组，每个节点位于一个数据并行组和一个张量并行组中。在实际系统中部署时，考虑到不同并行模式的通信开销，一般将同一个张量并行组内的节点放在单个服务器内，以利用机内GPU间的高速链路降低通信开销，数据并行组内的节点则进行跨机通信。\autoref{fig:DP-TP}给出了512 GPU集群的8×64 TP/DP混合并行模式的示意图。在该图中，共有64个服务器，每个服务器内的8个GPU构成一个张量并行组，每个服务器内相同编号的GPU构成一个数据并行组，TP的维度为8，DP的维度为64，和一个分组内的GPU数量相对应。
 
@@ -131,24 +141,75 @@ TP/DP混合并行模式结合了数据并行和张量并行的优势，以应对
     \caption{\label{fig:DP-TP}TP/DP混合并行模式示意图}
 \end{figure}
 
-\section{张量并行中基于算子拆分调度的计算通信并行方案}
-为了求解上一节中描述的参数同步拓扑优化问题，本节提出了如\autoref{fig:Fig3-0}所示的求解框架。将四种场景下的优化问题进行适当变换后，提出定制化的ADMM算法对优化问题进行求解，本节将求解得到的参数同步拓扑称为T-ADMM（Topology Based on ADMM）。进一步地，基于模拟退火算法生成拓扑结构，并将生成的拓扑结构作为ADMM算法求解节点带宽异构和服务器间交换机端口带宽异构场景下的优化问题的初始拓扑，以改进这两种场景下的优化问题求解结果，本节将改进的拓扑求解结果称为T-SA-ADMM（Topology Based on SA and ADMM）。下面分别介绍基于ADMM的拓扑优化问题求解方法和基于模拟退火算法的拓扑生成方法。
+\section{基于算子拆分调度的计算通信并行方法}
+本节针对Transformer模型和Megatron张量并行方法，基于算子拆分调度的方式提出了一种计算通信并行优化方法。我们考虑如\autoref{fig:transformer_main}所示的核心Transformer模型结构，对嵌入层和Transformer层分别设计了计算通信并行方案。
+针对TP/DP混合并行模式，我们结合本章提出的TP计算通信并行方法和现有的DP计算通信并行方法，使用Pytorch提供的接口实现了高效的TP/DP混合并行框架。
+本节内容安排如下：3.3.1节介绍嵌入层计算通信并行方法；3.3.2节介绍Transformer层计算通信并行方法；3.3.3节介绍TP/DP计算通信并行框架。
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter3/framework.pdf}
-    \caption{\label{fig:Fig3-0}参数同步拓扑优化问题求解框架}
+    \includegraphics[width=0.2\linewidth]{figure/chapter3/transformer_main.pdf}
+    \caption{\label{fig:transformer_main}Transformer模型核心结构示意图}
 \end{figure}
 
-\subsection{前向计算部分计算通信并行方案}
+\subsection{嵌入层计算通信并行方法}
+我们对模型嵌入层的执行流程进行了优化设计。在Megatron的基准实现中，嵌入层采用串行执行模式，即依次执行词嵌入（Word Embedding）、全局同步AllReduce通信、位置嵌入（Position Embedding）、相加（Add）与随机失活（Dropout）操作。该模式下计算单元在等待通信完成期间处于空闲状态，造成了计算资源的浪费，由此我们提出了改进的并行流方案：将原有串行流程拆分为计算流（Computation Stream）和通信流（Communication Stream）。
+改进方案的核心思想是在计算流中执行完词嵌入后在通信流中发起AllReduce通信操作，同时在计算流中并行地计算位置嵌入。这种设计使得耗时的通信操作与位置嵌入的计算实现了并行，从而有效地隐藏了通信开销。
+\autoref{fig:embedding_method}展示了嵌入层基线方案和优化后计算通信并行方案的执行流程。
+
+% \begin{figure}[!htbp]   
+%     \centering
+%     \subfigure[基线方案\label{fig:figure/chapter3/column_parallel}]{
+%         \includegraphics[width=0.15\linewidth]{figure/chapter3/embedding_base.pdf}
+%     }
+%     \subfigure[计算通信并行方案\label{fig:figure/chapter3/row_parallel}]{
+%         \includegraphics[width=0.3\linewidth]{figure/chapter3/embedding_optim.pdf}
+%     }
+%     \caption{嵌入层基线方案和计算通信并行方案的执行流程示意图}
+%     \label{fig:embedding_method}
+% \end{figure}
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.5\linewidth]{figure/chapter3/embedding_method.pdf}
+    \caption{\label{fig:embedding_method}嵌入层基线方案和计算通信并行方案的执行流程示意图}
+\end{figure}
 
 
 
-\subsection{反向计算部分计算通信并行方案}
+\subsection{Transformer层计算通信并行方法}
+
+\autoref{fig:transformer_baseline}展示了基线中模型Transformer层在训练过程中的前向与反向传播流程，基线采用Megatron提出的列并行与行并行交替进行的经典张量并行方案。Transformer包含Attention层和MLP层，采用列并行与行并行两种计算模式。在前向传播中，输入依次经过多头注意力（MHA）或GeLU激活函数、矩阵乘法（MatMul）、非线性变换（Non-Linear）、矩阵乘法，最终通过AllReduce进行梯度同步。反向传播过程中，误差梯度经由梯度矩阵乘法、非线性变换的梯度、梯度矩阵乘法，并通过AllReduce实现梯度的全局聚合。该方案在Attention层和MLP层后均需进行同步全局通信（AllReduce），由于通信操作与计算串行执行，设备在通信期间处于等待状态，造成了计算资源的空闲与延迟。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.6\linewidth]{figure/chapter3/transformer_baseline.pdf}
+    \caption{\label{fig:transformer_baseline}Transformer层基线方案执行流程示意图}
+\end{figure}
+
+\autoref{fig:transformer_optim}展示了Transformer层的计算和通信并行优化方案。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter3/transformer_optim.pdf}
+    \caption{\label{fig:transformer_optim}Transformer层计算通信并行方案执行流程示意图}
+\end{figure}
+
+在前向传播阶段，将原有的的AllReduce操作拆解为ReduceScatter和AllGather操作，并将对应的行并行和列并行矩阵计算相应地进行拆分。行并行的计算拆分后可以和ReduceScatter通信进行重叠，列并行的计算拆分后可以和AllGather通信重叠，从而实现计算与通信的并行。
+
+在反向传播阶段，将两个并行层之间用于梯度同步的AllReduce操作同样拆解为ReduceScatter和AllGather操作，并将它们分别与对应的梯度计算过程重叠执行：ReduceScatter与输入梯度（Input Gradient）计算重叠，AllGather与权重梯度（Weight Gradient）计算重叠。这样在保留梯度同步功能的同时最大化地隐藏了通信开销，从而提高了整体训练效率。
+
+\autoref{fig:transformer_optim_forward_detail}展示了Transformer层前向传播部分基线方案与对应计算通信并行优化方案。
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter3/transformer_optim_forward_detail.pdf}
+    \caption{\label{fig:transformer_optim_forward_detail}Transformer层前向传播基线方案与计算通信并行方案示意图}
+\end{figure}
+
+\subsection{TP/DP计算通信并行框架}
 
 
 
-\section{算力分析}
+\section{实验评估}
 本节对提出的参数同步拓扑优化方法的有效性进行验证，并与现有的参数同步拓扑进行对比分析。所有实验都是在同一个硬件系统上完成的，该系统配备了2个Intel Xeon Gold 6226R处理器和8个NVIDIA GeForce RTX 2080 Ti，每个GPU有11GB显存。该硬件系统采用\autoref{fig:Fig2-4}所示的标准服务器架构。本节的实验使用pytorch实现。
 
 \subsection{实验设置}

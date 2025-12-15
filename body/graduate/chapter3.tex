@@ -144,7 +144,7 @@ TP/DP混合并行模式结合了数据并行和张量并行的优势，以应对
 \section{基于算子拆分调度的计算通信并行方法}
 本节针对Transformer模型和Megatron张量并行方法，基于算子拆分调度的方式提出了一种计算通信并行优化方法。我们考虑如\autoref{fig:transformer_main}所示的核心Transformer模型结构，对嵌入层和Transformer层分别设计了计算通信并行方案。
 针对TP/DP混合并行模式，我们结合本章提出的TP计算通信并行方法和现有的DP计算通信并行方法，使用Pytorch提供的接口实现了高效的TP/DP混合并行框架。
-本节内容安排如下：3.3.1节介绍嵌入层计算通信并行方法；3.3.2节介绍Transformer层计算通信并行方法；3.3.3节介绍TP/DP计算通信并行框架。
+本节内容安排如下：3.3.1节介绍嵌入层计算通信并行方法；3.3.2节介绍Transformer层计算通信并行方法；3.3.3节介绍TP/DP计算通信并行方案；3.3.4节对所提出的计算通信并行方案进行了理论评估。
 
 \begin{figure}[!htbp]   
     \centering
@@ -178,348 +178,342 @@ TP/DP混合并行模式结合了数据并行和张量并行的优势，以应对
 
 \subsection{Transformer层计算通信并行方法}
 
-\autoref{fig:transformer_baseline}展示了基线中模型Transformer层在训练过程中的前向与反向传播流程，基线采用Megatron提出的列并行与行并行交替进行的经典张量并行方案。Transformer包含Attention层和MLP层，采用列并行与行并行两种计算模式。在前向传播中，输入依次经过多头注意力（MHA）或GeLU激活函数、矩阵乘法（MatMul）、非线性变换（Non-Linear）、矩阵乘法，最终通过AllReduce进行梯度同步。反向传播过程中，误差梯度经由梯度矩阵乘法、非线性变换的梯度、梯度矩阵乘法，并通过AllReduce实现梯度的全局聚合。该方案在Attention层和MLP层后均需进行同步全局通信（AllReduce），由于通信操作与计算串行执行，设备在通信期间处于等待状态，造成了计算资源的空闲与延迟。
-
+Transformer层基线方案和优化后计算通信并行方案的执行流程如\autoref{fig:transformer_method}所示。
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.6\linewidth]{figure/chapter3/transformer_baseline.pdf}
-    \caption{\label{fig:transformer_baseline}Transformer层基线方案执行流程示意图}
+    \includegraphics[width=1\linewidth]{figure/chapter3/transformer_method.pdf}
+    \caption{\label{fig:transformer_method}Transformer层基线方案和计算通信并行方案的执行流程示意图}
 \end{figure}
 
-\autoref{fig:transformer_optim}展示了Transformer层的计算和通信并行优化方案。
+% \begin{figure}[!htbp]   
+%     \centering
+%     \subfigure[基线方案\label{fig:transformer_baseline}]{
+%         \includegraphics[width=0.4\linewidth]{figure/chapter3/transformer_baseline.pdf}
+%     }
+%     \subfigure[计算通信并行方案\label{fig:transformer_optim}]{
+%         \includegraphics[width=0.55\linewidth]{figure/chapter3/transformer_optim.pdf}
+%     }
+%     \caption{Transformer层基线方案和计算通信并行方案的执行流程示意图}
+%     \label{fig:transformer_method}
+% \end{figure}
 
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter3/transformer_optim.pdf}
-    \caption{\label{fig:transformer_optim}Transformer层计算通信并行方案执行流程示意图}
-\end{figure}
+% \begin{figure}[!htbp]   
+%     \centering
+%     \includegraphics[width=0.6\linewidth]{figure/chapter3/transformer_baseline.pdf}
+%     \caption{\label{fig:transformer_baseline}Transformer层基线方案执行流程示意图}
+% \end{figure}
 
-在前向传播阶段，将原有的的AllReduce操作拆解为ReduceScatter和AllGather操作，并将对应的行并行和列并行矩阵计算相应地进行拆分。行并行的计算拆分后可以和ReduceScatter通信进行重叠，列并行的计算拆分后可以和AllGather通信重叠，从而实现计算与通信的并行。
+% \begin{figure}[!htbp]   
+%     \centering
+%     \includegraphics[width=0.8\linewidth]{figure/chapter3/transformer_optim.pdf}
+%     \caption{\label{fig:transformer_optim}Transformer层计算通信并行方案执行流程示意图}
+% \end{figure}
 
-在反向传播阶段，将两个并行层之间用于梯度同步的AllReduce操作同样拆解为ReduceScatter和AllGather操作，并将它们分别与对应的梯度计算过程重叠执行：ReduceScatter与输入梯度（Input Gradient）计算重叠，AllGather与权重梯度（Weight Gradient）计算重叠。这样在保留梯度同步功能的同时最大化地隐藏了通信开销，从而提高了整体训练效率。
+\autoref{fig:transformer_method}左侧子图所示的基线方案采用Megatron提出的列并行与行并行交替进行的经典张量并行方法。Transformer包含Attention层和MLP层，采用列并行与行并行两种计算模式。在前向传播中，输入依次经过多头注意力（MHA）或GeLU激活函数、矩阵乘法（MatMul）、非线性变换（Non-Linear）、矩阵乘法，最终通过AllReduce进行梯度同步。反向传播过程中，误差梯度经由梯度矩阵乘法、非线性变换的梯度、梯度矩阵乘法，并通过AllReduce实现梯度的全局聚合。该方案在Attention层和MLP层后均需进行同步全局通信（AllReduce），由于通信操作与计算串行执行，设备在通信期间处于等待状态，造成了计算资源的空闲与延迟。
 
-\autoref{fig:transformer_optim_forward_detail}展示了Transformer层前向传播部分基线方案与对应计算通信并行优化方案。
+\autoref{fig:transformer_method}右侧子图展示了Transformer层的计算和通信并行优化方案，该方案对前向传播和反向传播进行了针对性的优化设计。
+
+在前向传播阶段，将原有的的AllReduce操作拆解为ReduceScatter和AllGather操作，并将对应的行并行和列并行矩阵计算相应地进行拆分。行并行的计算拆分后可以和ReduceScatter通信并行，列并行的计算拆分后可以和AllGather通信并行，从而实现计算与通信的并行。\autoref{fig:transformer_optim_forward_detail}展示了Transformer层前向传播部分基线方案与对应计算通信并行优化方案的具体实现细节。
+
 \begin{figure}[!htbp]   
     \centering
     \includegraphics[width=1\linewidth]{figure/chapter3/transformer_optim_forward_detail.pdf}
     \caption{\label{fig:transformer_optim_forward_detail}Transformer层前向传播基线方案与计算通信并行方案示意图}
 \end{figure}
 
-\subsection{TP/DP计算通信并行框架}
+在反向传播过程中，每一层的梯度计算由两部分组成，分别为损失函数关于输入的梯度（Input Gradient）计算和损失函数关于该层模型参数的梯度（Weight Gradient），在同一层中这两部分计算是互不依赖的，仅依赖于上一层的输入梯度。前向与反向的模型计算图如\autoref{fig:transformer_computation_graph}所示。因此，我们将反向传播中的梯度计算进行了上述拆分，从而进一步优化了计算与通信的并行性。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter3/transformer_computation_graph.pdf}
+    \caption{\label{fig:transformer_computation_graph}前向传播与反向传播计算图}
+\end{figure}
+
+在反向传播阶段，将两个并行层之间用于梯度同步的AllReduce操作同样拆解为ReduceScatter和AllGather操作，并将它们分别与对应的梯度计算过程并行执行：ReduceScatter与输入梯度计算并行，AllGather与权重梯度（Weight Gradient）计算并行。这样在保留梯度同步功能的同时最大化地隐藏了通信开销，从而提高了整体训练效率。
+
+\subsection{TP/DP计算通信并行方案}
+
+TP/DP混合并行是分布式训练中常用的设置，我们针对TP/DP混合并行模式提出了一种高效的计算通信并行方案。该方案结合了前述的TP计算通信并行方法和现有的DP计算通信并行方法，实现了TP/DP混合并行模式下的高效训练。针对DP组间的通信，采用Goyal等人\cite{goyal2017accurate}提出的方法，利用梯度桶（Gradient Bucket）机制将模型梯度按层划分为多个子集，并在计算每个子集的梯度时，异步地发起对应的AllReduce通信操作，从而实现模型反向传播与DP组间通信的并行，该方法可以通过通过Pytorch的DDP（DistributedDataParallel）接口便捷地实现。TP/DP混合并行模式下，仅TP计算通信并行的计算通信流时间线和TP与DP均计算通信并行的计算通信流时间线如\autoref{fig:TP-DP_Overlap}所示。
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter3/TP-DP_Overlap.pdf}
+    \caption{\label{fig:TP-DP_Overlap}TP/DP混合并行模式下的计算通信并行时间线示意图}
+\end{figure}
+
+\subsection{计算通信并行方案理论评估}
+本节对提出的计算通信并行方案进行了理论评估，其中相关参数定义如\autoref{tab:param_def}所示。
+\begin{table}[htbp]
+  \centering
+  \caption{参数及参数含义}
+  \label{tab:param_def}
+
+  \makebox[\textwidth][c]{%
+    \begin{tabular}{>{\centering\arraybackslash}p{0.2\textwidth}
+                    >{\centering\arraybackslash}p{0.4\textwidth}}
+      \toprule
+      参数 & 参数含义 \\
+      \midrule
+      $B$ & 总批次（Global batch size） \\
+      $S$ & 序列长度（Sequence Length） \\
+      $H$ & 隐藏维度（Hidden Size） \\
+      $V$ & 词汇表长度（Vocabulary Size） \\
+      $M$ & MLP 层中间隐藏维度 \\
+      $N_{\mathrm{TP}}$ & 张量并行（TP）组节点数 \\
+      $N_{\mathrm{DP}}$ & 数据并行（DP）组节点数 \\
+      $B_w$ & 物理链路带宽 \\
+      \bottomrule
+    \end{tabular}%
+  }
+\end{table}
+
+嵌入层中，AllReduce通信的数据量为
+$
+V_{\mathrm{AR}}^{\mathrm{emb}}
+= \frac{B \times S \times H}{N_{\mathrm{DP}}}.
+$
+采用Ring AllReduce算法时，其通信时间为
+\begin{equation}
+  T_{\mathrm{AR}}^{\mathrm{emb}}
+  = \frac{B \times S \times H}{N_{\mathrm{DP}} \, B_w}
+    \times \frac{2\left(N_{\mathrm{TP}} - 1\right)}{N_{\mathrm{TP}}}.
+\end{equation}
+
+设 $T_{\mathrm{PE}}$ 为位置嵌入（Positional Embedding）操作时间，则嵌入层中可被计算掩盖的通信时间为
+\begin{equation}
+  T_{\mathrm{lap}}^{\mathrm{emb}}
+  = \min\!\left(
+      \frac{B \times S \times H}{N_{\mathrm{DP}} \, B_w}
+      \times \frac{2\left(N_{\mathrm{TP}} - 1\right)}{N_{\mathrm{TP}}},
+      \; T_{\mathrm{PE}}
+    \right).
+\end{equation}
+
+\medskip
+
+对于Transformer Block，在模型前向传播阶段，Attention层的行并行计算可与ReduceScatter通信并行，其数据量为
+$
+V_{\mathrm{RP}}^{\mathrm{att}}
+= \frac{B \times S \times H}{N_{\mathrm{DP}} \, N_{\mathrm{TP}}}.
+$
+设$T_{\mathrm{ARP}}$为Attention层单步行并行矩阵计算时间;
+MLP层的列并行计算可与AllGather通信并行，其数据量为
+$
+V_{\mathrm{CP}}^{\mathrm{mlp}}
+= \frac{B \times S \times M H}{N_{\mathrm{DP}} \, N_{\mathrm{TP}}}.
+$
+$T_{\mathrm{MCP}}$为MLP层单步列并行矩阵计算时间。
+同理，设$T_{\mathrm{MRP}}$为MLP层单步行并行矩阵计算时间，$T_{\mathrm{ACP}}$为Attention层单步列并行矩阵计算时间。
+综上，一个Transformer Block前向传播中计算通信可并行执行的时间为
+\begin{equation}
+\begin{aligned}
+T_{\mathrm{lap}}^{\mathrm{fwd}}
+= (N_{\mathrm{TP}} - 1)\!\Big[
+& \min\!\left(
+\frac{3B S H}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
+\, T_{\mathrm{ACP}}
+\right)
++ \min\!\left(
+\frac{B S H}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
+\, T_{\mathrm{ARP}}
+\right) \\
+& + \min\!\left(
+\frac{B S M H}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
+\, T_{\mathrm{MCP}}
+\right)
++ \min\!\left(
+\frac{B S H}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
+\, T_{\mathrm{MRP}}
+\right)
+\Big].
+\end{aligned}
+\end{equation}
+
+在模型的反向传播阶段，Transformer Block列并行输入梯度的计算与ReduceScatter通信并行执行，而列并行权重梯度的计算与 AllGather 通信并行执行。
+对于 Attention 层，其列并行的输入梯度与权重梯度的通信量分别为
+$V_{\mathrm{input}}^{\mathrm{att}}
+= \frac{3BSH}{N_{\mathrm{DP}}N_{\mathrm{TP}}}$ 与
+$V_{\mathrm{weight}}^{\mathrm{att}}
+= \frac{3BH^2}{N_{\mathrm{DP}}N_{\mathrm{TP}}}$；
+对于 MLP 层，其列并行的输入梯度与权重梯度的通信量分别为
+$V_{\mathrm{input}}^{\mathrm{mlp}}
+= \frac{BSMH}{N_{\mathrm{DP}}N_{\mathrm{TP}}}$ 与
+$V_{\mathrm{weight}}^{\mathrm{mlp}}
+= \frac{BMH^2}{N_{\mathrm{DP}}N_{\mathrm{TP}}}$。
+设 $T_{\mathrm{AI}}$ 与 $T_{\mathrm{AW}}$ 分别表示 Attention 层单步输入梯度与权重梯度的计算时间，
+$T_{\mathrm{MI}}$ 与 $T_{\mathrm{MW}}$ 分别表示 MLP 层单步输入梯度与权重梯度的计算时间，
+则在一个 Transformer Block中，反向传播阶段计算与通信能够并行执行的时间为
+\begin{equation}
+\begin{aligned}
+T_{\mathrm{lap}}^{\mathrm{bwd}}
+= (N_{\mathrm{TP}} - 1)\!\Big[
+& \min\!\left(
+\frac{3BSH}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
+\, T_{\mathrm{AI}}
+\right)
++ \min\!\left(
+\frac{3BH^2}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
+\, T_{\mathrm{AW}}
+\right) \\
+& + \min\!\left(
+\frac{BSMH}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
+\, T_{\mathrm{MI}}
+\right)
++ \min\!\left(
+\frac{BMH^2}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
+\, T_{\mathrm{MW}}
+\right)
+\Big].
+\end{aligned}
+\end{equation}
+
+
+
+
+
 
 
 
 \section{实验评估}
-本节对提出的参数同步拓扑优化方法的有效性进行验证，并与现有的参数同步拓扑进行对比分析。所有实验都是在同一个硬件系统上完成的，该系统配备了2个Intel Xeon Gold 6226R处理器和8个NVIDIA GeForce RTX 2080 Ti，每个GPU有11GB显存。该硬件系统采用\autoref{fig:Fig2-4}所示的标准服务器架构。本节的实验使用pytorch实现。
+本节对提出的计算通信并行方法进行了实验验证，并与Megatron的基准实现进行了对比分析。本文实验在算力自由平台提供的GPU计算节点上完成。实验节点配置8张NVIDIA L40S，每张L40S拥有48GB显存，GPU间通过PCIe 4.0×16接口与主机系统相连，构成多GPU PCIe互连架构。软件层面均使用Pytorch提供的接口实现。
 
 \subsection{实验设置}
-为了充分评估基于本章提出的方法获得的参数同步拓扑的性能，本节分别进行了一致性实验和分布式深度学习实验。一致性实验是指在给定拓扑上执行\autoref{section3-2-1}中描述的线性平均一致迭代过程，并根据一致性误差随时间的变化评估考虑通信开销时拓扑的一致性速度。在分布式深度学习实验中，训练算法使用分布式随机梯度下降算法（算法细节见{subsection-4-2-1}），数据集选用Cifar10和Cifar100图像分类数据集，神经网络模型采用ResNet-18。Cifar10和Cifar100数据集均包含60000张32×32像素的彩色图像。其中，Cifar10数据集涵盖10个类别，每个类别有6000张图像；而Cifar100数据集则包含100个类别，每个类别有600张图像。在这60000张图像中，50000张被用作训练数据，另外10000张用于测试。在训练开始之前，每个节点从每个类别的训练数据中随机采样相同数量的样本构成本地训练数据集。实验的超参数中批大小设置为32（每个节点），学习率设置为0.05，动量因子设置为0.9，权重衰减设置为0.0001，训练周期数设置为100。
-%介绍数据划分方式
-%为了充分验证参数同步拓扑对分布式深度学习的影响，本章对实验数据进行同构划分和异构划分。其中同构划分指每个节点从每个类别的数据中随机采样相同数量的样本构成本地训练数据集，从而保证不同节点的本地数据符合独立同分布。而异构划分指每个节点仅随机采样部分类别的数据，构成本地训练数据集，从而使每个节点的本地数据不为独立同分布。在异构的数据上进行训练能够更好地表现出一致性速度对模型收敛速度和模型精度的影响。本章的异构划分方式中，每个节点从Cifar10数据集中随机采样7个类别的数据，而从Cifar100数据集中随机采样80个类别的数据。图以Cifar10为例展示了每个节点上采样的数据类别。
+实验测试了不同参数设置的Transformer模型，不同规格模型的参数表如\autoref{tab:transformer_model_para}所示。实验采用TP/DP混合并行模式，使用单节点内8张GPU进行训练，其中TP维度设置为4，DP维度设置为2。
 
-另外在参数同步拓扑优化问题求解时，ADMM算法的收敛误差$\epsilon$设置为0.0001，惩罚项的权重$\rho$设置为10，$\alpha$设置为1，SA的迭代次数$N$设置为100000，初始温度参数$T_0$设置为使ASPL值最大的拓扑以50\%的概率被接受的温度值，对于不同的场景，该温度值不同，终止温度参数$T_N$设置为比当前拓扑ASPL值更大的拓扑以不大于0.01\%的概率被接受的温度值，由于采用2-opt进行突变时，比当前拓扑ASPL值更大的拓扑与当前拓扑的能量差至少为2，因此基于\autoref{tab:equ-3-52}设置终止温度参数为0.22。
-
-本节将优化得到的参数同步拓扑与五种现有的参数同步拓扑进行了对比，包括环形拓扑、网格拓扑（2D-grid）、2D-torus、指数拓扑和随机拓扑，\autoref{fig:Fig3-6}展示了8个节点上这五种拓扑的结构。其中前三种拓扑的权重矩阵基于Metropolis规则\cite{nedic2018network}生成：
-\begin{equation}
-    \label{tab:equ-3-54}
-    W_{ij}=\frac{1}{2\max \left\{ d_i,d_j \right\}} \ i,j\in \left\{ 1,...,n \right\} 
-\end{equation}
-式中$d_i$表示节点$i$的度。指数拓扑为有向拓扑，其每个节点将数据乘以$\frac{1}{d_{out}+1}$后发送给出邻居和节点本身，$d_{out}$为节点的出度。随机拓扑的每条边以0.5的概率生成，并且边的权重等于$\frac{1}{d_{\max}}$，$d_{\max}$为拓扑的最大度（无向拓扑中指度最大的节点的度），例如图\autoref{random-topo}中$d_{\max}=5$。本章研究和对比的拓扑中，除指数拓扑外均为无向拓扑，由于Gossip架构上一条无向边可以看作两条有向边，并且本章考虑的边的数目为无向边的数目，因此令指数拓扑中边的数目为有向边数目的$\frac{1}{2}$。
-
-\begin{figure}[!htbp]
+\begin{table}[!htbp]
     \centering
-    \subfigure[环形拓扑]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-1-different-topo.pdf}
-    }
-    \subfigure[网格拓扑]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-2-different-topo.pdf}
-    }
-    \subfigure[2D-Torus]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-3-different-topo.pdf}
-    }
-    \subfigure[指数拓扑]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-4-different-topo.pdf}
-    }
-    \subfigure[随机拓扑]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-5-different-topo.pdf}
-        \label{random-topo}
-    }
-    \caption{\label{fig:Fig3-6}现有的参数同步拓扑}
-\end{figure}
-
-为了模拟不同的带宽场景，本节采用第二章中获得计算时间和通信时间的方法，测试了在单个2080Ti上训练ResNet-18一次迭代的计算时间和在带宽为9.76GB/s的链路上通信ResNet-18的模型参数的通信时间，分别为15.21ms和5.01ms，并以测试结果为基准，对不同场景下一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放。缩放方式如下：
-\begin{itemize}
-    \item 首先计算拓扑中每条边的可用带宽，并确定其中最小的可用带宽，假设为$b_{min}$；
-    \item 对于一致性实验，根据9.76与$b_{min}$的比值对迭代时间进行缩放：
-    \begin{equation}
-        \label{tab:equ-3-55}
-        t_{iter}=\frac{9.76}{b_{min}}\times 5.01;
-    \end{equation}
-    \item 对于分布式深度学习实验，根据9.76与$b_{min}$的比值对每次迭代的通信时间进行缩放，并基于批大小和节点数获得一个训练周期所需的迭代次数$c_{iter}$，进而计算一个训练周期所需时间：
-    \begin{equation}
-        \label{tab:equ-3-56}
-        t_{epoch}=\left( \frac{9.76}{b_{min}}\times 5.01+15.21 \right) \times c_{iter}.
-    \end{equation}
-\end{itemize}
+    \caption{不同规格Transformer模型参数设置}
+    \label{tab:transformer_model_para}
+    \begin{tabular}{cccccc}
+        \toprule
+        模型规格 & Layers & Hidden size & Attention heads & Vocabulary size & Max sequence length\\
+        \midrule
+        一 & 12 & 2048 & 32 & 5000 & 1024\\
+        二 & 24 & 3072 & 48 & 5000 & 1024\\
+        三 & 36 & 4096 & 64 & 5000 & 1024\\
+        \bottomrule
+    \end{tabular}
+\end{table}
 
 \subsection{实验结果与分析}
-本小节从以下几个方面设计实验以验证本章提出的参数同步拓扑优化方法的有效性：实验1在8个节点上验证了本章提出的定制化ADMM算法求解参数同步拓扑优化问题的收敛性；实验2通过一致性实验和分布式深度学习实验，对比了同构带宽场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能；实验3通过一致性实验和分布式深度学习实验，对比了节点带宽异构场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能；实验4通过一致性实验和分布式深度学习实验，对比了服务器内部链路带宽异构场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能；实验5通过一致性实验和分布式深度学习实验，对比了服务器间交换机端口带宽异构场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能。
 
-\textbf{实验1：}为了验证定制化ADMM算法求解参数同步拓扑优化问题的收敛性，本节以同构带宽场景下的拓扑优化问题为例，令节点数目为8，边的数目为12，求解得到的拓扑和相应的权重矩阵如\autoref{fig:Fig3-7}所示，其中边的粗细表示边的权重大小，边越粗权重越大。可以看到，优化得到的参数同步拓扑中每个节点的度均为3，并且边的权重具有一定的对称性。优化问题求解过程中优化目标值$\tilde{\lambda}$和变量收敛误差随迭代次数的变化如\autoref{fig:Fig3-8}所示。其中优化目标值随迭代次数不断增加，并在达到最优值后保持不变，而且每组变量的误差也能够在1000次迭代后达到$10^{-5}$以下，从而充分说明了\autoref{Algorithm-T-ADMM}的收敛性。
+\autoref{tab:time_speedup}展示了三种规格下基线和改进方法的实跑参数和结果，三种模型规格下均能达到1.25×以上的百分比。\autoref{tab:overlap_fwd_bwd}展示了基线和改进方法实跑具体计算和通信占比与并行时长，其中全模型通信时长可以分为TP通信和DP通信两部分。DP通信仅为关于模型梯度的AllReduce。对于TP通信部分，前向传播过程包括12个Transformer层中的24个AllReduce、嵌入层AllReduce以及输出层ReduceScatter，反向传播过程包括12个Transformer层中的24个AllReduce、嵌入层AllReduce以及输出层ReduceScatter。
 
-\begin{figure}[!htbp]
-    \centering
-    \subfigure{
-        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-6-1-topo-architecture.pdf}
-    }
-    \subfigure{
-        \includegraphics[width=0.54\linewidth]{figure/chapter3/fig3-6-2-weight-matrix.pdf}
-    }
-    \caption{\label{fig:Fig3-7}同构带宽场景下$n=8,r=12$时求解得到的参数同步拓扑}
-\end{figure}
+\begin{table}[htbp]
+\centering
+\caption{不同模型规格的训练时间与加速比对比}
+\label{tab:time_speedup}
+% \small
+\begin{tabular}{c c c c c}
+\toprule
+模型规格 & Global batch size
+& 基线时间(s) & 改进时间(s) & 加速比 \\
+\midrule
+一 & 64 & 2.347 & 1.876 & 1.25$\times$ \\
+二 & 32 & 2.562 & 1.993 & 1.29$\times$ \\
+三 & 16 & 1.758 & 1.402 & 1.25$\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[优化目标]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-7-1-lambda_.pdf}
-    }
-    \subfigure[收敛误差]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-7-2-resid.pdf}
-    }
-    \caption{\label{fig:Fig3-8}优化目标和收敛误差随迭代次数的变化}
-\end{figure}
 
-\textbf{实验2：}为了验证同构带宽场景下参数同步拓扑优化方法的有效性，本节将基于\autoref{Algorithm-T-ADMM}得到的参数同步拓扑（T-ADMM）与现有的参数同步拓扑进行比较。首先进行一致性实验：令节点数目为16，边的数目分别为16，24，32和54，随机初始化边的权重并求解得到不同边的数目对应的参数同步拓扑；然后，为每个节点随机初始化维度与ResNet-18模型参数量相同的数据（经统计，ResNet-18模型参数量为11689512）；在求解得到的参数同步拓扑和现有的参数同步拓扑上执行线性平均一致问题的迭代过程，并记录一致性误差$\left\| \boldsymbol{x}_k-\bar{\boldsymbol{x}} \right\| _2$随迭代次数$k$的变化。在同构带宽场景下，每个节点的带宽相同，假设为9.76GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\min \left( \frac{9.76}{d_i},\frac{9.76}{d_j} \right) $，$d_i$和$d_j$为节点$i$和节点$j$的度（指数拓扑中为节点的出度/入度）。对迭代时间进行缩放后，不同拓扑的一致性误差随时间的变化如\autoref{fig:Fig3-9}所示。图中$r$为边的数目，$d$为拓扑的最大度。可以看到，当边的数目相同时，T-ADMM的一致性速度均优于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时T-ADMM的一致性速度最快。在对比的拓扑中，指数拓扑的一致性速度最快，为了进一步比较T-ADMM与指数拓扑的性能，本节还在不同的节点数目上对比了两者的渐进收敛因子和一致性误差达到0.0001所需的收敛时间，实验结果如\autoref{tab:iso-bandwidth-consensus}所示。当节点数目从6增加到32时，T-ADMM的渐进收敛因子和收敛时间始终小于指数拓扑，充分说明了T-ADMM在一致性速度上优于指数拓扑。
+\begin{table}[htbp]
+\centering
+\caption{不同模型规格下前向与反向阶段计算通信并行效果对比（单位：ms）}
+\label{tab:overlap_fwd_bwd}
+% \small
+\scalebox{0.9}{
+\begin{tabular}{c c c c c c c c}
+\toprule
+模型规格 &  &  
+& 基线计算 & 基线通信 & 基线总时长 & 改进总时长 & 并行时长 \\
+\midrule
+\multirow{5}{*}{一}
+& \multirow{2}{*}{前向}
+& 嵌入层
+& 5.784 & 18.433 & 24.217 & 21.040 & 3.177 \\
+&& Transformer层
+& 51.613 & 50.585 & 102.198 & 86.621 & 15.577 \\
+\cmidrule(lr){2-8}
+& 反向
+& Transformer层
+& 116.736 & 51.543 & 168.279 & 134.597 & 33.807 \\
+\cmidrule(lr){2-8}
+& \multicolumn{2}{c}{DP 通信}
+& -- & 81.553 & 81.553 & 11.320 & 74.233 \\
+\cmidrule(lr){2-8}
+& \multicolumn{2}{c}{全模型}
+& 1370.162 & 977.478 & 2347.640 & 1875.932 & 471.708 \\
+\midrule
+\multirow{5}{*}{二}
+& \multirow{2}{*}{前向}
+& 嵌入层
+& 5.558 & 19.461 & 25.019 & 21.991 & 3.028 \\
+&& Transformer层
+& 58.819 & 50.238 & 109.057 & 88.651 & 20.405 \\
+\cmidrule(lr){2-8}
+& 反向
+& Transformer层
+& 124.394 & 55.629 & 180.023 & 149.021 & 31.002 \\
+\cmidrule(lr){2-8}
+& \multicolumn{2}{c}{DP 通信}
+& -- & 158.463 & 158.463 & 11.199 & 147.264 \\
+\cmidrule(lr){2-8}
+& \multicolumn{2}{c}{全模型}
+& 1491.636 & 1070.983 & 2562.619 & 1993.885 & 568.734 \\
+\midrule
+\multirow{5}{*}{三}
+& \multirow{2}{*}{前向}
+& 嵌入层
+& 9.817 & 12.798 & 22.615 & 18.744 & 3.871 \\
+&& Transformer层
+& 43.918 & 29.256 & 73.174 & 67.378 & 5.796 \\
+\cmidrule(lr){2-8}
+& 反向
+& Transformer层
+& 73.080 & 32.412 & 105.492 & 97.300 & 8.192 \\
+\cmidrule(lr){2-8}
+& \multicolumn{2}{c}{DP 通信}
+& -- & 261.418 & 261.418 & 21.937 & 239.481 \\
+\cmidrule(lr){2-8}
+& \multicolumn{2}{c}{全模型}
+& 967.714 & 791.237 & 1758.951 & 1402.000 & 356.560 \\
+\bottomrule
+\end{tabular}
+}
+\end{table}
+
+
+图5.4为模型Transformer层前向传播Profiling时间线对比，使用模型规格一的场景进行分析，注意力层和MLP层之间的AllReduce拆分为ReduceScatter和AllGather，并将注意力层的行并行部分计算与ReduceScatte并行，将MLP层的列并行计算与AllGather并行。切分后的计算时间总体比原计算时间长，可能是因为计算矩阵变小，计算核利用率下降。在TP维度为4的情况下，点对点传输的Ring AllReduce共需要六步，ReduceScatter和AllGather部分能够各掩盖三步划分后的矩阵计算。时间线上展示了并行的计算和通信，与预期结果一致。
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-9-iso-bandwidth-consensus.pdf}
-    \caption{\label{fig:Fig3-9}同构带宽场景下一致性误差随时间的变化}
+    \subfigure[基线方案]{
+        \includegraphics[width=1\linewidth]{figure/chapter3/profiling_forward_base.pdf}
+    }
+    \subfigure[计算通信并行方案]{
+        \includegraphics[width=1\linewidth]{figure/chapter3/profiling_forward_optim.pdf}
+    }
+    \caption{Transformer层前向传播基线方案和计算通信并行方案的Profiling时间线对比}
+    \label{fig:transformer_method}
 \end{figure}
 
-\begin{table}[!htpb]
-    \center
-    \caption{同构带宽场景下T-ADMM与指数拓扑在不同节点数目上的一致性速度}
-    \label{tab:iso-bandwidth-consensus}
-    \setlength{\tabcolsep}{1.5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.8}{
-    \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|}
-      \hline
-      \multicolumn{2}{|c|}{节点数目}            & 6 & 8 & 10 & 12 & 14 & 16 & 18 & 20 & 22 & 24 & 26 & 28 & 30 & 32 \\ \hline
-      \multirow{2}{*}{渐进收敛因子} & 指数拓扑 & 0.5 & 0.5 & 0.6 & 0.6 & 0.6 & 0.6 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 \\ \cline{2-16}
-                                   & T-ADMM  & \textbf{0.33} &  \textbf{0.41} & \textbf{0.45} & \textbf{0.5} & \textbf{0.48} & \textbf{0.53} & \textbf{0.45} & \textbf{0.46} & \textbf{0.48} & \textbf{0.51} & \textbf{0.54} & \textbf{0.52} & \textbf{0.54} & \textbf{0.54} \\ \hline
-      \multirow{2}{*}{收敛时间/ms}     & 指数拓扑 & 210 & 210 & 381 & 381 & 381 & 381 & 576 & 576 & 576 & 576 & 576 & 576 & 576 & 576 \\ \cline{2-16}
-                                   & T-ADMM & \textbf{150} & \textbf{180} & \textbf{240} & \textbf{301} & \textbf{351} & \textbf{351} & \textbf{391} & \textbf{421} & \textbf{451} & \textbf{481} & \textbf{511} & \textbf{511} & \textbf{541} & \textbf{541} \\ \hline
-    \end{tabular}
-    }}
-\end{table}
-
-接下来在16个节点上利用求解得到的参数同步拓扑和现有的参数同步拓扑进行分布式深度学习实验，并根据\autoref{tab:equ-3-56}计算每个训练周期的时间，得到测试准确率\footnote{所有节点的测试准确率取平均值后，利用滑动窗口进行了光滑化，下文同理。}随时间的变化如\autoref{fig:Fig3-10}所示。从图中可以看到，当边的数目相同时，相同时间内T-ADMM上的预测准确率高于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时T-ADMM上的预测准确率最高。其中环形拓扑和T-ADMM（$r$=16，$d$=2）对应的曲线在250s左右消失的原因是这两个拓扑已经完成100个训练周期的训练。另外，为了定量评估不同参数同步拓扑对分布式深度学习训练性能的影响，统计了在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间\footnote{在本节的实验设置下，84\%和62\%为所有拓扑都能达到的相对较高的预测准确率值。}，如\autoref{tab:iso-bandwidth-accuracy-time}所示。可以看到，边的数目为32时求解得到的参数同步拓扑在Cifar10数据集和Cifar100数据集上预测准确率达到设定值所需的时间分别为110.1s和127.6s，均是所有拓扑中所需时间最少的，并且比环形拓扑和网格拓扑快了1倍左右，比随机拓扑快了1倍多。其他边的数目约束下的T-ADMM不如T-ADMM（$r$=32）的原因是当边的数目更少时拓扑更稀疏，一致性速度更慢，而当边的数目更多时，节点的度更大，每次迭代所需通信时间更多。
-
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[Cifar10]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-10-1-iso-bandwidth-cifar10.pdf}
-    }
-    \subfigure[Cifar100]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-10-2-iso-bandwidth-cifar100.pdf}
-    }
-    \caption{\label{fig:Fig3-10}同构带宽场景下测试准确率随时间的变化}
-\end{figure}
-
-\begin{table}[!htpb]
-    \center
-    \caption{同构带宽场景下测试准确率达到设定值所需的时间（单位：s）}
-    \label{tab:iso-bandwidth-accuracy-time}
-    \setlength{\tabcolsep}{1mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.8}{
-    \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|}
-      \hline
-      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-ADMM} \\ ($r$=16)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=24)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=32)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=54)}\\ \hline
-      Cifar10 & 229.7 & 227.7 & 189.8 & 134.6 & 262.0 & 165.4 & 144.9 & \textbf{110.1} & 146.1 \\ \hline
-      Cifar100 & 234.7 & 269.1 & 200.1 & 151.8 & 345.1 & 177.8 & 172.5 & \textbf{127.6} & 183.9 \\ \hline
-    \end{tabular}
-    }}
-\end{table}
-
-\textbf{实验3：}下面验证节点带宽异构场景下参数同步拓扑优化方法的有效性。在与现有的参数同步拓扑进行对比前，首先对基于模拟退火算法（SA）生成\autoref{Algorithm-T-ADMM}的初始拓扑的有效性进行验证。改变节点数目和节点带宽的异构性，并分别随机初始化拓扑结构和使用SA生成初始拓扑结构，然后基于\autoref{Algorithm-T-ADMM}求解得到对应的参数同步拓扑，\autoref{tab:bandwidth-constraint-SA-compare}对比了使用两种方式得到的优化目标值$\tilde{\lambda}$和参数同步拓扑的渐进收敛因子。其中T-ADMM为随机初始化并求解优化问题得到的参数同步拓扑，T-SA-ADMM为使用SA生成初始拓扑结构并求解优化问题得到的参数同步拓扑，可以看到，当节点数目为6时，两种方法得到的结果相同，当节点数目增加至8和16时，对于大部分的节点带宽比，T-SA-ADMM得到的结果要优于T-ADMM，说明基于SA初始化拓扑结构确实能够改善求解结果。\autoref{fig:Fig3-11}是几种节点带宽比对应的T-SA-ADMM的拓扑结构图，其中边的粗细表示对应边的权重。
-
-\begin{table}[!htpb]
-    \center
-    \caption{节点带宽异构场景下T-ADMM与T-SA-ADMM的对比}
-    \label{tab:bandwidth-constraint-SA-compare}
-    \setlength{\tabcolsep}{3mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.8}{
-    \begin{tabular}{|c|c|c|c|c|c|c|}
-      \hline
-      \multirow{2}{*}{节点数目} & \multirow{2}{*}{节点带宽比} & \multirow{2}{*}{边的数目} & \multicolumn{2}{c}{$\tilde{\lambda}$} &  \multicolumn{2}{|c|}{渐进收敛因子}\\ \cline{4-7}
-      &&& T-ADMM &  T-SA-ADMM & T-ADMM &  T-SA-ADMM \\ \hline
-      6 & \makecell[c]{3:3:2:2:1:1} & 6 & 0.26 & 0.26 & 0.74 & 0.74 \\ \hline
-      6 & \makecell[c]{3:3:3:1:1:1} & 6 & 0.25 & 0.25 & 0.75 & 0.75 \\ \hline
-      8 & \makecell[c]{3:3:3:3:1:1:1:1} & 8& 0.20 & 0.20 & 0.80 & 0.80 \\ \hline
-      8 & \makecell[c]{3:3:3:3:2:2:2:2} & 10& 0.36 & \textbf{0.42} & 0.64 & \textbf{0.58} \\ \hline
-      16 & \makecell[c]{3:3:3:3:3:3:3:3 \\ :1:1:1:1:1:1:1:1} & 16& 0.04 & \textbf{0.09} & 0.96 & \textbf{0.91} \\ \hline
-      16 & \makecell[c]{3:3:3:3:3:3:3:3 \\ :2:2:2:2:2:2:2:2} & 20& 0.20 & \textbf{0.21} & 0.80 & \textbf{0.79} \\ \hline
-      16 & \makecell[c]{5:5:5:5:1:1:1:1 \\ :1:1:1:1:1:1:1:1} & 16& 0 & \textbf{0.08} & 1 & \textbf{0.92} \\ \hline
-      16 & \makecell[c]{8:8:1:1:1:1:1:1 \\ :1:1:1:1:1:1:1:1} & 16& 0.05 & 0.05 & 0.95 & 0.95 \\ \hline
-    \end{tabular}
-    }}
-\end{table}
-
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[3:3:2:2:1:1 ($r=6$)]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-1.pdf}
-    }
-    \subfigure[3:3:3:1:1:1 ($r=6$)]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-2.pdf}
-    }
-    \subfigure[3:3:3:3:1:1:1:1 ($r=8$)]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-3.pdf}
-    }
-    \subfigure[3:3:3:3:2:2:2:2 ($r=10$)]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-4.pdf}
-    }
-    \subfigure[3:3:3:3:3:3:3:3:1:1:1:1:1:1:1:1 ($r=16$)]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-5.pdf}
-    }
-    \subfigure[5:5:5:5:1:1:1:1:1:1:1:1:1:1:1:1 ($r=16$)]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-11-6.pdf}
-    }
-    \caption{\label{fig:Fig3-11}不同节点带宽比对应的T-SA-ADMM的拓扑结构}
-\end{figure}
-
-%令边的数目分别为16，32和48，求解得到对应的参数同步拓扑。在求解得到的参数同步拓扑和现有的参数同步拓扑上进行一致性实验和分布式深度学习实验，
-接下来在16个节点上进行一致性实验和分布式深度学习实验，对比T-SA-ADMM与现有参数同步拓扑的性能。设置节点的带宽比为3:3:3:3:3:3:3:3:1:1:1:1:1:1:1:1，其中3对应的带宽为9.76GB/s，1对应的带宽为3.25GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\min \left( \frac{b_i}{d_i},\frac{b_j}{d_j} \right) $，$b_i$和$b_j$为节点$i$和节点$j$的带宽，$d_i$和$d_j$为节点$i$和节点$j$的度。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-12}和\autoref{fig:Fig3-13}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽3.25GB/s的比值。可以看到，一致性速度方面，边的数目为32和48时，T-SA-ADMM优于现有的参数同步拓扑，边的数目为16时，T-SA-ADMM的一致性速度略慢于指数拓扑，但是仍优于其他现有的参数同步拓扑。在分布式深度学习实验中，相同时间内不同边的数目对应的T-SA-ADMM上的预测准确率均高于现有的参数同步拓扑。虽然T-SA-ADMM（$r$=16，$b$=1）的一致性速度慢于指数拓扑，但是由于该拓扑中边的可用带宽更高，使得分布式深度学习一次迭代所需时间更短，从而可以在相同时间内执行更多次数的模型参数更新步骤，加快模型收敛速度。\autoref{tab:bandwidth-constraint-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间。其中不同边的数目对应的T-SA-ADMM所需的时间均明显少于现有的参数同步拓扑。
+图5.8为模型Transformer层反向传播Profiling时间线对比，使用模型规格一的场景进行分析， AllReduce解耦为ReduceScatter和AllGather，并分别将ReduceScatter与列并行的输入梯度计算分片并行，将AllGather与列并行的权重梯度计算直接并行。切分后的计算时间总体比原计算时间长，可能是因为计算矩阵变小，计算核利用率下降。此外，DP的AllReduce也与TP的计算相并行。时间线上展示了并行的计算和通信，与预期结果一致。
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-12-bandwidth-constraint-consensus.pdf}
-    \caption{\label{fig:Fig3-12}节点带宽异构场景下一致性误差随时间的变化}
+    \subfigure[基线方案]{
+        \includegraphics[width=1\linewidth]{figure/chapter3/profiling_backward_base.pdf}
+    }
+    \subfigure[计算通信并行方案]{
+        \includegraphics[width=1\linewidth]{figure/chapter3/profiling_backward_optim.pdf}
+    }
+    \caption{Transformer层反向传播基线方案和计算通信并行方案的Profiling时间线对比}
+    \label{fig:transformer_method}
 \end{figure}
 
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[Cifar10]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-13-1-bandwidth-constraint-cifar10.pdf}
-    }
-    \subfigure[Cifar100]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-13-2-bandwidth-constraint-cifar100.pdf}
-    }
-    \caption{\label{fig:Fig3-13}节点带宽异构场景下测试准确率随时间的变化}
-\end{figure}
-
-\begin{table}[!htpb]
-    \center
-    \caption{节点带宽异构场景下测试准确率达到设定值所需的时间（单位：s）}
-    \label{tab:bandwidth-constraint-accuracy-time}
-    \setlength{\tabcolsep}{1mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.8}{
-    \begin{tabular}{|c|c|c|c|c|c|c|c|c|}
-      \hline
-      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=16)} & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=32)} & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=48)}\\ \hline
-      Cifar10 & 412.0 & 486.4 & 405.3 & 287.4 & 663.8 & 275.3 & \textbf{181.6} & 182.9 \\ \hline
-      Cifar100 & 420.9 & 574.9 & 427.5 & 324.3 & 874.26 & 239.76 & 248.1 & \textbf{194.7} \\ \hline
-    \end{tabular}
-    }}
-\end{table}
-
-\textbf{实验4：}下面验证服务器内部链路带宽异构场景下参数同步拓扑优化方法的有效性。由于SA不适用于该场景，因此随机初始化拓扑结构，并基于\autoref{Algorithm-T-ADMM}求解得到参数同步拓扑（T-ADMM）。\autoref{fig:Fig3-14}是不同链路带宽比对应的T-ADMM的拓扑结构图，其中边的粗细表示对应边的权重。接下来设置三种类型的物理链路上的带宽比为$b_{PIX}:b_{NODE}:b_{SYS}$=1:1:2，其中2对应的带宽为9.76GB/s，1对应的带宽为4.88GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\frac{b_{link}}{e_{link}}$，$b_{link}$为边$\left\{ i,j \right\} $所在物理链路的带宽，$e_{link}$为边$\left\{ i,j \right\} $所在物理链路上边的数目。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-15}和\autoref{fig:Fig3-16}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽4.88GB/s的比值。可以看到，相同时间内，T-ADMM的一致性误差和预测准确率均优于现有的参数同步拓扑。另外，在该场景下，指数拓扑的性能有所下降，因为指数拓扑中物理链路SYS上有10条边，导致边的最小可用带宽仅为0.976GB/s，从而大大增加了一致性实验的迭代时间和分布式深度学习实验的训练周期时间。\autoref{tab:bandwidth-constraint-intra-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到61\%所需的时间。其中除了Cifar10上2D-torus与T-ADMM（$r$=16）所需的时间接近外，不同边的数目对应的T-ADMM所需的时间均明显少于现有的参数同步拓扑。
-
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:1:1 ($r=7$)]{
-        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-1-topo.pdf}
-    }
-    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:1:2 ($r=8$)]{
-        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-2-topo.pdf}
-    }
-    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:2:4 ($r=12$)]{
-        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-3-topo.pdf}
-    }
-    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:4:4 ($r=16$)]{
-        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-4-topo.pdf}
-    }
-    \caption{\label{fig:Fig3-14}不同链路带宽比对应的T-ADMM的拓扑结构}
-\end{figure}
-
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-15-bandwidth-constraint-intra-consensus.pdf}
-    \caption{\label{fig:Fig3-15}服务器内部链路带宽异构场景下一致性误差随时间的变化}
-\end{figure}
-
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[Cifar10]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-16-1-bandwidth-constraint-intra-cifar10.pdf}
-    }
-    \subfigure[Cifar100]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-16-2-bandwidth-constraint-intra-cifar100.pdf}
-    }
-    \caption{\label{fig:Fig3-16}服务器内部链路带宽异构场景下测试准确率随时间的变化}
-\end{figure}
-
-\begin{table}[!htpb]
-    \center
-    \caption{服务器内部链路带宽异构场景下测试准确率达到设定值所需的时间（单位：s）}
-    \label{tab:bandwidth-constraint-intra-accuracy-time}
-    \setlength{\tabcolsep}{2mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.8}{
-    \begin{tabular}{|c|c|c|c|c|c|c|c|c|}
-      \hline
-      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-ADMM} \\ ($r$=8)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=12)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=16)}\\ \hline
-      Cifar10 & 484.1 & 662.4 & 407.1 & 754.0 & 754.0 & \textbf{266.8} & 276.0 & 407.6 \\ \hline
-      Cifar100 & 350.7 & 552.0 & 510.6 & 651.8 & 766.8 & \textbf{261.8} & 269.1 & 310.1 \\ \hline
-    \end{tabular}
-    }}
-\end{table}
-
-\textbf{实验5：}下面验证服务器间交换机端口带宽异构场景下参数同步拓扑优化方法的有效性。在该场景下，对交换机端口上边的数目的约束可以看作是对子拓扑中节点度的约束，因此基于SA生成初始拓扑结构的方法同样适用于该场景下优化问题的求解。设置节点数目为16，交换机层级数为2，每个交换机上的端口数为4，分别令不同层级上的交换机端口带宽比为1：2和2：3，求解优化问题得到的T-SA-ADMM的拓扑结构如\autoref{fig:Fig3-17}所示，其中边的粗细表示对应边的权重。接下来在交换机端口带宽比为1：2的场景下进行一致性实验和分布式深度学习实验，其中2对应的带宽为9.76GB/s，1对应的带宽为4.88GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\frac{b_{s_{ij}}}{e_{s_{ij}}}$，$b_{s_{ij}}$为边$\left\{ i,j \right\} $经过的交换机端口的带宽，$e_{s_{ij}}$为边$\left\{ i,j \right\} $经过的交换机端口上边的数目。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-18}和\autoref{fig:Fig3-19}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽4.88GB/s的比值。可以看到，相同时间内，T-SA-ADMM的一致性误差和预测准确率均优于现有的参数同步拓扑。\autoref{tab:bandwidth-constraint-inter-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间。很显然，不同边的数目对应的T-SA-ADMM所需的时间均明显少于现有的参数同步拓扑。
-
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[$b_{s_0}:b_{s_1}$=1:2 ($r=24$)]{
-        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-17-1-topo.pdf}
-    }
-    \subfigure[$b_{s_0}:b_{s_1}$=2:3 ($r=40$)]{
-        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-17-2-topo.pdf}
-    }
-    \caption{\label{fig:Fig3-17}不同交换机端口带宽比对应的T-SA-ADMM的拓扑结构}
-\end{figure}
-
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-18-bandwidth-constraint-inter-consensus.pdf}
-    \caption{\label{fig:Fig3-18}服务器间交换机端口带宽异构场景下一致性误差随时间的变化}
-\end{figure}
-
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[Cifar10]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-19-1-bandwidth-constraint-inter-cifar10.pdf}
-    }
-    \subfigure[Cifar100]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-19-2-bandwidth-constraint-inter-cifar100.pdf}
-    }
-    \caption{\label{fig:Fig3-19}服务器间交换机端口带宽异构场景下测试准确率随时间的变化}
-\end{figure}
-
-\begin{table}[!htpb]
-    \center
-    \caption{服务器间交换机端口带宽异构场景下测试准确率达到设定值所需的时间（单位：s）}
-    \label{tab:bandwidth-constraint-inter-accuracy-time}
-    \setlength{\tabcolsep}{2mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.8}{
-    \begin{tabular}{|c|c|c|c|c|c|c|c|}
-      \hline
-      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=24)} & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=48)} \\ \hline
-      Cifar10 & 320.8 & 227.7 & 189.7 & 134.5 & 262.0 & 101.3 & \textbf{86.25} \\ \hline
-      Cifar100 & 327.8 & 269.1 & 200.1 & 151.8 & 345.1 & 126.0 & \textbf{117.3} \\ \hline
-    \end{tabular}
-    }}
-\end{table}
 
 
 \section{本章小结}
-本章从优化分布式深度学习的通信性能出发，研究了参数同步拓扑优化方法。首先，本章分别分析了同构带宽、节点带宽异构、服务器内部链路带宽异构和服务器间交换机端口带宽异构四种场景下影响通信开销的主要因素，其中对于后面三种带宽异构场景，本章提出了一种带宽分配策略，以实现边上带宽的最优分配。然后，以一致性速度为优化目标，对四种场景分别引入通信相关的约束，设计了对应的参数同步拓扑优化问题。接下来提出了定制化的ADMM算法用于求解参数同步拓扑优化问题，为了改进求解得到的结果，本章还通过模拟退火算法生成ADMM算法的初始拓扑结构。最后，在四种场景下分别进行一致性实验和分布式深度学习实验，并与现有的参数同步拓扑进行对比。实验结果表明，基于本章提出的方法得到的参数同步拓扑在一致性速度上优于现有的参数同步拓扑，并且在分布式深度学习中，使用优化出的参数同步拓扑能够在更短的时间内达到设定的预测准确率，从而证明了本章提出的方法的有效性。
+本项目围绕大规模模型计算与通信并行优化展开了系统性研究，梳理了当前主流的混合并行范式与代表性技术，包括基于张量并行的Megatron、Collective Einsum，基于数据并行的DeepSpeed ZeRO，以及基于流水并行的Zero Bubble调度算法。在此基础上，针对Transformer模型，分别从推理与训练两个阶段提出了改进方案：通过在嵌入层和Transformer块中拆分通信算子、细粒度调度矩阵计算，实现计算与通信的并行，有效减少设备空闲时间；通过在反向传播中优化算子顺序和梯度同步策略，进一步掩盖通信开销，提高端到端吞吐量。
+
+理论分析和实测结果表明，所提出的优化方案能够在不改变模型精度的前提下显著提升大模型分布式训练与推理的性能，具有良好的可扩展性和可移植性。未来工作可进一步探索跨节点异步通信机制、更细粒度流水调度及异构算力环境下的调优策略，以支撑百亿乃至万亿参数级模型的高效训练与推理。

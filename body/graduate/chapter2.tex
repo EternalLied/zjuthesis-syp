@@ -52,7 +52,7 @@ PairWise算法是一种常用的AlltoAll算子实现方法，它通过在每个�
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=0.6\linewidth]{figure/chapter2/TEN.pdf}
-    \caption{\label{fig:ten}示例物理拓扑与对应时间扩展网络TEN示意图}
+    \caption{\label{fig:ten}示例物理拓扑与对应时间扩展网络TEN示意图\cite{won2024tacos}}
 \end{figure}
 
 我们可以在TEN上直观地表示出集合通信算法的执行过程。\autoref{fig:ten-ring-allgather}给出了Ring AllGather算法的TEN表示。在该TEN中，每个节点在不同时间点上被复制为多个时间节点，表示节点在不同时间点上的状态变化。节点间的有向边表示节点间的数据传输过程，边上的色块表示传输的数据块，图中可以清晰地看到Ring AllGather算法中数据块的传输顺序和环状的传输路径。
@@ -60,7 +60,7 @@ PairWise算法是一种常用的AlltoAll算子实现方法，它通过在每个�
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=0.8\linewidth]{figure/chapter2/TEN-Ring-AllGather.pdf}
-    \caption{\label{fig:ten-ring-allgather}Ring AllGather算法的TEN表示}
+    \caption{\label{fig:ten-ring-allgather}Ring AllGather算法的TEN表示\cite{won2024tacos}}
 \end{figure}
 
 \subsection{基于TEN的集合通信算法合成器：TACOS}
@@ -80,596 +80,810 @@ TACOS可以高效地合成直连拓扑上的Allgather算子，并且适用于非
 \section{交换机拓扑感知的通用集合通信算法合成器}
 \subsection{方法概述}
 
-本章提出了一种新的集合通信算法合成方法，我们将其称为交换机拓扑感知的通用集合通信算法合成器（Fabric-Topology-Aware General Collective Algorithm Synthesizer，FTACAS）。\autoref{fig:Fig2-5}为FTACAS的框架图，FTACAS主要由以下三个部分组成：
+本章提出了一种新的集合通信算法合成方法，我们将其称为交换机拓扑感知的通用集合通信算法合成器（Fabric-Topology-Aware General Collective Algorithm Synthesizer，FTACAS）。\autoref{fig:Fig2-5}为FTACAS的框架图，FTACAS主要由以下四个模块组成：
 \begin{itemize}
-    \item 
-    \item 
-    \item 
+    \item 拓扑建模模块（Topology）：该模块负责将物理拓扑抽象为包含设备节点和交换机节点的物理有向图，支持多级交换机、并行链路以及交换机转发模式（Cut-Through模式和Store-and-Forward模式）选择。
+    \item 算子构建模块（Collective）：该模块负责定义目标集合通信算子的前置条件和后置条件，支持AllGather与AlltoAll算子，同时支持数据块的预先分块设置以探索更细粒度的调度实现。
+    \item 时间扩展网络模块（TEN）：根据集合通信算子的数据量，基于α–β模型计算链路传输时间，在物理图基础上引入时间维度，预计算并缓存拓扑关键信息（节点间传输时间矩阵与直达设备邻接表），并根据传输时间对初始后置条件进行排序。在合成器执行过程中维护链路/交换机端口资源占用状态，实现路由可行性检查、相关资源预留以及到达事件记录的功能。
+    \item 合成器模块（Synthesizer）：合成集合通信算法的主要模块，采用事件驱动的循环模式，在触发数据块到达事件的时间步执行基于贪心思想的链路-数据块匹配策略，直到所有节点的后置条件完全满足。该模块针对AllGather和AlltoAll算子分别设计了不同的匹配策略以高效合成高性能集合通信算法。
 \end{itemize}
-\autoref{Algorithm-FTACAS}总结了FTACAS的执行流程。
+
+为保证后续算法描述与公式推导的一致性，本节统一给出 FTACAS 中涉及的主要符号约定，如 \autoref{tab:ftacas-notation} 所示。在本章描述中，默认链路带宽 $B$、数据块大小 $S$与传输时间 $\Delta(\cdot)$ 采用一致的单位体系。
+
+\begin{table}[!htbp]
+\centering
+\caption{FTACAS符号约定}
+\label{tab:ftacas-notation}
+\begin{tabular}{p{0.26\linewidth}p{0.66\linewidth}}
+\hline
+符号 & 含义 \\
+\hline
+$G=(V,E)$ & 物理拓扑有向图 \\
+$V_D,\;V_S$ & 设备节点集合与交换机节点集合，$V=V_D\cup V_S$ \\
+$N$ & 设备数，$N=|V_D|$ \\
+$C$ & 每设备数据块划分数（用于探索更细粒度调度） \\
+$S$ & 数据块（chunk）大小 \\
+$e=(u\rightarrow v)$ & 节点u到节点v的物理链路\\
+$B_{u\rightarrow v}$ & 节点u到节点v的链路带宽\\
+$\alpha_{u\rightarrow v}$ & 节点u到节点v的静态时延 \\
+$\mathrm{cap}_{in/out}(s)$ & 交换机 $s$ 入/出方向端口并发容量 \\
+$\mathrm{mode}(s)$ & 交换机 $s$ 转发模式（Cut-Through 或 Store-and-Forward） \\
+$\Delta_{u\rightarrow v}(S)$ & 大小为 $S$ 的 chunk 在链路 $u\rightarrow v$ 上的传输时间 \\
+$\boldsymbol{T}$ & 传输时间矩阵，$T[u][v]$ 为设备 $u\rightarrow v$ 的传输时间 \\
+$\mathcal{N}(u)$ & 直达设备邻接表（仅允许经交换机中继，不经过中间设备） \\
+$\mathcal{P}$ & 前置条件集合，$\mathcal{P}(c,d)=1$ 表示设备 $d$ 拥有 chunk $c$ \\
+$\mathcal{Q}$ & 后置条件集合，$(c,d)\in\mathcal{Q}$ 表示设备 $d$ 需要 chunk $c$ \\
+$\pi(c,d)$ & 后置条件 $(c,d)$ 的优先级估计（由传输时间给出） \\
+$\mathrm{EQ}$ & 事件队列（存储未来到达事件的时间戳） \\
+$\mathcal{S}$ & 合成得到的集合通信调度（传输与路由预留的集合） \\
+$T_{coll}$ & 集合通信完成时间（makespan） \\
+$r_e(t;\mathcal{S})$ & 时刻 $t$ 调度 $\mathcal{S}$ 是否占用链路 $e$（取值为0或1） \\
+$r^{in}_s(t;\mathcal{S})$ & 时刻 $t$ 调度 $\mathcal{S}$ 在交换机 $s$ 入向端口的占用（并发数） \\
+$r^{out}_s(t;\mathcal{S})$ & 时刻 $t$ 调度 $\mathcal{S}$ 在交换机 $s$ 出向端口的占用（并发数） \\
+$t$ & 时间变量 \\
+\hline
+\end{tabular}
+\end{table}
+
+在上述符号约定下，FTACAS 的目标是在满足链路容量与交换机端口并发约束的前提下，
+构造一组集合通信调度 $\mathcal{S}$，
+使得所有后置条件 $(c,d)\in\mathcal{Q}$ 最终均被满足，
+并尽可能最小化集合通信完成时间 $T_{coll}$。
+该问题可形式化为如下优化问题：
+
+\begin{equation}
+\label{eq:ftacas-objective}
+\begin{matrix}
+& \underset{\mathcal{S}}{\min}\;\; T_{coll} \\
+\mathrm{s.t.}\;\; &
+\begin{array}{c}
+\mathcal{P}(c,d;T_{coll}) = 1,
+\quad \forall (c,d)\in \mathcal{Q}, \\[0.3em]
+r_e(t;\mathcal{S}) \le 1,
+\quad \forall e\in E,\ \forall t\in[0,T_{coll}], \\[0.3em]
+r^{in}_s(t;\mathcal{S}) \le \mathrm{cap}_{in}(s),
+\quad \forall s\in V_S,\ \forall t\in[0,T_{coll}], \\[0.3em]
+r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
+\quad \forall s\in V_S,\ \forall t\in[0,T_{coll}].
+\end{array}
+\end{matrix}
+\end{equation}
+
+
+\autoref{eq:ftacas-objective} 所描述的问题本质上属于带资源约束的调度与路由组合优化问题，在一般交换机拓扑结构下难以直接获得全局最优解。因此，FTACAS 采用可扩展的事件驱动贪心合成策略，在可控的计算开销下生成高质量的集合通信调度方案。
+
+\autoref{Algorithm-FTACAS-Main}总结了FTACAS的执行流程，其中\autoref{Algorithm-FTACAS-AllGather}和\autoref{Algorithm-FTACAS-AllToAll}在2.3.5节进行详细介绍。
+
+
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/fig2-5-framework.pdf}
+    \includegraphics[width=\linewidth]{figure/chapter2/FTACAS.pdf}
     \caption{\label{fig:Fig2-5}FTACAS框架图}
 \end{figure}
 
+
+
 \begin{center}
-% \begin{minipage}{8.5cm}
 \begin{algorithm}[!htbp]
-      \caption{PreTopo的执行流程} 
-    %   \small
-      \label{Algorithm-PreTopo} 
-        \begin{algorithmic}[1]
-        \REQUIRE{神经网络的层数$l$；各神经网络层的类型$layer_i, i\in{1,...,l}$；各神经网络层的特征$\boldsymbol{c}_{nn}^{layer_i}$；GPU的硬件特征$\boldsymbol{c}_{gpu}$；集群的通信特征$\boldsymbol{c}_{cluster}$}；
-        \ENSURE{分布式训练的迭代时间$T_{iter}$}；
-        \FOR{$i \in [1, l]$}
-            \STATE 基于\autoref{tab:features_fomula}计算第$i$个神经网络层的扩充特征：
-            \begin{align*}
-            % \small
-                &mem_w=\begin{cases}
-                    k^2c_{in}c_{out}+c_{out},&bias=1\\
-                    k^2c_{in}c_{out},&bias=0\\
-                \end{cases}\\
-                &mem_{in}=bm_{in}^2c_{in}, \hspace{0.2in} mem_{out}=bm_{out}^2c_{out},\\
-                &m_{out}=\lfloor \frac{m_{in}+2p-k}{s} \rfloor +1,\\
-                &ops_{conv}=bm_{out}^2k^2c_{in}c_{out}, \hspace{0.2in} ops_{fc}=bd_{in}d_{out}.
-            \end{align*}
-            \STATE 使用多层感知器模型预测第$i$个神经网络层的计算时间；
-        \ENDFOR
-        \IF{通信是基于$all\underline{~}reduce$进行的}
-        \STATE 基于\autoref{tab:multi_gpu_allreduce_based_multiGPU}预测通信时间：
+    % \footnotesize
+    % \small
+    \caption{FTACAS主流程}
+    \label{Algorithm-FTACAS-Main}
+    \begin{algorithmic}[1]
+        \REQUIRE{物理拓扑$G=(V,E)$（设备集合$V_D$，交换机集合$V_S$，链路带宽$B_e$，链路时延$\alpha_e$，交换机端口容量$\mathrm{cap}_{in/out}$，转发模式$\mathrm{mode}$）；集合通信算子类型$op\in\{\mathrm{AllGather},\mathrm{AllToAll}\}$；设备数$N$；每设备数据块划分数$C$；数据块大小$S$}
+        \ENSURE{集合通信调度$\mathcal{S}$；集合通信完成时间$T_{coll}$}
+
+        \STATE \textbf{算子条件初始化}：根据$op$生成前置条件集合$\mathcal{P}$与后置条件集合$\mathcal{Q}$；
+
+        \STATE \textbf{TEN构建与链路传输时间计算}：对每条物理链路$e=(u\rightarrow v)\in E$，基于$\alpha$--$\beta$模型计算传输时间：
         \begin{align*}
-        %\small
-            t_{all\underline{~}reduce}^{cluster}=\left( m-1 \right) \cdot t_{all\underline{~}reduce}^{link}\left( \frac{2N}{m} \right),
+            &\Delta_{u\rightarrow v}(S)=\alpha_{u\rightarrow v}+\frac{S}{B_{u\rightarrow v}},\\
+            &\Delta_{u\rightarrow s\rightarrow v}^{CT}(S)=\max\left(\Delta_{u\rightarrow s}(S),\,\Delta_{s\rightarrow v}(S)\right)\quad(\text{Cut-Through}).
         \end{align*}
+
+
+        \STATE \textbf{节点间最短传输路径搜索}：以$\Delta(\cdot)$为边代价，对每个源设备$u\in V_D$执行最短路径搜索，得到传输时间$T[u][\cdot]$；
+        \STATE \textbf{拓扑关键信息计算与缓存}：构建并缓存传输时间矩阵$\boldsymbol{T}=\{T[u][v]\}$以及直达设备邻接表$\mathcal{N}(u)$；
+
+        \STATE 对每个未满足的后置条件$(c,d)\in\mathcal{Q}$计算初始优先级：
+        \begin{align*}
+            \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathcal{P}(c,s)=1} T[s][d] .
+        \end{align*}
+        \STATE 按优先级对后置条件集合$\mathcal{Q}$排序（AllGather：$\pi$升序；AllToAll：$\pi$降序）；
+        \STATE 初始化事件队列$\mathrm{EQ}\leftarrow \{0\}$，调度集合$\mathcal{S}\leftarrow \emptyset$；
+
+        \IF{$op=\mathrm{AllGather}$}
+            \STATE 调用\autoref{Algorithm-FTACAS-AllGather}执行AllGather事件驱动贪心合成，得到$\mathcal{S}$与$T_{coll}$；
         \ELSE
-        \STATE 根据分布式训练架构和拓扑结构分析一次迭代需要进行的通信次数$c$以及每次通信涉及的通信链路的集合$links_i$；
-        \STATE 基于\autoref{tab:topo_based_on_broadcast}预测通信时间：
-        \begin{align*}
-        %\small
-            t_{comm}=\sum_{i=1}^c{t_{broadcast}^{cluster}\left( n_i, links_i \right)},
-        \end{align*}
+            \STATE 调用\autoref{Algorithm-FTACAS-AllToAll}执行AllToAll事件驱动贪心合成，得到$\mathcal{S}$与$T_{coll}$；
         \ENDIF
-        \STATE 提取关键路径并计算迭代时间。
-        \end{algorithmic}
+
+        \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
+    \end{algorithmic}
 \end{algorithm}
-% \end{minipage}
 \end{center}
 
-\subsection{计算时间预测模型}
-
-在本章中，用于预测每个神经网络层计算时间的多层感知器模型由五个全连接层组成，其中前四个全连接层为隐藏层，用于学习输入特征之间的关系，最后一个全连接层为输出层，用于学习隐藏层特征与输出之间的关系，每个全连接层执行如下操作：
-\begin{equation}
-    \label{tab:MLP-layer}
-    Y=W\cdot X+b,
-\end{equation}
-其中，$W$是全连接层的权重矩阵，$b$是偏置参数，$Y$是全连接层的输出数据。本章中全连接层的神经元数目分别为32、64、128和128，输出层神经元数目为1，表示预测的计算时间。其中，每个隐藏层的输出会经过ReLU激活函数，其表达式如\autoref{tab:ReLU}所示，它保证了整个神经网络是非线性且稀疏的：
-\begin{equation}
-    \label{tab:ReLU}
-    ReLU\left( Y \right) =\begin{cases}
-        Y,if\,\,Y>0\\
-        0,if\,\,Y\leqslant 0\\
-    \end{cases}.
-\end{equation}
-
-在训练时，输出层经过ReLU激活函数之前会以20\%的概率对其执行dropout操作以减轻过拟合。构建的多层感知器模型如\autoref{fig:Fig2-6}所示。针对不同类型的神经网络层，多层感知器的输入层神经元数目有所不同。根据卷积层、池化层、全连接层和批归一化层的特征分析结果，其输入层神经元数目分别为19、12、11和10。
-
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=0.6\linewidth]{figure/chapter2/fig2-6-MLP.pdf}
-    \caption{\label{fig:Fig2-6}多层感知器模型}
-\end{figure}
-
-在建立每种类型神经网络层对应的MLP模型之后，通过特征空间采样并测试得到基准测试数据集以训练MLP模型（基准测试数据集获取细节见\autoref{subsection_2_4_1}）。进而利用训练好的模型即可对待预测神经网络的计算时间进行逐层预测，并得到其单次迭代的计算时间：
-\begin{equation}
-    \label{tab:computation_time}
-    T_{comp}^{iter}=\sum_{i=0}^l{T_{comp}^{layer_i}}\left( c_{nn}^{layer_i},c_{gpu} \right) =M_{type_i}\left( c_{nn}^{layer_i},c_{gpu} \right) ,
-\end{equation}
-其中$l$是神经网络的层数，$\boldsymbol{c}_{nn}^{layer_i}$是第$i$个神经网络层的特征，$\boldsymbol{c}_{gpu}$是GPU的硬件特征，$type_i$是第$i$个神经网络层的类型，$M$是建立的MLP模型。
-
-\subsection{通信时间预测模型}\label{subsection_2_3_3}
-
-\textbf{1. 单链路通信时间预测模型}
-
-本节首先对分布式深度学习中常用的两种集合通信原语，全归约（$all\underline{~}reduce$）和广播（$broadcast$），建立了单链路通信时间预测模型。与Qi等人\cite{qi2016paleo}直接使用固定带宽预测通信时间的方法不同，在实际测试中，真实的通信带宽（又称实时吞吐量）会随着通信数据量而改变。因此，本章先使用最小二乘法拟合实时吞吐量和通信数据量之间的关系，然后基于拟合得到的实时吞吐量模型建立单链路通信时间预测模型。
-
-对于$all\underline{~}reduce$，实时吞吐量与通信数据量的对数之间呈现类似Sigmoid函数的关系，即满足：
-\begin{equation}
-    tp_{all\underline{~}reduce}=c\cdot \frac{1}{e^{-a\cdot \log \left( N \right)}+b},
-\end{equation}
-其中$tp_{all\underline{~}reduce}$是实时吞吐量，$N$是通信数据量，$a$，$b$和$c$是Sigmoid模型的拟合参数。接下来，通信时间可通过下式得到：
-\begin{equation}
-    \label{tab:single_link_allreduce}
-    t_{all\underline{~}reduce}^{link}=\frac{N}{tp}.
-\end{equation}
-
-对于$broadcast$，当通信数据量小于阈值$th$时，实时吞吐量与通信数据量的对数之间呈近似线性关系，因此本章建立了两阶段模型以进一步提高通信时间预测精度。于是，基于$broadcast$的单链路通信时间预测模型如下：
-\begin{equation}
-    \label{tab:single_link_broadcast}
-    t_{broadcast}^{link}=\left\{ \begin{matrix}
-        p\log \left( N \right) +q&		N<th\\
-        N/\left( \,\,c\,\,\cdot \,\,\frac{1}{e^{-a\cdot \log \left( N \right)}+b} \right)&		N\geqslant th\\
-    \end{matrix} \right. ,
-\end{equation}
-其中，$p$和$q$是第一段线性模型的拟合参数。
-
-\textbf{2. 多GPU通信时间预测模型}
-
-基于$all\underline{~}reduce$的多GPU通信底层是采用Ring All-Reduce算法实现的。Ring All-Reduce算法是一种在环形集群拓扑上实现全局数据通信的方法，该算法通过多轮通信使得每个节点最终得到所有节点的数据，包括分散规约（scatter-reduce）和全收集（all-gather）两个阶段。
-
-首先是scatter-reduce，在该阶段中，GPU集群会逐步交换彼此的数据并融合。在该阶段结束时，每个GPU节点都会得到完整融合的数据的一部分，即最终结果的一个数据块。在开始通信之前，每个节点会先根据节点数目$n$将要通信的数据按维度切分为$n$个数据块。例如，对于第$i$个节点，其数据可以表示为$x_i=\left( x_{i}^{1},x_{i}^{2},...,x_{i}^{n} \right)$。接下来执行$n-1$次数据交换，在第k次数据交换时，第$i$个节点会将其第$(i-k)\%n$个数据块发送给下一个节点，并在接收到上一个节点的数据块后，将其与自己对应位置的数据块求和。\autoref{fig:Fig2-7}为scatter-reduce的执行流程。
-
-然后是all-gather，在该阶段中，GPU集群会逐步交换彼此完整融合的数据块。在该阶段结束时，所有GPU最终都会得到完整融合的数据。如前文所述，在执行完scatter-reduce后，每个节点的数据里都有一个数据块是所有节点对应位置数据块求和的结果。现在需要将这些数据块发送到每个节点上，和scatter-reduce一样，也需要$n-1$次数据交换，不过在每次数据交换后不是执行数据块求和，而是执行数据块覆盖。具体而言，在第$k$次数据交换时，第$i$个节点会将其第$(i+1-k)\%n$个数据块发送给下一个节点，并在接收到前一个节点的数据块后，利用该数据块覆盖自己对应位置的数据块。\autoref{fig:Fig2-8}为all-gather的执行流程。
-
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[1次scatter-reduce操作]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter2/fig2-7-1-scatter-reduce-1.pdf}
-        \label{fig:Fig2-7-scatter-reduce-1}%文中引用该图片代号
-    }
-    \subfigure[scatter-reduce阶段结束]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter2/fig2-7-2-scatter-reduce-2.pdf}
-        \label{fig:Fig2-7-scatter-reduce-2}%文中引用该图片代号
-    }
-    \caption{Ring All-Reduce的scatter-reduce操作}
-    \label{fig:Fig2-7}
-\end{figure}
-
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[1次all-gather操作]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter2/fig2-8-1-all-gather-1.pdf}
-        \label{fig:Fig2-8-all-gather-1}%文中引用该图片代号
-    }
-    \subfigure[all-gather阶段结束]{
-        \includegraphics[width=0.48\linewidth]{figure/chapter2/fig2-8-2-all-gather-2.pdf}
-        \label{fig:Fig2-8-all-gather-2}%文中引用该图片代号
-    }
-    \caption{Ring All-Reduce的all-gather操作}
-    \label{fig:Fig2-8}
-\end{figure}
-
-由上述介绍可知，Ring All-Reduce算法的两个阶段都需要$n-1$次通信，并且在每次通信时，每个节点从它的前一个邻居接收数据量为$N/n$的数据，同时将数据量为$N/n$的数据发送给它的后一个邻居。基于前面建立的单链路模型，可以推导出在由$m$个GPU组成的集群中使用$all\underline{~}reduce$进行通信所需的时间为：
-\begin{equation}
-    \label{tab:multi_gpu_allreduce}
-        t_{all\underline{~}reduce}^{cluster}=\left( m-1 \right) \cdot t_{all\underline{~}reduce}^{link}\left( \frac{2N}{m} \right),
-\end{equation}
-其中$t_{all\underline{~}reduce}^{link}$是具有最小实时吞吐量的链路的通信时间。
-
-另外，本章还利用单链路通信时间的建模方法建立了基于小规模GPU集群的通信时间预测模型，并将其扩展到相对更大的GPU集群。这里扩展的前提是保证建模所使用的小规模GPU集群中的物理链路类型与待预测的更大规模GPU集群中的物理链路类型相同。基于该建模方法，可以得到新的通信时间预测模型：
-\begin{equation}
-    \label{tab:multi_gpu_allreduce_based_multiGPU}
-        t_{all\underline{~}reduce}^{cluster}=\frac{m-1}{s-1}\cdot t_s\left( \frac{sN}{m} \right),
-\end{equation}
-其中$s$是建模所使用的GPU数目，\autoref{tab:multi_gpu_allreduce}可以看作是$s=2$的特例。
-
-基于上述分析方法，只要为每种类型的物理链路建立基于$all\underline{~}reduce$的单链路通信时间预测模型或者在使用\autoref{tab:multi_gpu_allreduce_based_multiGPU}建立预测模型时，使用的小规模GPU集群中包含所有类型的物理链路（物理链路类型通常为\autoref{section2-2-3}中提到的五种类型），即可预测在任意规模的GPU集群上使用$all\underline{~}reduce$进行通信所需的时间。
-
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=0.48\linewidth]{figure/chapter2/fig2-9-broadcast.pdf}
-    \caption{\label{fig:Fig2-9}基于$broadcast$的通信流程}
-\end{figure}
-
-与$all\underline{~}reduce$不同，基于$broadcast$的通信主要用于将一个节点的数据发送给其他节点。传统的$broadcast$操作是利用链式拓扑将待通信的数据从源节点依次发送给每个节点，因此通信时间会随着GPU的数目线性增加。为了提高通信效率，英伟达提出的NCCL（Nvidia Collective multi-GPU Communication Library）通信库对$broadcast$的通信模式进行了改进。如\autoref{fig:Fig2-9}所示，在开始通信之前，源节点将待通信的数据切分为$S$个数据块，然后从源节点开始依次将$S$个数据块发送给下一个节点。即在第$k$次通信时，第$i\left(\max \left( 2, k-S+2 \right) \leqslant i\leqslant \min \left( k+1, n-1 \right)\right)$个节点从第$i-1$个节点接收第$k+2-i$个数据块，并将第$k+1-i$个数据块发送给第$i+1$个节点，如此进行$S+n-2$次通信使得每个节点最终都接收到完整的数据。
 
 
-基于上述broadcast的原理，可以建立如下多节点broadcast通信时间预测模型：
-\begin{equation}
-    \label{tab:multi_gpu_broadcast}
-    t_{broadcast}^{cluster}=\left( S+n-2 \right) t_{broadcast}^{link}\left( \frac{N}{S} \right).
-\end{equation}
-% 补充缺失的标准服务器拓扑图，解决对 fig:Fig2-4 的未定义引用
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/fig2-4-server_architecture.pdf}
-    \caption{标准服务器架构\label{fig:Fig2-4}}
-\end{figure}
-考虑到不同GPU之间可能经过不同的物理链路进行通信，例如\autoref{fig:Fig2-4}中有三种不同的物理链路，并且这三种链路对应着不同的通信带宽。因此，\autoref{tab:multi_gpu_broadcast}可以进一步精细化为：
-\begin{equation}
-    \label{tab:multi_gpu_broadcast_refined}
-    \begin{aligned}
-        t_{broadcast}^{cluster}\left( n, links \right) =&\left( S-1 \right) \cdot t_{broadcast}^{link_j}\left( \frac{N}{S} \right)+\sum_{link_i\in links}{t_{broadcast}^{link_i}\left( \frac{N}{S} \right)}\\t_{broadcast}^{link_j}=&\underset{link_i\in links}{\max}t_{broadcast}^{link_i},
-    \end{aligned}
-\end{equation}
-其中$links=\left\{ link_1,..., link_{n-1} \right\}$是参与通信的所有物理链路的集合。
+% \begin{center}
+% \begin{algorithm}[!htbp]
+%     \footnotesize
+%       \caption{FTACAS执行流程} 
+%       \label{Algorithm-FTACAS} 
+%         \begin{algorithmic}[1]
+%         \REQUIRE{物理拓扑$G=(V,E)$（设备集合$V_D$，交换机集合$V_S$，链路带宽$B_e$，链路时延$\alpha_e$，交换机端口容量$\mathrm{cap}_{in/out}$，转发模式$\mathrm{mode}$）；集合通信算子类型$op\in\{\mathrm{AllGather},\mathrm{AllToAll}\}$；设备数$N$；每设备数据块划分数$C$；数据块大小$S$}
+%         \ENSURE{集合通信调度$\mathcal{S}$；集合通信完成时间$T_{coll}$}
 
-\textbf{3. 面向一般拓扑的集群通信时间预测模型}
+%         \STATE \textbf{TEN构建与链路传输时间计算}：对每条物理链路$e=(u\rightarrow v)\in E$，基于$\alpha$--$\beta$模型计算传输时间：
+%         \begin{align*}
+%             &\Delta_{u\rightarrow v}(S)=\alpha_{u\rightarrow v}+\frac{S}{B_{u\rightarrow v}},\\
+%             &\Delta_{u\rightarrow s\rightarrow v}^{CT}(S)=\max\left(\Delta_{u\rightarrow s}(S),\,\Delta_{s\rightarrow v}(S)\right)\quad(\mathrm{CUT\_THROUGH}).
+%         \end{align*}
 
-由于基于$all\underline{~}reduce$的通信采用固定的环形拓扑，因此在分布式深度学习中，通常基于$broadcast$来实现不同拓扑上的通信。为了预测不同拓扑上的集群通信时间，首先需要分析在给定的通信拓扑上完成分布式训练一次迭代所需的通信次数和每次通信涉及的通信链路集合。具体而言，基于Gossip架构的分布式训练每次迭代只需通信一次，而基于All-Reduce架构的分布式训练需要执行多次通信以实现全局数据平均。另外，每次通信所需时间取决于与邻居通信最久的节点，因此可以通过对所有节点的通信时间取最大值得到。于是，集群通信时间可以由下式得到：
-\begin{equation}
-    \label{tab:topo_based_on_broadcast}
-    \begin{aligned}
-        t_{comm}&=\sum_{i=1}^c{t_{broadcast}^{cluster}\left( n_i,links_i \right)}\\
-        &=\sum_{i=1}^c{\underset{j\in \left\{ 1,...,n \right\}}{\max}\,\,t_{broadcast}^{cluster}\left( n_{i}^{j},links_{i}^{j} \right)},
-    \end{aligned}
-\end{equation}
-其中$c$是通信次数，$n_i$是参与第$i$次通信的节点数目，$links_i$是第$i$次通信涉及的通信链路的集合，$n_{i}^{j}$是节点$j$与其邻居中参与第$i$次通信的节点数目，$links_{i}^{j}$是节点$j$与其邻居参与第$i$次通信涉及的通信链路的集合。
+%         \STATE \textbf{节点间最短传输路径搜索}：以$\Delta(\cdot)$为边代价，对每个源设备$u\in V_D$执行最短路径搜索，得到传输时间$D[u][\cdot]$；
+%         \STATE \textbf{算法数据预计算}：构建并缓存时间距离矩阵$\boldsymbol{D}=\{D[u][v]\}$以及直接设备邻居列表$\mathcal{N}(u)$；
 
-\subsection{计算与通信的并行性分析}
+%         \STATE \textbf{算子条件初始化}：根据$op$生成前置条件集合$\mathcal{P}$与后置条件集合$\mathcal{Q}$，并初始化数据可达映射$\mathrm{chunkMap}$；
+%         \STATE 对每个未满足的后置条件$(c,d)\in\mathcal{Q}$计算初始优先级：
+%         \begin{align*}
+%             \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathrm{chunkMap}[c][s]=1} D[s][d] .
+%         \end{align*}
+%         \STATE 按优先级对未满足条件队列$\mathcal{L}$排序（AllGather：$\pi$升序；AllToAll：$\pi$降序），并对同优先级条件进行随机打散；
 
-在主流的深度学习框架（如tensorflow、pytorch等）中，为了提高训练效率，加速分布式训练过程，通常会对通信策略进行优化。具体而言，在每一层反向传播计算结束后立即对该层梯度进行通信，并且不会阻塞前一层的反向传播过程，从而使计算和通信并行执行，减少整体训练时间。在这种情况下，每次迭代的训练时间并不是计算时间和通信时间的简单求和。为了建模计算与通信的并行关系，本章作以下几点假设：
+%         \STATE 初始化事件队列$\mathrm{EQ}\leftarrow \{0\}$，调度集合$\mathcal{S}\leftarrow \emptyset$；
+%         \WHILE{$\mathcal{L}\neq \emptyset$}
+%             \STATE 从$\mathrm{EQ}$中取出当前时间步$t$；
+%             \STATE TEN推进至$t$并处理$t$时刻的所有到达事件；
+%             \FORALL{到达事件$(t,c,s\rightarrow d)$}
+%                 \IF{$op=\mathrm{AllGather}$ \AND $\mathrm{chunkMap}[c][d]=1$}
+%                     \STATE 执行Replacement策略，用$d$缺失且$s$已拥有的数据块替换$c$（若存在）；
+%                 \ENDIF
+%                 \STATE 更新$\mathrm{chunkMap}$，并从$\mathcal{L}$中移除已满足的后置条件；
+%                 \IF{$op=\mathrm{AllToAll}$}
+%                     \STATE 清除该数据块对应条件的调度标记；
+%                 \ENDIF
+%             \ENDFOR
+
+%             \STATE 初始化本时间步已调度条件集合$\mathrm{scheduled}\leftarrow \emptyset$；
+%             \FORALL{条件$(c,d)\in\mathcal{L}$（按当前优先级顺序）}
+%                 \IF{$op=\mathrm{AllToAll}$ \AND $(c,d)\in \mathrm{scheduled}$}
+%                     \STATE \textbf{continue}；
+%                 \ENDIF
+
+%                 \STATE \textbf{贪心源节点选择}：在满足$\mathrm{chunkMap}[c][s]=1$的设备中选择使$D[s][d]$最小的源节点$s$（同距随机）；
+%                 \IF{不存在可选源节点}
+%                     \STATE \textbf{continue}；
+%                 \ENDIF
+
+%                 \IF{$op=\mathrm{AllGather}$}
+%                     \STATE 设传输目标为$dst\leftarrow d$；
+%                 \ELSE
+%                     \STATE \textbf{AllToAll逐跳路由选择}：若$d\in\mathcal{N}(s)$且可用，则$dst\leftarrow d$；
+%                     \STATE 否则在$\mathcal{N}(s)$中选择满足$D[n][d] < D[s][d]$且可用的下一跳$n$；
+%                     \IF{未找到可行$dst$}
+%                         \STATE \textbf{continue}；
+%                     \ENDIF
+%                 \ENDIF
+
+%                 \STATE \textbf{资源检查与预留}：若TEN在$t$时刻可为$(s\rightarrow dst)$预留链路与交换机端口资源，则执行预留并加入调度$\mathcal{S}$；
+%                 \IF{预留成功}
+%                     \STATE 计算到达时间并加入事件队列：
+%                     \begin{align*}
+%                         t_{\mathrm{arr}} = t + D[s][dst],\quad \mathrm{EQ}\leftarrow \mathrm{EQ}\cup\{t_{\mathrm{arr}}\}.
+%                     \end{align*}
+%                     \IF{$op=\mathrm{AllToAll}$}
+%                         \STATE $\mathrm{scheduled}\leftarrow \mathrm{scheduled}\cup\{(c,d)\}$；
+%                         \STATE 若$dst\neq d$则更新$\pi(c,d)$并对$\mathcal{L}$进行局部重排；
+%                     \ENDIF
+%                 \ENDIF
+%             \ENDFOR
+%         \ENDWHILE
+
+%         \STATE $T_{coll}\leftarrow$ 最后一个到达事件对应的时间；
+%         \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
+%         \end{algorithmic}
+% \end{algorithm}
+% \end{center}
+
+
+
+\subsection{拓扑建模模块}
+\label{subsec:ftacas-topology}
+
+\noindent\textbf{1 多级交换机物理有向图建模}
+
+FTACAS将实际互连拓扑抽象为包含设备节点与交换机节点的物理有向图$G=(V,E)$。其中，设备集合$V_D$对应GPU/NPU等计算设备，交换机集合$V_S$对应NVSwitch、IB交换机等中继组件。每条有向边$e=(u\rightarrow v)\in E$表示一条物理单向链路，包含对应链路参数：带宽$B_{u\rightarrow v}$与静态时延$\alpha_{u\rightarrow v}$。
+
+该抽象允许链路在图中形成任意多级结构（例如设备$\rightarrow$交换机$\rightarrow$交换机$\rightarrow$设备），从而统一刻画多级交换机拓扑；同时也允许在同一对端点之间存在多条并行链路，以支持多条物理链路或多端口并发的建模需求。
+
+\noindent\textbf{2 交换机转发模式与端口并发约束}
+
+为刻画不同交换机的转发行为，FTACAS 为每个交换机节点$s\in V_S$ 定义转发模式$\mathrm{mode}(s)\in\{\mathrm{CT},\mathrm{SAF}\}$。
+% 需要指出的是，这里的转发模式是一种\emph{建模抽象}，
+% 并不严格对应具体硬件的内部实现。
 
 \begin{itemize}
-    \item 神经网络第$l$层梯度的通信与第$l-1$层的反向传播计算独立，因此可以并行执行而不会相互阻塞；
-    \item 第$l$层反向传播计算结束后，即可接收其他节点发送过来的梯度，并计算平均值以更新该层参数，而不会阻塞第$l-1$层的反向传播过程。
-    \item 同步算法中设备通信的启动时间是相同的，即不考虑潜在的时钟不一致的影响。
-\end{itemize}
-其中前两条假设与Zhang等人\cite{zhang2017poseidon}给出的假设一致。
+    \item \textbf{Cut-Through（CT）模式}：
+    交换机在接收数据流的同时即可向下游转发，端到端传输呈现流水化特征。在该模式下，路径上的多段链路可近似视为并行工作，端到端耗时主要由最慢链路及少量固定转发开销决定。该模型可用于刻画NVSwitch等片上高速交换结构，以及现代高性能IB/RoCE交换机的行为。
 
-如\autoref{fig:Fig2-10}所示，本章通过提取分布式训练的关键路径来预测迭代时间。首先，为每个节点和节点之间的通信链路维护一个操作队列和设备时间。然后，根据每个节点上计算操作的执行顺序和每个通信链路上通信操作的执行顺序将操作依次加入到对应的队列中，其中通信操作依赖于计算操作，即通信操作$q_i$需要在计算操作$p_i$后加入队列中。并且考虑到不同GPU的计算能力不同，在同步算法中，通信操作需要等待两个参与通信的节点上相应的计算操作都执行结束才会加入到队列中。在每个操作被添加到队列之后，更新节点或通信链路的设备时间为最新添加的操作的执行结束时间。最后，通过比较每个操作添加到队列前后的设备时间，确定一条最长的无阻塞连续执行的操作序列。本章将其称为关键路径，用于计算分布式训练的迭代时间。\autoref{fig:Fig2-10}给出了一个关键路径的示例，其迭代时间为：
-\begin{equation}
-    \label{tab:critical_path_formula}
-         t_{iter}=\underset{i,j\in \left\{ 1,...,n \right\}}{\max}\left( t_{ij} \right) =t_{p_0}+\sum_{k=1}^{l-2}{t_{p_k}}+\sum_{k=l-2}^l{t_{q_k}},
-\end{equation}
-其中$t_{ij}$是节点$i$和节点$j$之间通信链路上最终的设备时间，$t_{p_k}$是计算操作$p_k$的执行时间，$t_{q_k}$是通信操作$q_k$的执行时间。由于前传传播过程中不涉及通信操作，因此将整个神经网络的前向传播操作用$p_0$表示。
+    \item \textbf{Store-and-Forward（SAF）模式}：
+    交换机需在完整接收数据后再进行转发，各段链路的传输时延在路径上近似逐段累加。该模式用于刻画具有显著缓冲与分段转发特征的交换结构，或在保守建模假设下对网络转发行为进行上界估计。
+\end{itemize}
+
+同时，为限制交换机在同一时刻可并行处理的流数，FTACAS对每个交换机配置入向端口容量$\mathrm{cap}_{in}(s)$与出向端口容量$\mathrm{cap}_{out}(s)$，用于刻画交换机的并发处理能力。TEN在调度过程中将该约束转化为对时间区间重叠数量的限制（见\autoref{subsec:ftacas-ten}）。
+
+\noindent\textbf{3 直达设备邻接表$\mathcal{N}(u)$}
+
+为了保证调度的高效性和灵活性，FTACAS单次传输只调度不跨设备节点的路径，因此定义直达设备邻接关系：若存在从设备$u$到设备$v$的路径，且该路径内部节点均为交换机节点（即不经过中间设备作为路由器），则称$v$是$u$的直达设备邻居，记为$v\in\mathcal{N}(u)$。形式化定义为：
+\begin{align}
+\mathcal{N}(u)=\left\{v\in V_D\setminus\{u\}\;\middle|\;\exists p:u\rightsquigarrow v,\;\forall x\in p\setminus\{u,v\},\;x\in V_S\right\}. \label{eq:ftacas-neighbor-def}
+\end{align}
+直达设备邻接表$\mathcal{N}(\cdot)$在TEN构建阶段预计算并缓存，后续用于AllGather调度过程中的源设备选取与AllToAll调度过程中源设备下一跳设备的选取（见\autoref{subsec:ftacas-synth}）。
+
+
+
+\subsection{算子构建模块}
+\label{subsec:ftacas-collective}
+
+\noindent\textbf{1 算子统一表示：前置条件与后置条件}
+
+为统一刻画不同类型集合通信算子的合成需求，FTACAS采用条件集合的方式定义算子。记设备集合为$V_D$，设备数为$N=|V_D|$。对任意数据块（chunk）编号$c$与设备$d$，定义布尔型前置条件映射$\mathcal{P}(c,d)\in\{0,1\}$与后置条件集合$\mathcal{Q}$：
+\begin{itemize}
+    \item \textbf{前置条件（Precondition）} $\mathcal{P}(c,d)=1$：表示在当前时刻设备$d$已经拥有chunk $c$（该状态会在算法合成过程中动态更新）；
+    \item \textbf{后置条件（Postcondition）} $(c,d)\in\mathcal{Q}$：表示最终目标要求设备$d$必须拥有chunk $c$；当$\mathcal{P}(c,d)$被更新为$1$时，该后置条件被满足并从$\mathcal{Q}$中移除。
+\end{itemize}
+因此，集合通信算子的合成可表述为：在满足链路/交换机资源约束的前提下，构造一组传输调度$\mathcal{S}$，使得所有$(c,d)\in\mathcal{Q}$最终均满足$\mathcal{P}(c,d)=1$。
+
+\noindent\textbf{2 数据块划分}
+
+为探索更细粒度的通信并行性，FTACAS支持对每个设备节点的待通信数据预先进行分块。设每设备数据块划分数为$C$，则每个设备可视为拥有$C$个初始chunk。为便于描述，可将chunk索引映射为二元组$c=(u,k)$：其中$u\in V_D$为chunk来源设备，$k\in\{0,1,\dots,C-1\}$为分块编号。
+
+\noindent\textbf{3 AllGather算子条件构建}
+
+AllGather要求每个设备最终获得所有设备的数据块（即全量聚合分发），其算子语义示意图如\autoref{fig:allgather}所示。
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/fig2-10-critical_path.pdf}
-    \caption{\label{fig:Fig2-10}关键路径示意图}
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/AllGather.pdf}
+    \caption{\label{fig:allgather}AllGather算子语义示意图}
 \end{figure}
 
-\section{算力分析}
+在chunk划分数为$C$时，其条件构建如下：
+\begin{itemize}
+    \item \textbf{前置条件初始化：}对任意源设备$u\in V_D$及其本地chunk $(u,k)$，令$\mathcal{P}((u,k),u)=1$，且对任意$d\neq u$令$\mathcal{P}((u,k),d)=0$。
+    \item \textbf{后置条件集合：}对所有目的设备$d\in V_D$与所有源设备$u\in V_D$（$u$可等于$d$），以及$k\in\{0,\dots,C-1\}$，若$d$初始不拥有该chunk，则将条件加入：
+    \[
+        \mathcal{Q}\leftarrow \mathcal{Q}\cup \{((u,k),d)\}\quad\text{if}\quad \mathcal{P}((u,k),d)=0.
+    \]
+\end{itemize}
+由此可得AllGather的后置条件总数为$|\mathcal{Q}|=N\cdot (N-1)\cdot C$（不含每个设备本地已满足的后置条件）。
 
-本节对提出的面向一般拓扑的分布式深度学习训练时间预测方法（PreTopo）的有效性进行验证，并与现有的方法进行对比分析。所有实验都是在同一个硬件系统上完成的，该系统配备了2个Intel Xeon Gold 6226R处理器和8个NVIDIA GeForce RTX 2080 Ti，每个GPU有11GB显存。该硬件系统采用\autoref{fig:Fig2-4}所示的标准服务器架构。本节的实验使用pytorch实现，基于pytorch的distributed库进行通信。
+\noindent\textbf{4 AllToAll算子条件构建}
 
-\subsection{数据准备}\label{subsection_2_4_1}
+AllToAll要求每个设备将其数据按目的设备切分并分别发送给对应目的设备，其算子语义示意图如\autoref{fig:alltoall}所示。
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/AllToAll.pdf}
+    \caption{\label{fig:alltoall}AllToAll算子语义示意图}
+\end{figure}
 
-为了获得用于训练多层感知器模型的基准测试数据，本节首先为每种类型的神经网络层构建一个对应的单层神经网络，用于测试计算时间。然后在每种类型的神经网络层的特征空间中进行随机采样，并且采样的特征空间足够大，以确保全面覆盖实际应用场景。其中卷积层、池化层、全连接层和批归一化层的特征空间采样范围见\autoref{tab:sample-convolutional-layer}、\autoref{tab:sample-pooling-layer}、\autoref{tab:sample-fully-connected-layer}和\autoref{tab:sample-bn-layer}。然后利用每次采样的特征配置相应的单层神经网络，测试其前向传播和反向传播的计算时间，并将每组特征以及对应的测量时间作为一个样本。对于每种类型的神经网络层，采样80000次构成基准测试数据集，并按照8：1：1的比例将其划分为训练集、测试集和验证集。
 
-另外，为了获得用于拟合单链路通信时间预测模型的数据，本节对使用$all\underline{~}reduce$和$broadcast$两种集合通信原语在\autoref{section2-2-3}中提到的三种物理链路上通信不同大小的数据所需的时间进行了测试。测试数据量范围为0.0004MB\~{}400MB（一百到一亿个32位浮点数），每种通信原语和物理链路的组合测试100个不同的数据量。
+设每个源设备$u$对每个目的设备$d$生成$C$个chunk，记为$(u\rightarrow d,k)$，其中$k\in\{0,\dots,C-1\}$。则：
+\begin{itemize}
+    \item \textbf{前置条件初始化：}对任意$u,d,k$，令$\mathcal{P}((u\rightarrow d,k),u)=1$（该chunk初始位于设备$u$），并对任意$v\neq u$令$\mathcal{P}((u\rightarrow d,k),v)=0$。
+    \item \textbf{后置条件集合：}对任意$u,d,k$（通常$u$可等于$d$），目标是目的设备$d$最终拥有该chunk，因此加入：
+    \[
+        \mathcal{Q}\leftarrow \mathcal{Q}\cup \{((u\rightarrow d,k),d)\}\quad\text{if}\quad\mathcal{P}((u\rightarrow d,k),v)=0.
+    \]
+\end{itemize}
+因此AllToAll的后置条件规模为$|\mathcal{Q}|=N\cdot (N-1)\cdot C$（不包含初始已满足后置条件）。该算子的关键特征在于：每个chunk具有唯一最终目的设备。这也是FTACAS在AllToAll合成中采用“逐跳推进”策略并禁用Replacement机制的主要原因（见\autoref{subsec:ftacas-synth}）。
 
-在测试计算时间和通信时间之前，会先进行20次计算/通信操作以进行预热，然后测量100次计算/通信操作的平均执行时间作为建模所使用的数据。
+% \noindent\textbf{5 条件优先级初始化接口}
 
+% 算子构建模块在生成$\mathcal{P}$与$\mathcal{Q}$后，将未满足后置条件交由TEN进行优先级初始化。对任意$(c,d)\in\mathcal{Q}$，根据传输时间矩阵$\boldsymbol{T}$计算初始优先级$\pi(c,d)$：
+% \begin{align}
+%     \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathcal{P}(c,s)=1} T[s][d], \label{eq:ftacas-priority-init-collective}
+% \end{align}
+% 并按算子类型选择不同的排序方式（AllGather：$\pi$升序；AllToAll：$\pi$降序），从而为后续事件驱动贪心匹配提供统一的“任务队列”入口。
+
+\subsection{时间扩展网络模块（TEN）}
+\label{subsec:ftacas-ten}
+
+\noindent\textbf{1 链路传输时间计算与Cut-Through流水化}
+
+TEN基于$\alpha$--$\beta$模型为物理链路计算chunk传输时间。对任意链路$e=(u\rightarrow v)$，传输时间为
+\begin{align}
+\Delta_{u\rightarrow v}(S)=\alpha_{u\rightarrow v}+\frac{S}{B_{u\rightarrow v}}. \label{eq:ftacas-alpha-beta}
+\end{align}
+
+当路径中存在Cut-Through交换机$s$时，TEN将设备$\rightarrow$交换机$\rightarrow$设备的两段传输视为流水化，端到端耗时近似为二者的最大值：
+\begin{align}
+\Delta_{u\rightarrow s\rightarrow v}^{CT}(S)=\max\left(\Delta_{u\rightarrow s}(S),\,\Delta_{s\rightarrow v}(S)\right). \label{eq:ftacas-ct}
+\end{align}
+该近似使得TEN能够同时兼顾链路序列化与交换机流水行为，并与工程实现中的资源预留逻辑保持一致。
+
+\noindent\textbf{2 传输时间矩阵$\boldsymbol{T}$的预计算}
+
+\label{subsec:ftacas-ten-shortest}
+TEN以$\Delta(\cdot)$作为边代价，对每个源设备$u\in V_D$执行Dijkstra最短路径搜索，得到到所有设备节点的传输时间$T[u][\cdot]$，从而构建传输时间矩阵$\boldsymbol{T}=\{T[u][v]\}$。该矩阵在合成阶段用于：
+\begin{itemize}
+    \item 评估后置条件的初始优先级$\pi(c,d)$；
+    \item 贪心匹配时选择传输时间最短的设备；
+    \item 计算调度动作的到达时间$t_{\mathrm{arr}}=t+T[s][dst]$。
+\end{itemize}
+
+\noindent\textbf{3 资源占用状态维护与路由预留}
+
+\label{subsec:ftacas-ten-reserve}
+TEN在合成过程中维护两类关键资源的时间占用状态：
+\begin{itemize}
+    \item \textbf{链路资源：}对每条物理有向链路维护其忙碌截止时间；当存在并行链路时，分别维护每条并行链路的忙碌时间，从而支持同向多流并发。
+    \item \textbf{交换机端口资源：}对每个交换机$s$分别维护入向与出向端口在时间轴上的占用区间集合，并约束任意时刻重叠区间数不超过$\mathrm{cap}_{in}(s)$与$\mathrm{cap}_{out}(s)$。
+\end{itemize}
+
+当合成器尝试在时间$t$调度一次传输$(s\rightarrow dst)$时，TEN会执行“路由可行性检查”，即验证该传输对应路由上所有链路均未被占用，所有交换机端口在区间$[t,\;t+T[s][dst])$内均有足够余量；若检查通过，则TEN完成资源预留并返回成功，否则返回失败并由合成器继续尝试其它候选源/下一跳。
+
+\noindent\textbf{4 到达事件与事件队列}
+
+TEN将每次成功调度的传输转化为到达事件，并插入事件队列$\mathrm{EQ}$。到达事件可写为$(t_{\mathrm{arr}},c,s\rightarrow d)$，表示chunk $c$由$s$发送并于$t_{\mathrm{arr}}$到达$d$。事件队列按时间从小到大弹出，驱动合成器在关键时刻推进TEN状态并触发下一轮贪心匹配，从而避免使用固定时间步长导致的巨大时间扩展图开销。
+
+
+\subsection{合成器模块：事件驱动的贪心合成策略}
+\label{subsec:ftacas-synth}
+
+\noindent\textbf{1 后置条件与优先级排序策略}
+
+FTACAS以“后置条件是否被满足”作为合成过程的核心状态：对任意$(c,d)\in\mathcal{Q}$，当且仅当$\mathcal{P}(c,d)=1$时认为该后置条件被满足。为引导贪心合成的调度方向，FTACAS为每个未满足后置条件定义初始优先级：
+\begin{align}
+\pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathcal{P}(c,s)=1} T[s][d]. \label{eq:ftacas-priority}
+\end{align}
+
+在TEN初始化并计算得到传输时间矩阵$\boldsymbol{T}$后，对$\mathcal{Q}$进行初始化排序：AllGather采用$\pi$升序（优先满足传输时间短的后置条件以加速数据扩散），AllToAll采用$\pi$降序（优先推进传输时间长的后置条件以降低尾延迟）。
+
+\noindent\textbf{2 源设备贪心选择策略}
+
+对每个待满足后置条件$(c,d)$，合成器采用贪心匹配策略选择负责传输对应数据块的源设备：
+\begin{align}
+s=\arg\min\{T[s][d]\mid \mathcal{P}(c,s)=1,\,s\neq d\}. \label{eq:ftacas-source-select}
+\end{align}
+
+该策略优先选择传输时间最短的源设备，从而在局部决策上降低到达时间与资源占用区间长度。若最优源在当前时刻因链路/端口资源不足无法预留，则继续尝试次优的备选源，直至成功或放弃该条件并进入下一条件。
+
+\noindent\textbf{3 事件驱动的合成过程}\\
+
+FTACAS采用事件驱动的合成过程，在数据块到达时触发事件，更新TEN的状态并进行新一轮的调度。具体而言，从事件队列EQ取出最早完成的到达事件，获取当前的事件时间步$t$，处理所有到达事件并更新$\mathcal{P}$，随后根据算子类型执行对应的合成策略，直至所有后置条件均被满足（$\mathcal{Q}=\emptyset$）。
+
+
+
+\noindent\textbf{4 AllGather 合成策略}\\
+
+AllGather的目标是将系统中每个设备初始拥有的数据发送至所有设备。
+其事件驱动的贪心合成过程如\autoref{Algorithm-FTACAS-AllGather}所示。
+在每一个时间步，合成器执行如下核心调度逻辑：
+\begin{enumerate}[label=(\arabic*)]
+    \item \textbf{后置条件选取：}
+    从当前未满足的后置条件集合$\mathcal{Q}$中，
+    选取优先级最高（即$\pi(c,d)$最小）的后置条件$(c,d)$；
+
+    \item \textbf{源设备选取：}
+    在目标设备 $d$ 的直达设备邻接集合$\mathcal{N}(d)$中，
+    从满足$\mathcal{P}(c,s)=1$的设备里，
+    选择使传输时间$T[s][d]$最小的源设备$s$；
+
+    \item \textbf{资源冲突检查与调度：}
+    在当前时刻对路径$(s\rightarrow d)$执行资源冲突检查，
+    若TEN判定链路与交换机端口资源均可预留，
+    则完成资源预留并将对应传输加入调度集合$\mathcal{S}$，
+    同时生成相应的到达事件并加入事件队列$\mathrm{EQ}$。
+\end{enumerate}
+
+在上述调度流程中，只考虑通过不跨设备节点的单次传输能满足的后置条件，因此只从目标设备的直达设备邻居中选取源设备。
+AllGather允许chunk经由中间设备逐步扩散，虽然每次传输限定为直达设备之间的通信，
+但chunk可在不同时间步由不同中间设备继续转发，从而在复杂交换机拓扑下显著提升通信效率。
+
+在AllGather合成过程中，FTACAS还参考TACOS方法引入了Replacement机制以提升整体调度效率：
+\begin{itemize}
+    \item \textbf{Replacement 机制：}
+    为降低重复调度带来的网络资源浪费，
+    当到达事件中的 chunk $c$ 在目标设备 $d$ 处已存在
+    （即$\mathcal{P}(c,d)=1$）时，
+    合成器会尝试用设备 $d$ 仍缺失且源设备 $s$ 已拥有的另一chunk替换 $c$，
+    使得已发生的网络传输尽可能转化为对未满足后置条件的有效贡献
+    （见\autoref{Algorithm-FTACAS-AllGather} 第 5--7 行）。
+\end{itemize}
+
+
+
+\begin{center}
+\begin{algorithm}[!htbp]
+    % \footnotesize
+    % \small
+    \caption{AllGather的事件驱动贪心合成过程}
+    \label{Algorithm-FTACAS-AllGather}
+    \begin{algorithmic}[1]
+        \REQUIRE{前置条件集合$\mathcal{P}$；后置条件集合$\mathcal{Q}$；事件队列$\mathrm{EQ}$；调度集合$\mathcal{S}$；传输时间矩阵$\boldsymbol{D}$}
+        \ENSURE{更新后的调度集合$\mathcal{S}$；完成时间$T_{coll}$}
+
+        \WHILE{$\mathcal{Q}\neq \emptyset$}
+            \STATE 取出当前时间步$t\leftarrow \mathrm{popMin}(\mathrm{EQ})$；
+            \STATE TEN推进至$t$并处理$t$时刻的所有到达事件；
+            \FORALL{到达事件$(t,c,s\rightarrow d)$}
+                \IF{$\mathcal{P}(c,d)=1$}
+                    \STATE 执行Replacement：用$d$缺失且$s$已拥有的chunk替换$c$（若存在）；
+                \ENDIF
+                \STATE 更新$\mathcal{P}$，并从$\mathcal{Q}$中移除已满足的后置条件；
+            \ENDFOR
+
+            \FORALL{条件$(c,d)\in\mathcal{Q}$（按当前优先级顺序）}
+                \STATE 在$\mathcal{N}(d)$中选择源$s=\arg\min\{T[s][d]\mid \mathcal{P}(c,s)=1,\,s\neq d\}$；
+                \IF{不存在可选源$s$}
+                    \STATE \textbf{continue}；
+                \ENDIF
+                \STATE 设传输目标$dst\leftarrow d$；
+                \STATE 若TEN在$t$时刻可为$(s\rightarrow dst)$预留资源，则预留并加入调度$\mathcal{S}$；
+                \IF{预留成功}
+                    \STATE 生成到达事件：$t_{\mathrm{arr}}\leftarrow t+T[s][dst]$，$\mathrm{EQ}\leftarrow \mathrm{EQ}\cup\{t_{\mathrm{arr}}\}$；
+                \ENDIF
+            \ENDFOR
+        \ENDWHILE
+
+        \STATE $T_{coll}\leftarrow$ 最后一个到达事件对应的时间；
+        \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
+    \end{algorithmic}
+\end{algorithm}
+\end{center}
+
+
+
+\noindent\textbf{5 AllToAll 合成策略}\\
+
+AllToAll目标是将每个设备的数据按目的设备划分后，
+分别发送至对应设备。与 AllGather 不同，
+AllToAll中每个数据块具有唯一最终目的设备，
+后置条件的满足过程不涉及数据复制，
+因此FTACAS采用逐跳推进的调度策略。
+其事件驱动的贪心合成过程如\autoref{Algorithm-FTACAS-AllToAll} 所示。
+在每一个时间步$t$，合成器执行如下核心调度逻辑：
+\begin{enumerate}[label=(\arabic*)]
+    \item \textbf{后置条件选取：}  
+    从当前未满足的后置条件集合$\mathcal{Q}$中，
+    选取优先级最高（即$\pi(c,d)$最大）的后置条件$(c,d)$；
+
+    \item \textbf{源设备选取：}  
+    在满足$\mathcal{P}(c,s)=1$且$s\neq d$的设备中，
+    选择使传输时间$T[s][d]$最小的设备$s$作为当前源设备，
+    以保证每一步调度均朝着最终目的设备$d$的方向推进。
+
+    \item \textbf{下一跳设备选取：}  
+    若目标设备$d$属于源设备$s$的直达设备邻接集合
+    （即$d\in\mathcal{N}(s)$），
+    则直接设传输目标$dst\leftarrow d$；
+    否则，从$\mathcal{N}(s)$中选择下一跳设备$n$，
+    使其满足$T[n][d]<T[s][d]$，
+    并设$dst\leftarrow n$，
+    从而将chunk逐步推进至最终目的设备。
+
+    \item \textbf{资源冲突检查与调度：}  
+    若当前时刻在TEN中对路径$(s\rightarrow dst)$的资源冲突检查通过，
+    则完成资源预留并记录相应的传输调度与到达事件。
+    当$dst\neq d$时，后续调度将基于更新后的
+    $\mathcal{P}$与$\pi(c,d)$继续推进。
+\end{enumerate}
+
+
+
+除了上述基本调度流程外，
+FTACAS 在 AllToAll 合成过程中还引入了以下两项关键机制，
+以保证调度过程的正确性与高效性：
+
+\begin{itemize}
+    \item \textbf{防重复调度机制：}
+    为避免在不同时间步内对同一后置条件$(c,d)$进行重复的调度，
+    算法维护已调度但对应chunk尚未到达的条件集合$\mathrm{scheduled}$，
+    对已被调度的条件在当前时间步内不再重复处理
+    （见 \autoref{Algorithm-FTACAS-AllToAll} 第 10--12 行）。
+
+    \item \textbf{动态优先级调整机制：}
+    当 chunk 被调度到中间节点（即$dst\neq d$）时，
+    其到最终目的设备$d$的剩余传输时间将发生变化。
+    为使后续调度顺序与当前系统状态匹配，
+    算法会重新计算对应后置条件的优先级$\pi(c,d)$，
+    并对后置条件集合$\mathcal{Q}$进行局部重排
+    （见 \autoref{Algorithm-FTACAS-AllToAll} 第 31--33 行）。
+\end{itemize}
+
+
+
+\begin{center}
+\begin{algorithm}[!htbp]
+    % \footnotesize
+    % \small
+    \caption{AllToAll的事件驱动贪心合成过程}
+    \label{Algorithm-FTACAS-AllToAll}
+    \scalebox{0.88}{
+    \begin{minipage}{\linewidth}
+    \setlength{\baselineskip}{0.8\baselineskip}
+    \begin{algorithmic}[1]
+        \REQUIRE{前置条件集合$\mathcal{P}$；后置条件集合$\mathcal{Q}$；事件队列$\mathrm{EQ}$；调度集合$\mathcal{S}$；传输时间矩阵$\boldsymbol{D}$；直达设备邻接表$\mathcal{N}(\cdot)$}
+        \ENSURE{更新后的调度集合$\mathcal{S}$；完成时间$T_{coll}$}
+
+        \WHILE{$\mathcal{Q}\neq \emptyset$}
+            \STATE 取出当前时间步$t\leftarrow \mathrm{popMin}(\mathrm{EQ})$；
+            \STATE TEN推进至$t$并处理$t$时刻的所有到达事件；
+            \FORALL{到达事件$(t,c,s\rightarrow d)$}
+                \STATE 更新$\mathcal{P}$，并从$\mathcal{Q}$中移除已满足的后置条件；
+                \STATE 清除该条件的调度标记，使其允许继续逐跳推进；
+            \ENDFOR
+
+            \STATE 初始化本时间步已调度条件集合$\mathrm{scheduled}\leftarrow \emptyset$；
+            \FORALL{条件$(c,d)\in\mathcal{Q}$（按当前优先级顺序）}
+                \IF{$(c,d)\in \mathrm{scheduled}$}
+                    \STATE \textbf{continue}；
+                \ENDIF
+
+                \STATE 选择源$s=\arg\min\{T[s][d]\mid \mathcal{P}(c,s)=1,\,s\neq d\}$；
+                \IF{不存在可选源$s$}
+                    \STATE \textbf{continue}；
+                \ENDIF
+
+                \STATE \textbf{下一跳选择}：
+                \IF{$d\in\mathcal{N}(s)$且路由$(s\rightarrow d)$在$t$可预留}
+                    \STATE $dst\leftarrow d$；
+                \ELSE
+                    \STATE 在$\mathcal{N}(s)$中选取$T[n][d]<T[s][d]$且路由$(s\rightarrow n)$在$t$可预留的下一跳$n$；
+                    \IF{不存在可行下一跳}
+                        \STATE \textbf{continue}；
+                    \ENDIF
+                    \STATE $dst\leftarrow n$；
+                \ENDIF
+
+                \STATE 预留路由$(s\rightarrow dst)$并将传输加入$\mathcal{S}$；
+                \IF{预留成功}
+                    \STATE 生成到达事件：$t_{\mathrm{arr}}\leftarrow t+T[s][dst]$，$\mathrm{EQ}\leftarrow \mathrm{EQ}\cup\{t_{\mathrm{arr}}\}$；
+                    \STATE $\mathrm{scheduled}\leftarrow \mathrm{scheduled}\cup\{(c,d)\}$；
+                    \IF{$dst\neq d$}
+                        \STATE 更新$\pi(c,d)$并对$\mathcal{Q}$进行局部重排；
+                    \ENDIF
+                \ENDIF
+            \ENDFOR
+        \ENDWHILE
+
+        \STATE $T_{coll}\leftarrow$ 最后一个到达事件对应的时间；
+        \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
+    \end{algorithmic}
+    \end{minipage}
+    }
+\end{algorithm}
+\end{center}
+
+
+
+\subsection{复杂度与可扩展性分析}
+\label{subsec:ftacas-complexity}
+
+设物理图节点数$|V|$、边数$|E|$、设备数$N=|V_D|$，后置条件数量为$|\mathcal{Q}|$。
+\begin{itemize}
+    \item \textbf{TEN预计算开销：}预计算时对每个源设备执行一次最短路径搜索，时间复杂度为$O\!\left(N\cdot |E|\log|V|\right)$，并得到$\boldsymbol{T}$矩阵，空间复杂度为$O(N^2)$。
+    \item \textbf{事件驱动合成开销：}
+    设合成过程中共触发$K$个事件时间步，
+    第$k$个时间步中尚未满足的后置条件集合记为$\mathcal{Q}_k$。
+    若合成过程中总调度传输次数为$M$（对应$M$个事件），
+    则事件队列的维护开销约为$O(M\log M)$。
+    在每个事件时间步，
+    最坏情况下需要遍历$\mathcal{Q}_k$并为每个条件选择源设备，
+    若直接扫描源设备集合，则单步复杂度为$O(|\mathcal{Q}_k|\cdot N)$；
+    结合路由可行性检查与资源预留（与路径长度线性相关），
+    总体时间复杂度可表示为
+    $O\!\left(\sum_{k=1}^{K} |\mathcal{Q}_k|\cdot (N+\bar{L})\right)$，
+    其中$\bar{L}$表示平均路由长度。
+\end{itemize}
+
+实际算法实现中，借助事件驱动推进（减少空时间步）、候选条件剪枝、同优先级候选随机化与局部重排等机制，可有效降低常数开销并提升规模扩展能力。
+
+
+
+\section{实验评估}
+
+本节对提出的交换机拓扑感知的通用集合通信算法合成器FTACAS的算法性能进行验证，并与现有方法进行对比分析。实验主要关注算法合成过程的时间开销与合成得到的集合通信算法的算法带宽。所有实验均在同一计算平台上完成，实验平台配备Intel Core i9-12900H处理器。FTACAS采用C++语言实现。
+
+\subsection{对比方法：TECCL}
+
+为了评估所提出FTACAS方法的有效性，本文选取TECCL\cite{liu2024rethinking}方法作为对比基线。TECCL是Liu等人2024年提出的方法，该方法将集合通信算法合成问题描述成多商品流优化问题，借鉴网络流量工程（Traffic Engineering，TE）中的建模与求解思想，在统一的优化框架下考虑路由选择、链路容量约束以及调度时序。TECCL方法将集合通信算法合成问题建模为混合整数线性规划（Mixed Integer Linear Programming，MILP）问题，并采用商业求解器Gurobi进行求解。TECCL方法同样支持多级交换机拓扑结构，支持AllGtaher和AlltoAll算子，在复杂拓扑下表现出较强的适应能力。本文采用作者开源的TECCL实现代码进行对比实验。
+
+\subsection{实验拓扑}
+为全面评估 FTACAS 在不同互连结构下的算法合成性能，并与 TECCL 方法进行对比，本文选取了多种具有代表性的 GPU 集群拓扑作为实验对象。这些拓扑覆盖了直接互连结构、单机箱高带宽互连结构以及多机箱交换机互连结构，能够反映实际系统中常见的通信场景。
+具体而言，实验中使用的拓扑类型包括：直连 Mesh 拓扑（Mesh4×4）、单机箱 DGX1 拓扑（DGX1-1）、双机箱 DGX2 拓扑（DGX2-2）、基于交换机的 NDv2 拓扑（NDv2-2 与 NDv2-4），以及双机箱 AMD GPU 拓扑（AMD-2）。其中，拓扑名称中的数字后缀表示所包含的机箱（chassis）数量。
+\autoref{tab:topology-summary} 给出了每种拓扑中单个机箱内的 GPU 数量以及机箱数量。FTACAS与TECCL均在相同的拓扑配置下运行。
 \begin{table}[!htbp]
-    \center
-    \caption{卷积层特征空间的采样范围}
-    \label{tab:sample-convolutional-layer}
-    \setlength{\tabcolsep}{7.5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.9}{
-        \begin{tabular}{cc}
-          \toprule[2pt]
-          特征          & 采样范围\\ 
-          \midrule[1pt]
-          输入尺寸         &  1\~{}256 \\
-        %   \hline
-          批大小          &  1\~{}256 \\
-        %   \hline
-          输入通道数       &  1\~{}1024  \\
-        %   \hline
-          输出通道数       &  1\~{}1024 \\
-        %   \hline
-          卷积核大小       &  1\~{}7          \\
-        %   \hline
-          边界填充大小     &  0\~{}3 \\
-        %   \hline
-          卷积核步幅大小   &  1\~{}5            \\
-        %   \hline
-          是否使用偏置项          & True/False            \\
-        %   \hline
-          激活函数类型    &  none/relu/tanh/sigmiod           \\
-        %   \hline
-          优化器类型       & SGD/Adadelta/Adagrad/Adam/RMSProp             \\
-          \bottomrule[2pt]
-        \end{tabular}
-    }}
+\centering
+\caption{实验拓扑配置}
+\label{tab:topology-summary}
+\begin{tabular}{lccc}
+\toprule
+Topology & GPUs per chassis & Chassis  & Total number of GPUs\\
+\midrule
+Mesh($4\times4$)  & 16 & 1 & 16\\
+DGX1-1            & 8  & 1 & 8\\
+DGX2-2            & 16 & 2 & 32\\
+NDv2-2            & 8  & 2 & 16\\
+NDv2-4            & 8  & 4 & 32\\
+AMD-2             & 16 & 2 & 32\\
+\bottomrule
+\end{tabular}
 \end{table}
 
-\begin{table}[!htbp]
-    \center
-    \caption{池化层特征空间的采样范围}
-    \label{tab:sample-pooling-layer}
-    \setlength{\tabcolsep}{5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.9}{
-        \begin{tabular}{cc}
-            \toprule[2pt]
-          特征          & 采样范围\\ 
-          \midrule[1pt]
-          输入尺寸         &  1\~{}256 \\
-        %   \hline
-          批大小          &  1\~{}256 \\
-        %   \hline
-          通道数       &  1\~{}1024  \\
-        %   \hline
-          池化核大小       &  1\~{}7          \\
-        %   \hline
-          边界填充大小     &  0\~{}3 \\
-        %   \hline
-          池化核步幅大小   &  1\~{}5            \\
-        %   \hline
-          池化类型       & MaxPool2d/MaxPool1d/AvgPool2d/AvgPool1d             \\
-          \bottomrule[2pt]
-        \end{tabular}
-    }}
-\end{table}
+Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓扑结构可参考\autoref{fig:DGX1}，其物理参数与单机箱 NDv2 拓扑相同。DGX2-2 的拓扑结构如\autoref{fig:DGX2-2}所示。NDv2-4 的拓扑结构如\autoref{fig:NDv2-cluster}所示，其中 NDv2-2 可视为相同结构下的双机箱拓扑；NDv2 的单机箱拓扑结构与 DGX1 类似，在本实验中采用相同的实验参数。AMD-2 的拓扑结构如\autoref{fig:AMD-2}所示。
 
-\begin{table}[!htbp]
-    \center
-    \caption{全连接层特征空间的采样范围}
-    \label{tab:sample-fully-connected-layer}
-    \setlength{\tabcolsep}{7.5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.9}{
-        \begin{tabular}{cc}
-            \toprule[2pt]
-          特征          & 采样范围\\ 
-          \midrule[1pt]
-          批大小         &  1\~{}256 \\
-        %   \hline
-          输入维度         &  1\~{}4096 \\
-        %   \hline
-          输出维度          &  1\~{}4096 \\
-        %   \hline
-          是否使用偏置项     &  True/False \\
-        %   \hline
-          激活函数类型       &  none/relu/tanh/sigmoid            \\
-        %   \hline
-          优化器类型       & SGD/Adadelta/Adagrad/Adam/RMSProp             \\
-          \bottomrule[2pt]
-        \end{tabular}
-    }}
-\end{table}
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/Mesh.pdf}
+    \caption{Mesh($4\times4$)拓扑结构示意图}
+    \label{fig:Mesh4x4}
+\end{figure}
 
-\begin{table}[t]
-    \center
-    \caption{批归一化层特征空间的采样范围}
-    \label{tab:sample-bn-layer}
-    \setlength{\tabcolsep}{8mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.9}{
-        \begin{tabular}{cc}
-            \toprule[2pt]
-          特征          & 采样范围\\ 
-          \midrule[1pt]
-            输入尺寸         &  1\~{}256 \\
-            % \hline
-            批大小          &  1\~{}256 \\
-            % \hline
-            通道数       &  1\~{}1024  \\
-        %   \hline
-          激活函数类型    &  none/relu/tanh/sigmiod           \\
-        %   \hline
-          优化器类型       & SGD/Adadelta/Adagrad/Adam/RMSProp             \\
-          \bottomrule[2pt]
-        \end{tabular}
-    }}
-\end{table}
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter2/DGX2-2.pdf}
+    \caption{DGX2-2拓扑结构示意图\cite{liu2024rethinking}}
+    \label{fig:DGX2-2}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/NDv2-4.pdf}
+    \caption{NDv2-4拓扑结构示意图\cite{liu2024rethinking}}
+    \label{fig:NDv2-cluster}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter2/AMD-2.pdf}
+    \caption{AMD-2拓扑结构示意图\cite{liu2024rethinking}}
+    \label{fig:AMD-2}
+\end{figure}
+
 
 
 \subsection{实验设置与评价指标}
 
-在训练多层感知器模型时，优化器使用Adam，批大小设置为128，初始学习率设置为0.1，并分别在第40和80个训练周期时将学习率缩小10倍。本节选择VGG-16\cite{simonyan2014very}，ResNet-50\cite{he2016deep}，ResNet-101\cite{he2016deep}和GoogLeNet\cite{szegedy2015going}作为待预测的卷积神经网络，其中VGG-16由标准的卷积层、池化层和全连接堆叠而成，ResNet-50和ResNet-101由残差块组成，GoogLeNet由Inception模块组成。这些神经网络的基本组成单元都是本章所考虑的卷积层、池化层、全连接层和批归一化层。另外，本节选择如\autoref{fig:Fig2-13}所示的五种拓扑作为待预测的拓扑结构，分别是环形拓扑\cite{nedic2018network}、树形拓扑\cite{iandola2016firecaffe}、分层拓扑\cite{trevisan2017lecture}、2D-Torus\cite{tanakaimagenet}和指数拓扑\cite{ying2021exponential}，并且在测试和预测时，前四种拓扑结构基于All-Reduce架构，指数拓扑则基于Gossip架构。
+本节对 FTACAS 方法的算法合成时间开销以及合成得到的集合通信算法的算法带宽进行评估，并与 TECCL 方法进行对比分析。实验中，FTACAS 与 TECCL 均在相同的拓扑配置下运行。针对每种拓扑结构，分别测试 AllGather 与 AllToAll 两种集合通信算子的合成性能。
 
-\begin{figure}[h]
-    \centering
-    \subfigure[环形拓扑]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-1-different-topo.pdf}
-    }
-    \subfigure[树形拓扑]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-2-different-topo.pdf}
-    }
-    \subfigure[分层拓扑]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-3-different-topo.pdf}
-    }
-    \subfigure[2D-Torus]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-4-different-topo.pdf}
-    }
-    \subfigure[指数拓扑]{
-        \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-5-different-topo.pdf}
-    }
-    \caption{基于$broadcast$实现的不同通信拓扑}
-    \label{fig:Fig2-13}
-\end{figure}
+为刻画不同数据量下集合通信算子的特征，实验选取了三种数据量设置，分别为 1MB、64MB 与 1GB。本文中，集合通信算子的数据量定义为完整接收缓冲区的大小。此外，考虑到分块策略对集合通信调度与性能的影响，实验中测试了分块数为 1 与 2 的两种场景。
 
-% 下面简单介绍一下五种拓扑上的通信机制：
-% \begin{itemize}
-%     \item 环形拓扑：在基于All-Reduce架构的环形拓扑上进行数据通信时，数据从节点1经其他节点依次发送至节点8，由节点8对所有节点的数据求平均后再依次发送给每个节点；
-%     \item 树形拓扑：在基于All-Reduce架构的树形拓扑上进行数据通信时，每个节点分别从其子节点接收数据，并将接收的数据与本地数据求和后发送给其父节点，由节点1对所有节点的数据求平均后再依次向下发送给每个节点；
-%     \item 分层拓扑：在基于All-Reduce架构的分层拓扑上进行数据通信时，节点1、3、5、7分别将数据发送给节点2、4、6、8，然后节点2、6将数据求和并发送给节点4、8，最后节点4将数据求和并发送给节点8，由节点8对所有节点的数据求平均后再反向发送给每个节点；
-%     \item 2D-Torus：
-% \end{itemize}
-
-为了衡量预测模型的性能，本节使用均方根误差（RMSE），平均绝对百分比误差（MAPE）和决定系数（$R^2$）作为评价指标。其中RMSE和MAPE表示预测值与真实值之间的偏差，这两个指标越小，说明预测模型的精度越高。RMSE和MAPE的计算公式如下：
+在上述设置下，本节比较了 FTACAS 与 TECCL 在不同拓扑结构上的算法合成时间开销，以及其合成得到的集合通信算法的算法带宽。
+其中，算法带宽（Algorithm Bandwidth）用于衡量合成得到的集合通信算法在运行阶段的数据传输效率，其定义为集合通信过程中完成传输的数据量与对应完成时间的比值，即
 \begin{equation}
-    \label{tab:RMSE}
-    RMSE=\sqrt{\frac{1}{n_{sample}}\sum_{i=1}^{n_{sample}}{\left( \hat{y}_i-y_i \right) ^2}},
+\mathrm{B_{alg}}
+=
+\frac{S_{\mathrm{total}}}{T_{coll}},
 \end{equation}
 
-\begin{equation}
-    \label{tab:MAPE}
-    MAPE=\frac{100\%}{n_{sample}}\sum_{i=1}^{n_{sample}}{\left| \frac{\hat{y}_i-y_i}{y_i} \right|},
-\end{equation}
-其中$n_{sample}$是样本数，$\hat{y}_i$是第$i$个样本的预测值，$y_i$是第$i$个样本的真实值。
 
-与RMSE和MAPE不同，$R^2$用于衡量一个模型对数据的拟合程度，取值范围在0到1之间，并且越接近1，说明模型对数据的拟合越好。其计算公式如下：
-\begin{equation}
-    \label{tab:R2}
-    R^2=\frac{SSR}{SST}=\frac{\sum_{i=1}^{n_{sample}}{\left( \hat{y}_i-\bar{y} \right) ^2}}{\sum_{i=1}^{n_{sample}}{\left( y_i-\bar{y} \right) ^2}},
-\end{equation}
-其中$SSR$被称为回归平方和，SST被称为总离差平方和，$\bar{y}$是所有样本真实值的平均值。
 
-\subsection{实验结果与分析}\label{subsection_2_4_3}
+\subsection{实验结果与分析}
 
-下面将分别从计算时间预测、通信时间预测和迭代时间预测三个方面验证PreTopo的有效性。
+下面将详细对比不同场景下的AllGather与AlltoAll算子的算法带宽与求解时间。
 
-\textbf{1. 计算时间预测}
+\noindent\textbf{1 算法带宽}
 
-首先对上述四种类型的神经网络层的预测结果进行评估，为了说明特征扩充对预测模型精度的提升，本节进行了消融实验——将PreTopo与没有进行特征扩充的MLP模型进行对比。由于池化层和批归一化层的预测精度较高，因此在建模时没有对池化层和批归一化层进行特征扩充。\autoref{tab:result_layer_type}展示了在验证集上得到的预测结果。可以看到，特征扩充提升了卷积层和全连接层的计算时间预测精度。另外，在四种类型的神经网络层中，卷积层表现出最大的预测误差，这主要归因于它较高的计算复杂度。因为深度学习框架针对卷积运算进行了优化，会根据矩阵大小的不同选择不同的算法实现卷积运算，从而增大MLP模型训练的难度，导致难以准确预测卷积层的计算时间。不过PreTopo的MAPE仍然保持在18\%以下，并且$R^2$可以达到0.9以上。对于常见的卷积配置，PreTopo的预测误差会低于表中的平均结果，这点从后面的实验结果中可以得到证实。
-
-\renewcommand\arraystretch{0.8}
-\begin{table}[!htpb]
-    \center
-    \caption{不同类型神经网络层的计算时间预测结果}
-    \label{tab:result_layer_type}
-    \setlength{\tabcolsep}{4mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.9}{
-    \begin{tabular}{|c|c|ccc|}
-      \hline
-      层类型    &        预测方法      &     RMSE(ms)     &    MAPE(\%)    &     $R^2$ \\ 
-      \hline
-      \multirow{2}{*}{卷积层}     &     PreTopo     &  \textbf{5.610}  &  \textbf{17.90\%}    &    \textbf{0.904} \\
-                                                   &    MLP         &  6.850      &    19.90\%    &    0.858 \\ \hline
-      池化层               &  PreTopo     & 0.069      &  8.92\%    &   0.997 \\\hline
-      \multirow{2}{*}{全连接层}       &  PreTopo     &  \textbf{0.157}      &    \textbf{13.20\%}    &  \textbf{0.951} \\
-                                              &    MLP         &  0.187      &    14.6\%    &    0.946 \\ \hline
-      批归一化层         &  PreTopo     &  0.209      &   3.86\%    &   0.994 \\
-      \hline
-    \end{tabular}
-    }}
-\end{table}
-
-接下来对整个神经网络的计算时间预测结果进行评估。本节将PreTopo与其他两个方法进行比较：没有进行特征扩充的MLP模型和经典的计算时间预测方法Paleo。为了进行全面的比较，本节将每个节点的批大小从1增加到32，并将输入尺寸设置为 $32\times32\times3$和$224\times224\times3$（分别为Cifar10和ImageNet数据集的图像大小）。\autoref{tab:result_full_NN}比较了三种预测方法对VGG-16、ResNet-50、ResNet-100和GoogLeNet四种神经网络模型的计算时间的预测结果，表中的每个值为不同批大小的预测结果的平均值。可以发现，对于四种类型的CNN，PreTopo均实现了小于10ms的RMSE和小于15\%的MAPE，优于没有进行特征扩充的MLP模型和Paleo。
-
-\begin{table}[!htpb]
-    \center
-    \caption{不同神经网络模型的计算时间预测结果}
-    \label{tab:result_full_NN}
-    \setlength{\tabcolsep}{3mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.9}{
-    \begin{tabular}{|c|c|c|ccc|}
-      \hline
-      神经网络模型                 & 输入尺寸          & 预测方法 & RMSE(ms)              & MAPE(\%) &    $R^2$           \\ \hline
-      \multirow{6}{*}{VGG-16}    & \multirow{3}{*}{$32\times32\times3$}   & PreTopo          & \textbf{0.487}       & \textbf{4.43\%}   &    \textbf{0.960}           \\
-                                &                            & MLP            & 7.761                & 53.34\%  &      -              \\
-                                &                            & Paleo            & 3.769                & 35.44\%  &      -              \\ \cline{2-6} 
-                                & \multirow{3}{*}{$224\times224\times3$} & PreTopo          & \textbf{9.207}      & \textbf{7.74\%}   &    \textbf{0.978}           \\
-                                &                            & MLP            & 9.615                & 19.76\%  &      0.976              \\
-                                &                            & Paleo            & 27.764               & 22.61\%   &   0.803                 \\ \hline
-      \multirow{6}{*}{ResNet-50} & \multirow{3}{*}{$32\times32\times3$}   & PreTopo          & \textbf{2.268}        & \textbf{7.18\%}   &    \textbf{0.810}           \\
-                                  &                            & MLP            & 8.880                & 18.92\%  &      -              \\
-                                &                            & Paleo            & 23.181               & 76.41\%  &      -                   \\ \cline{2-6} 
-                                & \multirow{3}{*}{$224\times224\times3$} & PreTopo          & \textbf{5.334}      & \textbf{13.77\%}  &    \textbf{0.976}           \\
-                                &                            & MLP            & 9.850                & 16.53\%  &      0.917              \\
-                                &                            & Paleo            & 29.351               & 62.08\%  &    0.271                   \\ \hline
-      \multirow{6}{*}{ResNet-101} & \multirow{3}{*}{$32\times32\times3$}   & PreTopo          & \textbf{6.356}        & \textbf{13.48\%}   &    \textbf{0.206}           \\
-                                  &                            & MLP            & 22.521                & 29.30\%  &      -              \\
-                                &                            & Paleo            & 33.050               & 71.34\%  &      -                   \\ \cline{2-6} 
-                                & \multirow{3}{*}{$224\times224\times3$} & PreTopo          & \textbf{6.711}      & \textbf{6.42\%}  &    \textbf{0.984}           \\
-                                &                            & MLP            & 7.763                & 9.49\%  &      0.979              \\
-                                &                            & Paleo            & 45.650               & 59.86\%  &    0.290                   \\ \hline
-      \multirow{6}{*}{GoogLeNet} & \multirow{3}{*}{$32\times32\times3$}   & PreTopo          & \textbf{2.210}        & \textbf{4.76\%}   &    \textbf{0.038}           \\
-                                  &                            & MLP            &  2.466               & 5.31\%  &          -          \\
-                                &                            & Paleo            &      38.890          & 94.84\%  &         -                \\ \cline{2-6} 
-                                & \multirow{3}{*}{$224\times224\times3$} & PreTopo          & \textbf{3.860}      & \textbf{8.12\%}  &    \textbf{0.749}           \\
-                                &                            & MLP            &   4.383              & 8.57\%  &         0.677          \\
-                                &                            & Paleo            &     36.019           & 83.07\%  &         -              \\ \hline
-  
-    \end{tabular}
-    }}
-\end{table}
-
-\textbf{2. 通信时间预测}
-
-1）单链路通信时间预测
-
-首先对单链路通信时间预测结果进行评估。在\autoref{subsection_2_4_1}中分别测试了使用两种集合通信原语通信不同大小的数据所需的时间，接下来利用基于$all\underline{~}reduce$的单链路通信时间预测模型和基于$broadcast$的单链路通信时间预测模型对相应的数据进行拟合。由于PIX、NODE和SYS三种物理链路的带宽不同，因此本节为分别它们建立对应的单链路模型。对于基于$all\underline{~}reduce$的通信，本节将PreTopo与固定带宽的模型进行比较，而对于基于$broadcast$的通信，由于我们采用分段模型对Sigmoid模型进行了改进，因此本节还将PreTopo与未分段的Sigmoid模型进行了对比。实验结果如\autoref{tab:result_single_link_comm}所示，表中的每个值为不同通信数据量的预测结果的平均值。可以发现，PreTopo在不同物理链路上的MAPE不超过12\%，并且对于基于$all\underline{~}reduce$的通信，PreTopo优于固定带宽的模型45\%以上，对于基于$broadcast$的通信，PreTopo优于其他两种模型50\%以上。此外，PreTopo的RMSE小于0.7ms，$R^2$大于等于0.998，均优于其他模型。
-
-根据测试结果，当通信数据量足够大时，实时吞吐量近似等于链路的最大带宽。因此，上述所有预测模型在这种情况下表现出相似的性能。当通信数据量减小时，实时吞吐量将变得小于链路的最大带宽，使得固定带宽的模型无法准确预测通信时间。此外，在基于$broadcast$进行通信并且通信数据量小于0.14MB时，基于Sigmoid的模型的预测性能会显著下降。综上所述，PreTopo在单链路通信时间预测上优于其他两种方法。
-
-\begin{table}[!htpb]
-    \center
-    \caption{单链路通信时间预测结果}
-    \label{tab:result_single_link_comm}
-    \setlength{\tabcolsep}{3mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
-    \scalebox{0.9}{
-    \begin{tabular}{|c|c|c|ccc|}
-      \hline
-      通信原语         & 物理链路    & 预测方法          & RMSE(ms)              & MAPE(\%) & $R^2$ \\ \hline
-      \multirow{6}{*}{$all\underline{~}reduce$}    & \multirow{2}{*}{PIX}  & PreTopo & \textbf{0.514} &  \textbf{8.97\%}        &   \textbf{0.999}                   \\
-                                &                       & 固定带宽的模型                 &   0.688             & 54.00\%     &  0.999              \\ \cline{2-6} 
-                                & \multirow{2}{*}{NODE} & PreTopo &   \textbf{0.172}             &  \textbf{8.32\%}      &   \textbf{0.999}                   \\
-                                &                       & 固定带宽的模型                 &   0.330              & 59.41\%    &   0.999              \\ \cline{2-6} 
-                                & \multirow{2}{*}{SYS}  & PreTopo &   \textbf{0.253}              & \textbf{6.89\%}      &  \textbf{0.999}                    \\
-                                &                       & 固定带宽的模型                 &   0.382             &  59.71\%        & 0.998                \\ \hline
-      \multirow{9}{*}{$broadcast$} & \multirow{3}{*}{PIX}  & PreTopo &   \textbf{0.226}         &  \textbf{11.06\%}     &  \textbf{0.999}                    \\
-                                &                       & 基于Sigmoid的模型               &  0.439              &  102.65\%   &    0.996             \\
-                                &                       & 固定带宽的模型                 &  0.560              &  63.99\%   &    0.993             \\\cline{2-6} 
-                                & \multirow{3}{*}{NODE} & PreTopo &  \textbf{0.206}              &   \textbf{9.79\%}   &  \textbf{0.999}                    \\
-                                &                       & 基于Sigmoid的模型                &  0.293              &   74.49\%   & 0.998              \\ 
-                                &                       & 固定带宽的模型                 &  0.407              &   65.23\%   & 0.996              \\ \cline{2-6} 
-                                & \multirow{3}{*}{SYS}  & PreTopo &  \textbf{0.316}              &  \textbf{9.21\%}    &  \textbf{0.998}                    \\
-                                &                       & 基于Sigmoid的模型                 &  0.378               & 80.94\%    &  0.997               \\ 
-                                &                       & 固定带宽的模型                 &  0.348               & 65.51\%    &  0.997               \\ \hline
-    \end{tabular}
-    }}
-\end{table}
-
-2）多GPU通信时间预测
-
-接下来对多GPU通信时间预测结果进行评估。对于$all\underline{~}reduce$，本节利用\autoref{tab:multi_gpu_allreduce_based_multiGPU}对8个GPU上的通信时间进行预测，分别设置$s=2$、$s=5$和$s=8$。实验结果如\autoref{fig:Fig2-11}所示。可以看到，$s=8$时，预测的通信时间与真实测量时间基本一致，这是因为建立预测模型使用的节点数目与待预测的节点数目相同，此时模型参数由真实测量数据拟合得到。$s=5$时，本节选择的5个GPU为GPU1\~{}GPU5，它们之间基于$all\underline{~}reduce$进行通信时会使用硬件系统中的三种物理链路，因此$s=5$时同样可以比较准确地预测通信时间。$s=2$时，预测模型基于单链路预测模型得到，因此预测误差相对较大，不过仍然可以比较准确地预测出通信时间的变化趋势。上述实验结果验证了\autoref{subsection_2_3_3}中对规模扩展性的分析，即通过为每种类型的物理链路建立单链路通信时间预测模型或者使用包含所有类型的物理链路的小规模GPU集群建立通信时间预测模型，即可预测更大规模的GPU集群上的通信时间。
+不同场景下AllGather算子的算法带宽对比结果如\autoref{fig:allgather-bandwidth}所示。
+不同场景下AlltoAll算子的算法带宽对比结果如\autoref{fig:alltoall-bandwidth}所示。
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.65\linewidth]{figure/chapter2/fig2-11-allreduce_pred_by_different_nodes.pdf}
-    \caption{\label{fig:Fig2-11}基于$all\underline{~}reduce$的8个GPU上的通信时间预测结果}
+    \includegraphics[width=1\linewidth]{figure/chapter2/allgather_bandwidth_all_scenarios.pdf}
+    \caption{不同场景下AllGather算子的算法带宽对比}
+    \label{fig:allgather-bandwidth}
 \end{figure}
-
-对于$broadcast$，本节将PreTopo与基于Sigmoid的模型和固定带宽的模型进行比较。考虑到现有的方法没有对集合通信原语进行分析，因此本节对比的基于Sigmoid的模型和固定带宽的模型同样基于\autoref{tab:multi_gpu_broadcast_refined}，不过将其中的单链路模型替换为对应的基于Sigmoid的模型和固定带宽的模型。\autoref{fig:Fig2-12}展示了三种方法对不同数目GPU的通信时间的预测结果，其中MAPE的值为不同通信数据量的预测结果的平均值。可以看到PreTopo的预测精度分别优于基于Sigmoid的模型和固定带宽的模型12.59\%以上和2.17\%以上。其中，基于Sigmoid的模型在通信数据量小于0.14MB时，预测误差会大大增加，导致其MAPE值在三种方法中最大。另外，三种方法的MAPE随着GPU数量的增加而逐渐增加，这归因于在每次通信之前基于GPU数量的数据分块机制。GPU数目越多，每个数据块的数据量越小，而单链路模型在数据量较小时容易产生较大的MAPE，从而使得基于\autoref{tab:multi_gpu_broadcast_refined}的多GPU通信时间预测模型的MAPE增加。在分布式深度学习中，为了降低通信开销，每个节点的邻居数目通常不会过多，因此PreTopo可以保持较高的预测精度。
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.65\linewidth]{figure/chapter2/fig2-12-error_multigpu_broadcast.pdf}
-    \caption{\label{fig:Fig2-12}基于$broadcast$的多GPU通信时间预测结果}
+    \includegraphics[width=1\linewidth]{figure/chapter2/alltoall_bandwidth_all_scenarios.pdf}
+    \caption{不同场景下AlltoAll算子的算法带宽对比}
+    \label{fig:alltoall-bandwidth}
 \end{figure}
 
-3）一般拓扑上的通信时间预测
+\noindent\textbf{2 求解时间}
 
-进一步地，对PreTopo在\autoref{fig:Fig2-13}所示的五种拓扑上的通信时间预测结果进行评估。实验结果如\autoref{fig:Fig2-14}所示，其中MAPE的值为不同通信数据量的预测结果的平均值。可以看到，PreTopo在五种拓扑上的MAPE都小于15\%，优于基于Sigmoid的模型和固定带宽的模型。由此验证了PreTopo对于预测一般拓扑上的通信时间的有效性。
+不同场景下AllGather算子的求解时间对比结果如\autoref {fig:allgather-solving-time}所示。
+不同场景下AlltoAll算子的求解时间对比结果如\autoref {fig:alltoall-solving-time}所示。
 
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter2/allgather_time_all_scenarios.pdf}
+    \caption{不同场景下AllGather算子的求解时间对比}
+    \label{fig:allgather-solving-time}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter2/alltoall_time_all_scenarios.pdf}
+    \caption{不同场景下AlltoAll算子的求解时间对比}
+    \label{fig:alltoall-solving-time}
+\end{figure}
+
+\noindent\textbf{3. 综合对比分析}
+
+% 在数据量为1G，分块数为1的场景下，FTACAS与TECCL的综合性能对比分析如\autoref{fig:combined-comparison}所示。
 % \begin{figure}[!htbp]
 %     \centering
-%     \subfigure[环形拓扑]{
-%         \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-1-different-topo.pdf}
-%     }
-%     \subfigure[树形拓扑]{
-%         \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-2-different-topo.pdf}
-%     }
-%     \subfigure[分层拓扑]{
-%         \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-3-different-topo.pdf}
-%     }
-%     \subfigure[2D-Torus]{
-%         \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-4-different-topo.pdf}
-%     }
-%     \subfigure[指数拓扑]{
-%         \includegraphics[width=0.3\linewidth]{figure/chapter2/fig2-13-5-different-topo.pdf}
-%     }
-%     \caption{基于$broadcast$实现的不同通信拓扑}
-%     \label{fig:Fig2-13}
+%     \includegraphics[width=1\linewidth]{figure/chapter2/comprehensive_comparison.pdf}
+%     \caption{FTACAS与TECCL的综合性能对比（1GB，1分块）}
+%     \label{fig:combined-comparison}
 % \end{figure}
 
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=0.65\linewidth]{figure/chapter2/fig2-14-error_topo_comm.pdf}
-    \caption{\label{fig:Fig2-14}不同拓扑上的通信时间预测结果}
-\end{figure}
+在分块数为1的所有场景下，FTACAS相对于TECCL算法的算法带宽加速比如\autoref {tab:speedup_ab_chunk1_opcol}所示，求解时间加速比如\autoref {tab:speedup_time_chunk1_opcol_sci}所示。
 
-\textbf{3. 迭代时间预测}
+% Required package: \usepackage{booktabs}
+\begin{table}[!htbp]
+\centering
+\caption{分块数为1时FTACAS相对TECCL的算法带宽加速比}
+\label{tab:speedup_ab_chunk1_opcol}
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{lcccccc}
+\toprule
+\multirow{2}{*}{Topology} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AllToAll} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+& 1MB & 64MB & 1GB & 1MB & 64MB & 1GB \\
+\midrule
+Mesh
+& 1.00 & 1.00 & 1.00
+& 0.94 & 0.94 & 0.94 \\
+DGX1-1
+& 1.00 & 1.00 & 1.00
+& 1.50 & 1.34 & 1.33 \\
+DGX2-2
+& 1.65 & 1.76 & 1.76
+& 1.00 & 1.03 & 1.03 \\
+NDv2-2
+& 1.60 & 1.01 & 1.00
+& 0.89 & 0.89 & 0.89 \\
+NDv2-4
+& 2.23 & 1.14 & 1.10
+& 0.98 & 0.97 & 0.98 \\
+AMD-2
+& 2.99 & 3.05 & 3.05
+& 0.98 & 0.97 & 0.98 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-为了验证PreTopo对于预测一般拓扑上分布式深度学习训练时间的有效性，本节选择ResNet-50作为待预测的神经网络模型，将输入尺寸设置为224×224×3，优化算法采用SGD算法，分别测试基于Ring All-Reduce算法进行分布式训练和在上述五种拓扑上进行分布式训练所需的迭代时间，并使用PreTopo对迭代时间进行预测。
+% Required package: \usepackage{booktabs}
+\begin{table}[!htbp]
+\centering
+\caption{分块数为1时FTACAS相对TECCL的合成时间加速比}
+\label{tab:speedup_time_chunk1_opcol_sci}
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{lcccccc}
+\toprule
+\multirow{2}{*}{Topology} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AllToAll} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+& 1MB & 64MB & 1GB & 1MB & 64MB & 1GB \\
+\midrule
+Mesh
+& $2.36\times10^{3}$ & $2.18\times10^{3}$ & $2.16\times10^{3}$
+& $3.45\times10^{3}$ & $3.31\times10^{3}$ & $3.08\times10^{3}$ \\
+DGX1-1
+& $1.08\times10^{3}$ & $1.08\times10^{3}$ & $1.00\times10^{3}$
+& $5.33\times10^{3}$ & $5.42\times10^{3}$ & $5.74\times10^{3}$ \\
+DGX2-2
+& $5.27\times10^{2}$ & $4.23\times10^{2}$ & $4.49\times10^{2}$
+& $2.33\times10^{3}$ & $2.61\times10^{3}$ & $2.65\times10^{3}$ \\
+NDv2-2
+& $4.72\times10^{3}$ & $5.26\times10^{3}$ & $5.41\times10^{3}$
+& $1.16\times10^{3}$ & $1.27\times10^{3}$ & $1.26\times10^{3}$ \\
+NDv2-4
+& $7.79\times10^{4}$ & $4.84\times10^{4}$ & $5.46\times10^{4}$
+& $3.31\times10^{3}$ & $7.28\times10^{3}$ & $6.38\times10^{3}$ \\
+AMD-2
+& $5.84\times10^{2}$ & $5.63\times10^{2}$ & $5.29\times10^{2}$
+& $9.41\times10^{2}$ & $6.62\times10^{2}$ & $8.18\times10^{2}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-首先，基于Ring All-Reduce算法进行分布式训练，并对迭代时间预测结果进行评估。设置每个节点的批大小从1变化到32（8个节点的总批大小从8变化到256），分别对计算与通信有并行和无并行两种场景进行预测，得到如\autoref{fig:Fig2-15}所示的实验结果。由于计算和通信的并行执行提高了分布式训练的效率，因此并行执行的迭代时间少于没有并行执行的迭代时间。此外，对于这两种场景，PreTopo均能够比较准确地预测迭代时间，这主要是因为PreTopo对计算和通信的并行关系进行了细粒度的分析。
 
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=0.65\linewidth]{figure/chapter2/fig2-15-pred_result_ring_overlap.pdf}
-    \caption{\label{fig:Fig2-15}基于Ring All-Reduce算法的分布式训练迭代时间预测结果}
-\end{figure}
-
-接下来，在上述五种拓扑上进行分布式训练（无计算与通信的并行执行），并对迭代时间预测结果进行评估。由于现有的训练时间预测方法均不适用于一般拓扑，因此本节将Paleo与固定带宽的通信时间预测模型结合，作为本节的对比方法。实验结果如\autoref{fig:Fig2-16}所示，其中MAPE的值为不同批大小的预测结果的平均值。可以看到，对于给定的五种拓扑，PreTopo的MAPE分别为4.84\%，2.40\%，9.28\%，13.26\%和7.47\%，均小于15\%，并且优于对比方法大约10\%。
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=0.65\linewidth]{figure/chapter2/fig2-16-error_dist_time.pdf}
-    \caption{\label{fig:Fig2-16}不同拓扑上的分布式训练迭代时间预测结果}
-\end{figure}
-
-% 以上所有实验结果证明了本章提出的PreTopo对于预测分布式深度学习训练时间的有效性。
 
 \section{本章小结}
-
-在分布式深度学习领域，现有的训练时间预测方法都是基于简单的星形拓扑或环形拓扑。本章提出了一种新的训练时间预测方法，能够实现对一般拓扑上的分布式深度学习训练时间的准确预测。该方法将分布式训练时间分解为计算时间和通信时间，并分别建立了基于MLP的计算时间预测模型和基于机理分析的通信时间预测模型。为了提高计算时间预测的精度，通过分析各神经网络层的执行机理对特征进行了扩充。对于通信预测，通过分析集合通信原语的执行机理和不同拓扑的通信特征建立了细粒度的通信时间预测模型。此外，通过计算与通信的并行关系分析进一步精细化了预测模型。在实际分布式深度学习场景的验证实验表明，本章提出的预测方法优于现有的方法，能够有效预测不同拓扑上的分布式深度学习训练时间。
-
-本章的工作可用于分析分布式深度学习中的性能瓶颈，并衡量不同规模GPU集群上的训练效率，从而有助于优化分布式深度学习的训练时间。
-
-
 

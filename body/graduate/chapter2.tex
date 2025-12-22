@@ -694,7 +694,7 @@ FTACAS 在 AllToAll 合成过程中还引入了以下两项关键机制，
 \subsection{实验拓扑}
 为全面评估 FTACAS 在不同互连结构下的算法合成性能，并与 TECCL 方法进行对比，本文选取了多种具有代表性的 GPU 集群拓扑作为实验对象。这些拓扑覆盖了直接互连结构、单机箱高带宽互连结构以及多机箱交换机互连结构，能够反映实际系统中常见的通信场景。
 具体而言，实验中使用的拓扑类型包括：直连 Mesh 拓扑（Mesh4×4）、单机箱 DGX1 拓扑（DGX1-1）、双机箱 DGX2 拓扑（DGX2-2）、基于交换机的 NDv2 拓扑（NDv2-2 与 NDv2-4），以及双机箱 AMD GPU 拓扑（AMD-2）。其中，拓扑名称中的数字后缀表示所包含的机箱（chassis）数量。
-\autoref{tab:topology-summary} 给出了每种拓扑中单个机箱内的 GPU 数量以及机箱数量。FTACAS与TECCL均在相同的拓扑配置下运行。
+\autoref{tab:topology-summary} 给出了每种拓扑中单个机箱内的GPU数量以及机箱数量。FTACAS与TECCL均在相同的拓扑配置下运行。
 \begin{table}[!htbp]
 \centering
 \caption{实验拓扑配置}
@@ -713,34 +713,24 @@ AMD-2             & 16 & 2 & 32\\
 \end{tabular}
 \end{table}
 
-Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓扑结构可参考\autoref{fig:DGX1}，其物理参数与单机箱 NDv2 拓扑相同。DGX2-2 的拓扑结构如\autoref{fig:DGX2-2}所示。NDv2-4 的拓扑结构如\autoref{fig:NDv2-cluster}所示，其中 NDv2-2 可视为相同结构下的双机箱拓扑；NDv2 的单机箱拓扑结构与 DGX1 类似，在本实验中采用相同的实验参数。AMD-2 的拓扑结构如\autoref{fig:AMD-2}所示。
+Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓扑结构可参考\autoref{fig:DGX1}，其物理参数与单机箱 NDv2 拓扑相同。DGX2-2 的拓扑结构如\autoref{fig:DGX2-2}所示。NDv2-4 的拓扑结构如\autoref{fig:NDv2-4}所示，其中 NDv2-2 可视为相同结构下的双机箱拓扑；NDv2 的单机箱拓扑结构与 DGX1 类似，在本实验中采用相同的实验参数。AMD-2 的拓扑结构如\autoref{fig:AMD-2}所示。
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/Mesh.pdf}
-    \caption{Mesh($4\times4$)拓扑结构示意图}
-    \label{fig:Mesh4x4}
-\end{figure}
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=1\linewidth]{figure/chapter2/DGX2-2.pdf}
-    \caption{DGX2-2拓扑结构示意图\cite{liu2024rethinking}}
-    \label{fig:DGX2-2}
-\end{figure}
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/NDv2-4.pdf}
-    \caption{NDv2-4拓扑结构示意图\cite{liu2024rethinking}}
-    \label{fig:NDv2-cluster}
-\end{figure}
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=1\linewidth]{figure/chapter2/AMD-2.pdf}
-    \caption{AMD-2拓扑结构示意图\cite{liu2024rethinking}}
-    \label{fig:AMD-2}
+    \subfigure[Mesh($4\times4$)拓扑结构\label{fig:Mesh4x4}]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter2/Mesh.pdf}
+    }
+    \subfigure[DGX2-2拓扑结构\label{fig:DGX2-2}\cite{liu2024rethinking}]{
+        \includegraphics[width=0.56\linewidth]{figure/chapter2/DGX2-2.pdf}
+    }
+    \subfigure[NDv2-4拓扑结构\label{fig:NDv2-4}\cite{liu2024rethinking}]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter2/NDv2-4.pdf}
+    }
+    \subfigure[AMD-2拓扑结构\label{fig:AMD-2}\cite{liu2024rethinking}]{
+        \includegraphics[width=0.56\linewidth]{figure/chapter2/AMD-2.pdf}
+    }
+    \caption{实验中使用的不同拓扑结构示意图}
+    \label{fig:topologies}
 \end{figure}
 
 
@@ -805,20 +795,12 @@ Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓�
 
 \noindent\textbf{3. 综合对比分析}
 
-% 在数据量为1G，分块数为1的场景下，FTACAS与TECCL的综合性能对比分析如\autoref{fig:combined-comparison}所示。
-% \begin{figure}[!htbp]
-%     \centering
-%     \includegraphics[width=1\linewidth]{figure/chapter2/comprehensive_comparison.pdf}
-%     \caption{FTACAS与TECCL的综合性能对比（1GB，1分块）}
-%     \label{fig:combined-comparison}
-% \end{figure}
-
-在分块数为1的所有场景下，FTACAS相对于TECCL算法的算法带宽加速比如\autoref {tab:speedup_ab_chunk1_opcol}所示，求解时间加速比如\autoref {tab:speedup_time_chunk1_opcol_sci}所示。
+分块数为1时，FTACAS相对于TECCL算法的算法带宽加速比如\autoref {tab:speedup_ab_chunk1_opcol}所示，求解时间加速比如\autoref {tab:speedup_time_chunk1_opcol_sci}所示。
 
 % Required package: \usepackage{booktabs}
 \begin{table}[!htbp]
 \centering
-\caption{分块数为1时FTACAS相对TECCL的算法带宽加速比}
+\caption{FTACAS相对TECCL的算法带宽加速比}
 \label{tab:speedup_ab_chunk1_opcol}
 \setlength{\tabcolsep}{4.5pt}
 \begin{tabular}{lcccccc}
@@ -852,7 +834,7 @@ AMD-2
 % Required package: \usepackage{booktabs}
 \begin{table}[!htbp]
 \centering
-\caption{分块数为1时FTACAS相对TECCL的合成时间加速比}
+\caption{FTACAS相对TECCL的合成时间加速比}
 \label{tab:speedup_time_chunk1_opcol_sci}
 \setlength{\tabcolsep}{4.5pt}
 \begin{tabular}{lcccccc}

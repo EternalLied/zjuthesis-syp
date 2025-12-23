@@ -1,519 +1,880 @@
-\chapter{计算通信并行优化}
+\chapter{拓扑感知的集合通信算法合成方法}
 \section{引言}
 
-当前，以AIGC为代表的大模型得到广泛的应用和部署，其参数可达到万亿级别，并且仍然保持迅速增长的趋势。随着模型迅速增大，大部分大模型采用了跨节点分布式部署的方式。在跨节点部署场景中，节点间需要频繁执行各种集合通信算子来协同训练，导致通信时间在整个训练过程中占据了相当的比例。因此，能否通过计算与通信的并行优化来通信开销，是加速大模型分布式训练至关重要的瓶颈点。
+当前，以AIGC为代表的大模型得到广泛的应用和部署。当前模型参数达到万亿级别，并且仍然保持迅速增长的趋势。随着模型迅速增大，大部分大模型采用了跨节点分布式部署的方式。在跨节点的大模型部署的场景中，节点间需要频繁地执行各种集合通信算子来协同训练，导致通信时间在整个训练过程中占据了相当的比例。因此，能否设计出高效的集合通信算子，是加速大模型分布式训练的至关重要的瓶颈点。
+跨节点的大模型部署场景下，计算集群中存在多种通信链路，如HCCS、PCIE、ROCE/IB等。多种通信链路的并发度和利用率，对集合通信算子整体性能至关重要。本项目计划研发跨节点多链路并发通信技术，提升模型训练和推理的端到端性能。
 
-分布式训练任务中，常用的并行训练方式有数据并行（Data Parallelism，DP）、张量并行（Tensor Parallelism，TP）和、流水并行（Pipeline Parallelism，PP）和专家并行（Expert Parallelism，EP）等。
-在数据并行中，每个节点持有整个模型的副本，并在划分的本地数据集上进行训练，各本地梯度通过例如AllReduce的集合通信方式进行聚合，然后更新参数，以保持不同节点模型间的同步。然而，数据并行可能无法满足大规模模型的训练需求，这些模型可能超出设备的存储和计算能力，因此，模型并行的使用变得不可避免。模型并行包括张量并行、流水并行和专家并行等方式。
-张量并行是一种为Transformer模型的分布式训练提出的优化策略，它将权重矩阵在行或列维度上进行划分，并依靠AllReduce操作确保划分前后的数学等效性。张量并行可以有效减少单个节点的显存占用，但是节点间需要进行频繁的通信同步参数。
-流水并行则将神经网络模型切分为多个阶段，并将这些阶段分配到不同的计算节点上，每个节点处理模型的一个子集，并在前向和反向传播过程中与其他节点进行通信。流水并行存在着Bubble现象，即在某些时间段内，部分节点处于空闲状态，无法充分利用计算资源。为了解决这一问题，可以采用微批次（Micro-batch）技术，将输入数据划分为更小的批次，并在流水线中交错处理这些微批次，从而提高资源利用率和整体训练效率。
-专家并行是一种针对混合专家模型（Mixture of Experts，MOE）提出的并行策略，它将模型中的不同专家模块分配到不同的计算节点上，能够实现高效的模型训练和推理。
-各种并行训练模式示意图如\autoref{fig:parallel_pattern}所示。
+本章其他小结的内容安排如下：2.2节对分布式深度学习的训练时间进行建模并分析了影响训练时间的特征；2.3节介绍了本章提出的分布式深度学习训练时间预测方法的各部分；2.4节基于真实测量结果对本章所提出方法的效果进行验证分析；2.5节对本章内容进行了总结。
+
+\section{问题描述}
+
+\subsection{集合通信算子}
+
+集合通信是在并行计算环境中多个进程或节点之间协调和交换数据的一类操作，在大模型场景下，是每个计算节点间同步和交换参数的操作，一个指定的集合通信算子确定了每个计算节点需要发送和接收的数据。常用集合通信算子如\autoref{fig:collective}所示。
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter3/parallel_pattern.pdf}
-    \caption{\label{fig:parallel_pattern}分布式训练中的常见并行模式示意图}
+    \includegraphics[width=1\linewidth]{figure/chapter2/collective.pdf}
+    \caption{\label{fig:collective}集合通信算子示意图}
 \end{figure}
 
-实际训练任务中，通常会结合多种并行方式以充分利用计算资源并提升训练效率。例如，在大模型训练中，数据并行常与张量并行或流水并行结合使用，以应对模型规模和计算需求的挑战。图\autoref{fig:3D-parallel}给出了数据并行、张量并行、流水并行同时部署的3D并行模式。在这种多并行方式结合的场景下，计算与通信的并行优化变得尤为重要，因为不同并行方式下的通信模式和需求各不相同。
+分布式训练中常用的集合通信算子有AllReduce、ReduceScatter、AllGather、AlltoAll等，其中AllReduce是最常用的算子，AllReduce算子将所有节点的数据进行规约（如求和、求平均等），并将结果分发到所有节点上。在分布式训练中，AllReduce通常用于同步各节点的模型参数或梯度，从而保证每个节点在每次迭代后都拥有一致的模型参数。AllReduce可以看作是ReduceScatter和AllGather两个算子的组合，首先通过ReduceScatter将所有节点的数据进行规约并分发到各节点上，然后通过AllGather将规约后的结果汇总到所有节点上。AllReduce的大部分算法实现也可以拆分成ReduceScatter和AllGather两部分，因此大部分经典研究都是针对AllReduce算子的。除此之外，随着大模型架构的发展，AlltoAll开始广泛应用于分布式训练场景中，如模型并行训练中不同节点间的特征交换和混合专家模型（Mixture of Experts，MOE）中的dispatch和combine操作等。
 
-\begin{figure}[!htbp]   
+\subsection{物理拓扑}
+
+物理拓扑描述了计算节点之间的底层物理连接关系，可以由一组图给定。高性能计算集群系统的群物理拓扑中往往存在着明显的多级异构链路，链路信息包含了各链路的带宽以及时延等特性。图\autoref{fig:DGX1}给出了NVIDIA DGX-1系统的机内物理拓扑结构示意图。该系统包含8个计算节点，每个节点配备了8个NVIDIA V100 GPU。节点之间通过高速互连网络NVLink和PCIe进行连接。多个DGX-1系统可以通过以太网或InfiniBand等网络进行互连，形成更大规模的集群系统。通过Infiniband互连的124机DGX-1集群拓扑结构如图\autoref{fig:DGX1-cluster}所示。
+
+\begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.6\linewidth]{figure/chapter3/3D-parallel.pdf}
-    \caption{\label{fig:3D-parallel}数据并行、张量并行、流水并行结合的3D并行模式示意图}
-\end{figure}
-
-在数据并行中，由于模型的梯度本身就是分层计算的，因此可以通过重叠梯度计算和通信来实现计算与通信的并行优化，从而减少通信开销。在流水并行中，模型被划分为多个顺序执行的阶段，采用Micro-batch技术时，天然具有不同Micro-batch间的计算与通信的并行性。而对于张量并行，模型参数被划分到不同节点上，节点间需要频繁进行严格同步的参数交换以完成前向和反向传播，因此张量并行中的计算与通信并行是目前分布式训练任务中的一个重要挑战。
-
-基于以上背景，本章针对分布式深度学习任务中的计算与通信并行优化问题，提出了一种针对张量并行的高效计算通信并行优化方法。我们通过Pytorch的上层接口实现了该方法，并在TP/DP混合并行的分布式训练任务中进行了性能验证。实验结果表明，本章所提出的方法能够有效减少Transformer模型的端到端训练时间，从而提升整体训练效率。
-
-本章其他小结的内容安排如下：3.2节介绍了典型的线性平均一致问题并分别描述了同构带宽和异构带宽场景下的拓扑优化问题；3.3节介绍了本章提出的参数同步拓扑优化问题求解框架；3.4节通过不同场景下的实验对本章所提出方法的有效性进行验证分析；3.5节对本章内容进行了总结。
-
-\section{问题描述}\label{section3-2}
-\subsection{Transformer模型结构} \label{section3-2-1}
-Transformer模型\cite{vaswani2017attention}是一种基于自注意力机制的神经网络架构，广泛应用于自然语言处理和计算机视觉等领域。Transformer模型主要由编码器（Encoder）和解码器（Decoder）两部分组成，每部分包含多个相同的层。每个层主要包括多头自注意力机制（Multi-Head Self-Attention，MHA）和前馈神经网络（Feed-Forward Neural Network，FFN）两个子层。
-图\autoref {fig:Transformer-overall}给出了Transformer模型的整体架构示意图。图\autoref {fig:Transformer-layer}给出了Transformer层的基本结构示意图。从图中可以看到Transformer层主要由多头自注意力机制和前馈神经网络两部分组成，我们以下简称这两部分为Attention层和MLP层。这两部分都以通用矩阵乘法（General Matrix Multiplication，GEMM）为核心计算操作，通过拆分其中的的矩阵乘法操作，可以实现Transformer模型的张量并行训练。
-
-\begin{figure}[!h]
-    \centering
-    \subfigure[Transformer整体模型架构\cite{vaswani2017attention}\label{fig:Transformer-overall}]{
-        \includegraphics[width=0.4\linewidth]{figure/chapter3/transformer.pdf}
+    \subfigure[机内物理拓扑结构\label{fig:DGX1}]{
+        \includegraphics[width=0.45\linewidth]{figure/chapter2/DGX1.pdf}
     }
-    \subfigure[Transformer层模型结构\cite{shoeybi2019megatron}\label{fig:Transformer-layer}]{
-        \includegraphics[width=0.4\linewidth]{figure/chapter3/transformer_layer.pdf}
+    \subfigure[124机集群物理拓扑结构\label{fig:DGX1-cluster}]{
+        \includegraphics[width=0.45\linewidth]{figure/chapter2/DGX1-cluster.pdf}
     }
-    \caption{Transformer模型结构示意图}
-    \label{fig:Transformer}
+    \caption{DGX-1系统物理拓扑结构示意图\cite{nvidia_dgx1_blog}}
+    \label{fig:DGX1-system}
 \end{figure}
 
+\subsection{集合通信算法}
+集合通信算法是指实现集合通信算子的具体方法，不同的算法在通信步骤、数据传输方式和节点间协调等方面有所不同。常见的集合通信算法包括环形算法、树形算法和层级算法等。这些算法通过优化数据传输路径和减少通信开销，提高了集合通信的效率和性能。在分布式训练中，针对系统的物理拓扑选择合适的集合通信算法对于提高训练速度和资源利用率具有重要意义。
 
-\subsection{数据并行} \label{section3-2-2}
-数据并行是一种常用的分布式训练策略，在数据并行中，每个计算节点持有整个模型的副本，并在划分的本地数据集上进行训练。各节点在本地计算梯度后，通过集合通信算子（如AllReduce）将本地梯度进行聚合，然后更新模型参数，以保持不同节点模型间的同步。 数据并行的主要优势在于其实现简单且易于扩展，适用于大多数神经网络模型。然而，随着模型规模的增大，单个节点可能无法容纳整个模型，导致数据并行面临存储和计算能力的限制。此外，数据并行中的通信开销也会随着节点数量的增加而显著上升，成为训练效率的瓶颈。因此，在实际应用中，数据并行常与其他并行方式（如张量并行、流水并行）结合使用，以充分利用计算资源并提升训练效率。数据并行训练模式的示意图如\autoref{fig:data_parallel}所示。
+Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的规约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
 
-\begin{figure}[!htbp]   
+PairWise算法是一种常用的AlltoAll算子实现方法，它通过在每个通信步骤中让节点与另一个节点交换数据块，逐步完成所有节点间的数据交换。PairWise算法的优点在于其简单性和易于实现，但在大规模集群中可能会导致通信冲突和带宽浪费，同时对于无法建立直接通信链路的节点对，需要中间节点进行转发。为了提高AlltoAll的性能，现有研究提出了多种优化算法，如基于拓扑感知的调度算法和分层通信算法等，这些算法通过优化数据传输路径和减少通信冲突，提高了AlltoAll的效率。
+
+\subsection{时间扩展网络TEN}
+
+时间扩展网络（Time-expanded Network，TEN）是一种用于表示动态网络的静态网络模型，通过在时间维度上扩展原始网络来捕捉网络中随时间变化的动态特性。在TEN中，原始网络中的每个节点在不同时间点上被复制为多个时间节点，这些时间节点之间通过有向边连接，表示节点在不同时间点上的状态变化。TEN可以用于分析和优化动态网络中的各种问题，如最短路径、最大流等。Won等人\cite{won2024tacos}在2023年将TEN引入集合通信领域。TEN可以用一组包含时序的有向无环图表示集合通信算子在系统物理拓扑上的具体通信过程，也就是具体的集合通信算法。
+
+对于一个给定的物理拓扑，时间扩展网络TEN的构建方式是将其沿着时间维度进行展开，用不同时间下节点间的有向边表示时间序列中可用的节点间传输链路，\autoref{fig:ten}给出了一个简单物理拓扑转换为TEN的示例。
+
+\begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.5\linewidth]{figure/chapter3/DP.pdf}
-    \caption{\label{fig:data_parallel}数据并行训练模式示意图}
+    \includegraphics[width=0.6\linewidth]{figure/chapter2/TEN.pdf}
+    \caption{\label{fig:ten}示例物理拓扑与对应时间扩展网络TEN示意图\cite{won2024tacos}}
 \end{figure}
 
-\subsection{张量并行方法：Megatron}\label{subsection3-2-3}
+我们可以在TEN上直观地表示出集合通信算法的执行过程。\autoref{fig:ten-ring-allgather}给出了Ring AllGather算法的TEN表示。在该TEN中，每个节点在不同时间点上被复制为多个时间节点，表示节点在不同时间点上的状态变化。节点间的有向边表示节点间的数据传输过程，边上的色块表示传输的数据块，图中可以清晰地看到Ring AllGather算法中数据块的传输顺序和环状的传输路径。
 
-张量并行是一种通过在多个计算节点间划分神经网络模型的权重矩阵来实现分布式训练的方法。Megatron-LM（以下简称Megatron）\cite{shoeybi2019megatron}是NVIDIA提出的一种高效的张量并行训练框架，专门用于大规模Transformer模型的训练。Megatron-LM将Transformer模型的权重矩阵在行或列维度上进行划分，通过AllReduce操作确保划分前后的数学等效性，从而实现了高效的分布式训练。
-Megatron基于两种形式的矩阵分块乘法实现张量并行：列并行（Column Parallel，CP）与行并行（Row Parallel，RP）。列并行将权重矩阵按列划分，每个节点持有权重矩阵的一部分列，并在本地计算输入矩阵与该部分列的乘积，随后通过AllGather操作将各节点的计算结果进行汇总，得到完整的输出矩阵。行并行则将权重矩阵按行划分，同时将输入矩阵对应地按列切分，每个节点持有权重矩阵的一部分行，并在本地计算该部分行与输入矩阵对应部分列的乘积。随后通过AllReduce操作将各节点的计算结果进行汇总，得到完整的输出矩阵。
-两种矩阵分块乘法的示意图分别如图\autoref{fig:figure/chapter3/column_parallel}和图\autoref{fig:figure/chapter3/row_parallel}所示。
-\begin{figure}[!h]
+\begin{figure}[!htbp]
     \centering
-    \subfigure[列并行\label{fig:figure/chapter3/column_parallel}]{
-        \includegraphics[width=0.45\linewidth]{figure/chapter3/column_parallel.pdf}
-    }
-    \subfigure[行并行\label{fig:figure/chapter3/row_parallel}]{
-        \includegraphics[width=0.45\linewidth]{figure/chapter3/row_parallel.pdf}
-    }
-    \caption{矩阵分块乘法原理示意图}
-    \label{fig:Transformer}
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/TEN-Ring-AllGather.pdf}
+    \caption{\label{fig:ten-ring-allgather}Ring AllGather算法的TEN表示\cite{won2024tacos}}
 \end{figure}
 
-以2节点张量并行组为例，针对MLP层，Megatron提出了如\autoref{fig:TP-MLP}所示的TP部署方法。
-\begin{figure}[!htbp]   
+\subsection{基于TEN的集合通信算法合成器：TACOS}
+
+Won等人\cite{won2024tacos}提出了TACOS，其可以在无需人工指导或干预的情况下，自主合成网络拓扑上的集合通信算法。TACOS使用TEN表示将集合通信算法合成问题建模为数据块与链路的匹配问题，采用基于贪婪的启发式匹配方法，在约束下最大化链路与数据块的匹配数量。
+
+TACOS的求解原理较为简单，输入包含转换为TEN的物理拓扑，以及目标集合通信算子，其中目标集合通信算子通过初始前置条件和最终后置条件描述。前置条件表示当前时刻节点上目前有哪些可用的数据块，后置条件表示当前时刻节点上还需要收集哪些数据块。整个求解过程迭代运行，不断增加时间t，在每个时刻基于贪婪的启发方法匹配链路与后置条件所需的数据块，直到所有节点的后置条件完全满足。\autoref{fig:tacos}给出了示例非对称四节点物理拓扑上 AllGather算子的端到端合成过程。
+
+\begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.6\linewidth]{figure/chapter3/TP-MLP.pdf}
-    \caption{\label{fig:TP-MLP}Megatron张量并行MLP层部署示意图\cite{shoeybi2019megatron}}
-\end{figure}
-MLP层的第一部分包括一个线性层和一个激活层，分别进行通用矩阵乘法计算和GeLU激活函数的非线性计算，其计算公式为
-$$
-Y=\text{GeLU}\left( XA \right) ,
-$$
-对首个线性层执行列并行，即将权重矩阵按列分块，有
-$$
-A=\left[ A_1,\,\,A_2 \right] ,
-$$
-这一并行策略可以让GeLU独立作用在每个分块矩阵乘法的输出上，因此，以上列并行模块计算过程可表示为
-$$
-\left[ Y_1,\,\,Y_2 \right] =\left[ \text{GeLU}\left( XA_1 \right) ,\,\,\text{GeLU}\left( XA_1 \right) \right] ,
-$$
-列并行能够消除同步点，各分块矩阵乘法的计算结果可以异步地开始GeLU计算。
-
-MLP的第二部分为一个线性层和一个Dropout层，分别进行矩阵乘法计算和Dropout非线性计算，其计算公式为
-$$
-Z=\text{Dropout}\left( YB \right) ,
-$$
-对第二部分线性层执行行并行，即将权重矩阵按行分块，相应的，输入矩阵按列分块，有
-$$
-B=\left[ \begin{array}{c}
-	B_1\\
-	B_2\\
-\end{array} \right] ,\,\,Y=\left[ Y_1,\,\,Y_2 \right] ,
-$$
-以上行并行模块计算过程可表示为
-$$
-Z=\text{Dropout}\left( Y_1B_1+Y_2B_2 \right) ,
-$$
-由于Dropout为非线性函数，不满足可加性，因此，在进入Dropout计算之前需要一次同步操作，通过AllReduce通信聚合分块矩阵。而这种将行并行接续在列并行之后的部署组合，可以省去列并行模块后的AllGather通信，从而降低了通信开销。
-
-类似地，以2节点张量并行组为例，针对Attention层，Megatron提出了如\autoref{fig:TP-Attention}所示的TP部署方法。
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=0.6\linewidth]{figure/chapter3/TP-Attention.pdf}
-    \caption{\label{fig:TP-Attention}Megatron张量并行Attention层部署示意图\cite{shoeybi2019megatron}}
+    \includegraphics[width=1\linewidth]{figure/chapter2/TACOS.pdf}
+    \caption{\label{fig:tacos}示例非对称四节点物理拓扑上 AllGather算子的TACOS合成过程\cite{won2024tacos}}
 \end{figure}
 
-在Attention层中，Megatron利用多头注意力机制MHA所固有的并行性，将与键（Key, K）、查询（Query, Q）和值（Value, V）相关的矩阵乘法采用列并行的方式执行，使得每个注意力头对应的矩阵乘法均可在单个节点上独立完成。这种划分方式能够将每个注意力头的参数与计算任务分布到不同节点上执行，在自注意力后的输出线性层中的矩阵乘法则采用行并行的方式执行，它能够直接接收并行注意力层的输出，无需在节点之间进行通信。
-这种方法在MLP层与Attention层中均实现了两个矩阵乘法的融合，有效消除了中间的同步点，从而提升了整体的可扩展性。最终，在一个完整的Transformer层中，所有矩阵乘法的计算仅需在前向传播中执行两次AllReduce操作，在反向传播中执行两次AllReduce操作，分别由\autoref{fig:TP-MLP}和\autoref{fig:TP-Attention}中的$f$运算符和$g$运算符表示。完整的Transformer层TP示意图如\autoref {fig:TP-Transformer-layer}所示。
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=0.6\linewidth]{figure/chapter3/TP-comm.pdf}
-    \caption{\label{fig:TP-Transformer-layer}Megatron张量并行Transformer层部署示意图\cite{shoeybi2019megatron}}
-\end{figure}
+TACOS可以高效地合成直连拓扑上的Allgather算子，并且适用于非对称异构的网络环境。然而TACOS算法存在两个严重的局限性：不直接支持交换机拓扑，尤其是多层交换机拓扑；不支持AlltoAll算子的合成。
 
-在Transformer语言模型中，嵌入层的维度为隐藏层大小H与词汇表大小V的乘积。由于现代语言模型的词表规模通常在数万个词元量级，因此，Megatron也对嵌入层进行了并行化。然而，在Transformer语言模型中，输出嵌入层与输入嵌入层共享权重，这就要求同时对两者进行修改。
-这里采用类似列并行的方法，将输入嵌入层的权重矩阵沿着词汇表维度进行划分，由于每个分区仅包含部分嵌入表，因此在输入嵌入层之后需要一次AllReduce操作。对于输出嵌入层，则直接采用执行并行的矩阵乘法运算得到分块的logits输出后，再通过一次AllGather操作，将结果送入交叉熵损失函数计算得到loss的方法。
+\section{交换机拓扑感知的通用集合通信算法合成器}
+\subsection{方法概述}
 
+本章提出了一种新的集合通信算法合成方法，我们将其称为交换机拓扑感知的通用集合通信算法合成器（Fabric-Topology-Aware General Collective Algorithm Synthesizer，FTACAS）。\autoref{fig:Fig2-5}为FTACAS的框架图，FTACAS主要由以下四个模块组成：
+\begin{itemize}
+    \item 拓扑建模模块（Topology）：该模块负责将物理拓扑抽象为包含设备节点和交换机节点的物理有向图，支持多级交换机、并行链路以及交换机转发模式（Cut-Through模式和Store-and-Forward模式）选择。
+    \item 算子构建模块（Collective）：该模块负责定义目标集合通信算子的前置条件和后置条件，支持AllGather与AlltoAll算子，同时支持数据块的预先分块设置以探索更细粒度的调度实现。
+    \item 时间扩展网络模块（TEN）：根据集合通信算子的数据量，基于α–β模型计算链路传输时间，在物理图基础上引入时间维度，预计算并缓存拓扑关键信息（节点间传输时间矩阵与直达设备邻接表），并根据传输时间对初始后置条件进行排序。在合成器执行过程中维护链路/交换机端口资源占用状态，实现路由可行性检查、相关资源预留以及到达事件记录的功能。
+    \item 合成器模块（Synthesizer）：合成集合通信算法的主要模块，采用事件驱动的循环模式，在触发数据块到达事件的时间步执行基于贪心思想的链路-数据块匹配策略，直到所有节点的后置条件完全满足。该模块针对AllGather和AlltoAll算子分别设计了不同的匹配策略以高效合成高性能集合通信算法。
+\end{itemize}
 
+为保证后续算法描述与公式推导的一致性，本节统一给出 FTACAS 中涉及的主要符号约定，如 \autoref{tab:ftacas-notation} 所示。在本章描述中，默认链路带宽 $B$、数据块大小 $S$与传输时间 $\Delta(\cdot)$ 采用一致的单位体系。
 
-\subsection{TP/DP混合并行模式}\label{subsection3-2-4}
-
-TP/DP混合并行模式结合了数据并行和张量并行的优势，以应对大规模模型训练中的计算和内存需求。在这种模式下，模型首先通过张量并行在多个节点间划分权重矩阵，然后在每个节点上使用数据并行处理不同的数据批次。这样，每个节点持有模型的一个子集，并在本地数据上进行训练，同时通过AllReduce操作同步参数和梯度。该模式下，所有节点被组织成多个数据并行组和张量并行组，每个节点位于一个数据并行组和一个张量并行组中。在实际系统中部署时，考虑到不同并行模式的通信开销，一般将同一个张量并行组内的节点放在单个服务器内，以利用机内GPU间的高速链路降低通信开销，数据并行组内的节点则进行跨机通信。\autoref{fig:DP-TP}给出了512 GPU集群的8×64 TP/DP混合并行模式的示意图。在该图中，共有64个服务器，每个服务器内的8个GPU构成一个张量并行组，每个服务器内相同编号的GPU构成一个数据并行组，TP的维度为8，DP的维度为64，和一个分组内的GPU数量相对应。
-
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=0.6\linewidth]{figure/chapter3/TP-DP.pdf}
-    \caption{\label{fig:DP-TP}TP/DP混合并行模式示意图}
-\end{figure}
-
-\section{基于算子拆分调度的计算通信并行方法}
-本节针对Transformer模型和Megatron张量并行方法，基于算子拆分调度的方式提出了一种计算通信并行优化方法。我们考虑如\autoref{fig:transformer_main}所示的核心Transformer模型结构，对嵌入层和Transformer层分别设计了计算通信并行方案。
-针对TP/DP混合并行模式，我们结合本章提出的TP计算通信并行方法和现有的DP计算通信并行方法，使用Pytorch提供的接口实现了高效的TP/DP混合并行框架。
-本节内容安排如下：3.3.1节介绍嵌入层计算通信并行方法；3.3.2节介绍Transformer层计算通信并行方法；3.3.3节介绍TP/DP计算通信并行方案；3.3.4节对所提出的计算通信并行方案进行了理论评估。
-
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=0.2\linewidth]{figure/chapter3/transformer_main.pdf}
-    \caption{\label{fig:transformer_main}Transformer模型核心结构示意图}
-\end{figure}
-
-\subsection{嵌入层计算通信并行方法}
-我们对模型嵌入层的执行流程进行了优化设计。在Megatron的基准实现中，嵌入层采用串行执行模式，即依次执行词嵌入（Word Embedding）、全局同步AllReduce通信、位置嵌入（Position Embedding）、相加（Add）与随机失活（Dropout）操作。该模式下计算单元在等待通信完成期间处于空闲状态，造成了计算资源的浪费，由此我们提出了改进的并行流方案：将原有串行流程拆分为计算流（Computation Stream）和通信流（Communication Stream）。
-改进方案的核心思想是在计算流中执行完词嵌入后在通信流中发起AllReduce通信操作，同时在计算流中并行地计算位置嵌入。这种设计使得耗时的通信操作与位置嵌入的计算实现了并行，从而有效地隐藏了通信开销。
-\autoref{fig:embedding_method}展示了嵌入层基线方案和优化后计算通信并行方案的执行流程。
-
-% \begin{figure}[!htbp]   
-%     \centering
-%     \subfigure[基线方案\label{fig:figure/chapter3/column_parallel}]{
-%         \includegraphics[width=0.15\linewidth]{figure/chapter3/embedding_base.pdf}
-%     }
-%     \subfigure[计算通信并行方案\label{fig:figure/chapter3/row_parallel}]{
-%         \includegraphics[width=0.3\linewidth]{figure/chapter3/embedding_optim.pdf}
-%     }
-%     \caption{嵌入层基线方案和计算通信并行方案的执行流程示意图}
-%     \label{fig:embedding_method}
-% \end{figure}
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=0.5\linewidth]{figure/chapter3/embedding_method.pdf}
-    \caption{\label{fig:embedding_method}嵌入层基线方案和计算通信并行方案的执行流程示意图}
-\end{figure}
-
-
-
-\subsection{Transformer层计算通信并行方法}
-
-Transformer层基线方案和优化后计算通信并行方案的执行流程如\autoref{fig:transformer_method}所示。
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=1\linewidth]{figure/chapter3/transformer_method.pdf}
-    \caption{\label{fig:transformer_method}Transformer层基线方案和计算通信并行方案的执行流程示意图}
-\end{figure}
-
-% \begin{figure}[!htbp]   
-%     \centering
-%     \subfigure[基线方案\label{fig:transformer_baseline}]{
-%         \includegraphics[width=0.4\linewidth]{figure/chapter3/transformer_baseline.pdf}
-%     }
-%     \subfigure[计算通信并行方案\label{fig:transformer_optim}]{
-%         \includegraphics[width=0.55\linewidth]{figure/chapter3/transformer_optim.pdf}
-%     }
-%     \caption{Transformer层基线方案和计算通信并行方案的执行流程示意图}
-%     \label{fig:transformer_method}
-% \end{figure}
-
-% \begin{figure}[!htbp]   
-%     \centering
-%     \includegraphics[width=0.6\linewidth]{figure/chapter3/transformer_baseline.pdf}
-%     \caption{\label{fig:transformer_baseline}Transformer层基线方案执行流程示意图}
-% \end{figure}
-
-% \begin{figure}[!htbp]   
-%     \centering
-%     \includegraphics[width=0.8\linewidth]{figure/chapter3/transformer_optim.pdf}
-%     \caption{\label{fig:transformer_optim}Transformer层计算通信并行方案执行流程示意图}
-% \end{figure}
-
-\autoref{fig:transformer_method}左侧子图所示的基线方案采用Megatron提出的列并行与行并行交替进行的经典张量并行方法。Transformer包含Attention层和MLP层，采用列并行与行并行两种计算模式。在前向传播中，输入依次经过多头注意力（MHA）或GeLU激活函数、矩阵乘法（MatMul）、非线性变换（Non-Linear）、矩阵乘法，最终通过AllReduce进行梯度同步。反向传播过程中，误差梯度经由梯度矩阵乘法、非线性变换的梯度、梯度矩阵乘法，并通过AllReduce实现梯度的全局聚合。该方案在Attention层和MLP层后均需进行同步全局通信（AllReduce），由于通信操作与计算串行执行，设备在通信期间处于等待状态，造成了计算资源的空闲与延迟。
-
-\autoref{fig:transformer_method}右侧子图展示了Transformer层的计算和通信并行优化方案，该方案对前向传播和反向传播进行了针对性的优化设计。
-
-在前向传播阶段，将原有的的AllReduce操作拆解为ReduceScatter和AllGather操作，并将对应的行并行和列并行矩阵计算相应地进行拆分。行并行的计算拆分后可以和ReduceScatter通信并行，列并行的计算拆分后可以和AllGather通信并行，从而实现计算与通信的并行。\autoref{fig:transformer_optim_forward_detail}展示了Transformer层前向传播部分基线方案与对应计算通信并行优化方案的具体实现细节。
-
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=1\linewidth]{figure/chapter3/transformer_optim_forward_detail.pdf}
-    \caption{\label{fig:transformer_optim_forward_detail}Transformer层前向传播基线方案与计算通信并行方案示意图}
-\end{figure}
-
-在反向传播过程中，每一层的梯度计算由两部分组成，分别为损失函数关于输入的梯度（Input Gradient）计算和损失函数关于该层模型参数的梯度（Weight Gradient），在同一层中这两部分计算是互不依赖的，仅依赖于上一层的输入梯度。前向与反向的模型计算图如\autoref{fig:transformer_computation_graph}所示。因此，我们将反向传播中的梯度计算进行了上述拆分，从而进一步优化了计算与通信的并行性。
-
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter3/transformer_computation_graph.pdf}
-    \caption{\label{fig:transformer_computation_graph}前向传播与反向传播计算图}
-\end{figure}
-
-在反向传播阶段，将两个并行层之间用于梯度同步的AllReduce操作同样拆解为ReduceScatter和AllGather操作，并将它们分别与对应的梯度计算过程并行执行：ReduceScatter与输入梯度计算并行，AllGather与权重梯度（Weight Gradient）计算并行。这样在保留梯度同步功能的同时最大化地隐藏了通信开销，从而提高了整体训练效率。
-
-\subsection{TP/DP计算通信并行方案}
-
-TP/DP混合并行是分布式训练中常用的设置，我们针对TP/DP混合并行模式提出了一种高效的计算通信并行方案。该方案结合了前述的TP计算通信并行方法和现有的DP计算通信并行方法，实现了TP/DP混合并行模式下的高效训练。针对DP组间的通信，采用Goyal等人\cite{goyal2017accurate}提出的方法，利用梯度桶（Gradient Bucket）机制将模型梯度按层划分为多个子集，并在计算每个子集的梯度时，异步地发起对应的AllReduce通信操作，从而实现模型反向传播与DP组间通信的并行，该方法可以通过通过Pytorch的DDP（DistributedDataParallel）接口便捷地实现。TP/DP混合并行模式下，仅TP计算通信并行的计算通信流时间线和TP与DP均计算通信并行的计算通信流时间线如\autoref{fig:TP-DP_Overlap}所示。
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=1\linewidth]{figure/chapter3/TP-DP_Overlap.pdf}
-    \caption{\label{fig:TP-DP_Overlap}TP/DP混合并行模式下的计算通信并行时间线示意图}
-\end{figure}
-
-\subsection{计算通信并行方案理论评估}
-本节对提出的计算通信并行方案进行了理论评估，其中相关参数定义如\autoref{tab:param_def}所示。
-\begin{table}[htbp]
-  \centering
-  \caption{参数及参数含义}
-  \label{tab:param_def}
-
-  \makebox[\textwidth][c]{%
-    \begin{tabular}{>{\centering\arraybackslash}p{0.2\textwidth}
-                    >{\centering\arraybackslash}p{0.4\textwidth}}
-      \toprule
-      参数 & 参数含义 \\
-      \midrule
-      $B$ & 总批次（Global batch size） \\
-      $S$ & 序列长度（Sequence Length） \\
-      $H$ & 隐藏维度（Hidden Size） \\
-      $V$ & 词汇表长度（Vocabulary Size） \\
-      $M$ & MLP 层中间隐藏维度 \\
-      $N_{\mathrm{TP}}$ & 张量并行（TP）组节点数 \\
-      $N_{\mathrm{DP}}$ & 数据并行（DP）组节点数 \\
-      $B_w$ & 物理链路带宽 \\
-      \bottomrule
-    \end{tabular}%
-  }
+\begin{table}[!htbp]
+\centering
+\caption{FTACAS符号约定}
+\label{tab:ftacas-notation}
+\begin{tabular}{p{0.26\linewidth}p{0.66\linewidth}}
+\hline
+符号 & 含义 \\
+\hline
+$G=(V,E)$ & 物理拓扑有向图 \\
+$V_D,\;V_S$ & 设备节点集合与交换机节点集合，$V=V_D\cup V_S$ \\
+$N$ & 设备数，$N=|V_D|$ \\
+$C$ & 每设备数据块划分数（用于探索更细粒度调度） \\
+$S$ & 数据块（chunk）大小 \\
+$op$ & 集合通信算子类型（AllGather或AlltoAll） \\
+$e=(u\rightarrow v)$ & 节点u到节点v的物理链路\\
+$B_{u\rightarrow v}$ & 节点u到节点v的链路带宽\\
+$\alpha_{u\rightarrow v}$ & 节点u到节点v的静态时延 \\
+$\mathrm{cap}_{in/out}(s)$ & 交换机 $s$ 入/出方向端口并发容量 \\
+$\mathrm{mode}(s)$ & 交换机 $s$ 转发模式（Cut-Through 或 Store-and-Forward） \\
+$\Delta_{u\rightarrow v}(S)$ & 大小为 $S$ 的 chunk 在链路 $u\rightarrow v$ 上的传输时间 \\
+$\boldsymbol{T}$ & 传输时间矩阵，$T[u][v]$ 为设备 $u\rightarrow v$ 的传输时间 \\
+$\mathcal{N}(u)$ & 直达设备邻接表（仅允许经交换机中继，不经过中间设备） \\
+$\mathcal{P}$ & 前置条件集合，$\mathcal{P}(c,d)=1$ 表示设备 $d$ 拥有 chunk $c$ \\
+$\mathcal{Q}$ & 后置条件集合，$(c,d)\in\mathcal{Q}$ 表示设备 $d$ 需要 chunk $c$ \\
+$\pi(c,d)$ & 后置条件 $(c,d)$ 的优先级估计（由传输时间给出） \\
+$\mathrm{EQ}$ & 事件队列（存储未来到达事件的时间戳） \\
+$\mathcal{S}$ & 合成得到的集合通信调度（传输与路由预留的集合） \\
+$T_{coll}$ & 集合通信完成时间（makespan） \\
+$r_e(t;\mathcal{S})$ & 时刻 $t$ 调度 $\mathcal{S}$ 是否占用链路 $e$（取值为0或1） \\
+$r^{in}_s(t;\mathcal{S})$ & 时刻 $t$ 调度 $\mathcal{S}$ 在交换机 $s$ 入向端口的占用（并发数） \\
+$r^{out}_s(t;\mathcal{S})$ & 时刻 $t$ 调度 $\mathcal{S}$ 在交换机 $s$ 出向端口的占用（并发数） \\
+$t$ & 时间变量 \\
+\hline
+\end{tabular}
 \end{table}
 
-嵌入层中，AllReduce通信的数据量为
-$
-V_{\mathrm{AR}}^{\mathrm{emb}}
-= \frac{B \times S \times H}{N_{\mathrm{DP}}}.
-$
-采用Ring AllReduce算法时，其通信时间为
-\begin{equation}
-  T_{\mathrm{AR}}^{\mathrm{emb}}
-  = \frac{B \times S \times H}{N_{\mathrm{DP}} \, B_w}
-    \times \frac{2\left(N_{\mathrm{TP}} - 1\right)}{N_{\mathrm{TP}}}.
-\end{equation}
+在上述符号约定下，FTACAS 的目标是在满足链路容量与交换机端口并发约束的前提下，
+构造一组集合通信调度 $\mathcal{S}$，
+使得所有后置条件 $(c,d)\in\mathcal{Q}$ 最终均被满足，
+并尽可能最小化集合通信完成时间 $T_{coll}$。
+该问题可形式化为如下优化问题：
 
-设 $T_{\mathrm{PE}}$ 为位置嵌入（Positional Embedding）操作时间，则嵌入层中可被计算掩盖的通信时间为
 \begin{equation}
-  T_{\mathrm{lap}}^{\mathrm{emb}}
-  = \min\!\left(
-      \frac{B \times S \times H}{N_{\mathrm{DP}} \, B_w}
-      \times \frac{2\left(N_{\mathrm{TP}} - 1\right)}{N_{\mathrm{TP}}},
-      \; T_{\mathrm{PE}}
-    \right).
-\end{equation}
-
-\medskip
-
-对于Transformer Block，在模型前向传播阶段，Attention层的行并行计算可与ReduceScatter通信并行，其数据量为
-$
-V_{\mathrm{RP}}^{\mathrm{att}}
-= \frac{B \times S \times H}{N_{\mathrm{DP}} \, N_{\mathrm{TP}}}.
-$
-设$T_{\mathrm{ARP}}$为Attention层单步行并行矩阵计算时间;
-MLP层的列并行计算可与AllGather通信并行，其数据量为
-$
-V_{\mathrm{CP}}^{\mathrm{mlp}}
-= \frac{B \times S \times M H}{N_{\mathrm{DP}} \, N_{\mathrm{TP}}}.
-$
-$T_{\mathrm{MCP}}$为MLP层单步列并行矩阵计算时间。
-同理，设$T_{\mathrm{MRP}}$为MLP层单步行并行矩阵计算时间，$T_{\mathrm{ACP}}$为Attention层单步列并行矩阵计算时间。
-综上，一个Transformer Block前向传播中计算通信可并行执行的时间为
-\begin{equation}
-\begin{aligned}
-T_{\mathrm{lap}}^{\mathrm{fwd}}
-= (N_{\mathrm{TP}} - 1)\!\Big[
-& \min\!\left(
-\frac{3B S H}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
-\, T_{\mathrm{ACP}}
-\right)
-+ \min\!\left(
-\frac{B S H}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
-\, T_{\mathrm{ARP}}
-\right) \\
-& + \min\!\left(
-\frac{B S M H}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
-\, T_{\mathrm{MCP}}
-\right)
-+ \min\!\left(
-\frac{B S H}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
-\, T_{\mathrm{MRP}}
-\right)
-\Big].
-\end{aligned}
-\end{equation}
-
-在模型的反向传播阶段，Transformer Block列并行输入梯度的计算与ReduceScatter通信并行执行，而列并行权重梯度的计算与 AllGather 通信并行执行。
-对于 Attention 层，其列并行的输入梯度与权重梯度的通信量分别为
-$V_{\mathrm{input}}^{\mathrm{att}}
-= \frac{3BSH}{N_{\mathrm{DP}}N_{\mathrm{TP}}}$ 与
-$V_{\mathrm{weight}}^{\mathrm{att}}
-= \frac{3BH^2}{N_{\mathrm{DP}}N_{\mathrm{TP}}}$；
-对于 MLP 层，其列并行的输入梯度与权重梯度的通信量分别为
-$V_{\mathrm{input}}^{\mathrm{mlp}}
-= \frac{BSMH}{N_{\mathrm{DP}}N_{\mathrm{TP}}}$ 与
-$V_{\mathrm{weight}}^{\mathrm{mlp}}
-= \frac{BMH^2}{N_{\mathrm{DP}}N_{\mathrm{TP}}}$。
-设 $T_{\mathrm{AI}}$ 与 $T_{\mathrm{AW}}$ 分别表示 Attention 层单步输入梯度与权重梯度的计算时间，
-$T_{\mathrm{MI}}$ 与 $T_{\mathrm{MW}}$ 分别表示 MLP 层单步输入梯度与权重梯度的计算时间，
-则在一个 Transformer Block中，反向传播阶段计算与通信能够并行执行的时间为
-\begin{equation}
-\begin{aligned}
-T_{\mathrm{lap}}^{\mathrm{bwd}}
-= (N_{\mathrm{TP}} - 1)\!\Big[
-& \min\!\left(
-\frac{3BSH}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
-\, T_{\mathrm{AI}}
-\right)
-+ \min\!\left(
-\frac{3BH^2}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
-\, T_{\mathrm{AW}}
-\right) \\
-& + \min\!\left(
-\frac{BSMH}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
-\, T_{\mathrm{MI}}
-\right)
-+ \min\!\left(
-\frac{BMH^2}{N_{\mathrm{DP}} N_{\mathrm{TP}} B_w}\frac{2}{N_{\mathrm{TP}}},
-\, T_{\mathrm{MW}}
-\right)
-\Big].
-\end{aligned}
+\label{eq:ftacas-objective}
+\begin{matrix}
+& \underset{\mathcal{S}}{\min}\;\; T_{coll} \\
+\mathrm{s.t.}\;\; &
+\begin{array}{c}
+\mathcal{P}(c,d;T_{coll}) = 1,
+\quad \forall (c,d)\in \mathcal{Q}, \\[0.3em]
+r_e(t;\mathcal{S}) \le 1,
+\quad \forall e\in E,\ \forall t\in[0,T_{coll}], \\[0.3em]
+r^{in}_s(t;\mathcal{S}) \le \mathrm{cap}_{in}(s),
+\quad \forall s\in V_S,\ \forall t\in[0,T_{coll}], \\[0.3em]
+r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
+\quad \forall s\in V_S,\ \forall t\in[0,T_{coll}].
+\end{array}
+\end{matrix}
 \end{equation}
 
 
+\autoref{eq:ftacas-objective} 所描述的问题本质上属于带资源约束的调度与路由组合优化问题，在一般交换机拓扑结构下难以直接获得全局最优解。因此，FTACAS 采用可扩展的事件驱动贪心合成策略，在可控的计算开销下生成高质量的集合通信调度方案。
+
+\autoref{Algorithm-FTACAS-Main}总结了FTACAS的执行流程，其中\autoref{Algorithm-FTACAS-AllGather}和\autoref{Algorithm-FTACAS-AllToAll}在2.3.5节进行详细介绍。
 
 
 
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=\linewidth]{figure/chapter2/FTACAS.pdf}
+    \caption{\label{fig:Fig2-5}FTACAS框架图}
+\end{figure}
+
+
+
+\begin{center}
+\begin{algorithm}[!htbp]
+    % \footnotesize
+    % \small
+    \caption{FTACAS主流程}
+    \label{Algorithm-FTACAS-Main}
+    \begin{algorithmic}[1]
+        \REQUIRE{物理拓扑$G=(V,E)$（设备集合$V_D$，交换机集合$V_S$，链路带宽$B_e$，链路时延$\alpha_e$，交换机端口容量$\mathrm{cap}_{in/out}$，转发模式$\mathrm{mode}$）；集合通信算子类型$op\in\{\mathrm{AllGather},\mathrm{AllToAll}\}$；设备数$N$；每设备数据块划分数$C$；数据块大小$S$}
+        \ENSURE{集合通信调度$\mathcal{S}$；集合通信完成时间$T_{coll}$}
+
+        \STATE \textbf{算子条件初始化}：根据$op$生成前置条件集合$\mathcal{P}$与后置条件集合$\mathcal{Q}$；
+
+        \STATE \textbf{TEN构建与链路传输时间计算}：对每条物理链路$e=(u\rightarrow v)\in E$，基于$\alpha$--$\beta$模型计算传输时间：
+        \begin{align*}
+            &\Delta_{u\rightarrow v}(S)=\alpha_{u\rightarrow v}+\frac{S}{B_{u\rightarrow v}},\\
+            &\Delta_{u\rightarrow s\rightarrow v}^{CT}(S)=\max\left(\Delta_{u\rightarrow s}(S),\,\Delta_{s\rightarrow v}(S)\right)\quad(\text{Cut-Through}).
+        \end{align*}
+
+
+        \STATE \textbf{节点间最短传输路径搜索}：以$\Delta(\cdot)$为边代价，对每个源设备$u\in V_D$执行最短路径搜索，得到传输时间$T[u][\cdot]$；
+        \STATE \textbf{拓扑关键信息计算与缓存}：构建并缓存传输时间矩阵$\boldsymbol{T}=\{T[u][v]\}$以及直达设备邻接表$\mathcal{N}(u)$；
+
+        \STATE 对每个未满足的后置条件$(c,d)\in\mathcal{Q}$计算初始优先级：
+        \begin{align*}
+            \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathcal{P}(c,s)=1} T[s][d] .
+        \end{align*}
+        \STATE 按优先级对后置条件集合$\mathcal{Q}$排序（AllGather：$\pi$升序；AllToAll：$\pi$降序）；
+        \STATE 初始化事件队列$\mathrm{EQ}\leftarrow \{0\}$，调度集合$\mathcal{S}\leftarrow \emptyset$；
+
+        \IF{$op=\mathrm{AllGather}$}
+            \STATE 调用\autoref{Algorithm-FTACAS-AllGather}执行AllGather事件驱动贪心合成，得到$\mathcal{S}$与$T_{coll}$；
+        \ELSE
+            \STATE 调用\autoref{Algorithm-FTACAS-AllToAll}执行AllToAll事件驱动贪心合成，得到$\mathcal{S}$与$T_{coll}$；
+        \ENDIF
+
+        \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
+    \end{algorithmic}
+\end{algorithm}
+\end{center}
+
+
+
+% \begin{center}
+% \begin{algorithm}[!htbp]
+%     \footnotesize
+%       \caption{FTACAS执行流程} 
+%       \label{Algorithm-FTACAS} 
+%         \begin{algorithmic}[1]
+%         \REQUIRE{物理拓扑$G=(V,E)$（设备集合$V_D$，交换机集合$V_S$，链路带宽$B_e$，链路时延$\alpha_e$，交换机端口容量$\mathrm{cap}_{in/out}$，转发模式$\mathrm{mode}$）；集合通信算子类型$op\in\{\mathrm{AllGather},\mathrm{AllToAll}\}$；设备数$N$；每设备数据块划分数$C$；数据块大小$S$}
+%         \ENSURE{集合通信调度$\mathcal{S}$；集合通信完成时间$T_{coll}$}
+
+%         \STATE \textbf{TEN构建与链路传输时间计算}：对每条物理链路$e=(u\rightarrow v)\in E$，基于$\alpha$--$\beta$模型计算传输时间：
+%         \begin{align*}
+%             &\Delta_{u\rightarrow v}(S)=\alpha_{u\rightarrow v}+\frac{S}{B_{u\rightarrow v}},\\
+%             &\Delta_{u\rightarrow s\rightarrow v}^{CT}(S)=\max\left(\Delta_{u\rightarrow s}(S),\,\Delta_{s\rightarrow v}(S)\right)\quad(\mathrm{CUT\_THROUGH}).
+%         \end{align*}
+
+%         \STATE \textbf{节点间最短传输路径搜索}：以$\Delta(\cdot)$为边代价，对每个源设备$u\in V_D$执行最短路径搜索，得到传输时间$D[u][\cdot]$；
+%         \STATE \textbf{算法数据预计算}：构建并缓存时间距离矩阵$\boldsymbol{D}=\{D[u][v]\}$以及直接设备邻居列表$\mathcal{N}(u)$；
+
+%         \STATE \textbf{算子条件初始化}：根据$op$生成前置条件集合$\mathcal{P}$与后置条件集合$\mathcal{Q}$，并初始化数据可达映射$\mathrm{chunkMap}$；
+%         \STATE 对每个未满足的后置条件$(c,d)\in\mathcal{Q}$计算初始优先级：
+%         \begin{align*}
+%             \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathrm{chunkMap}[c][s]=1} D[s][d] .
+%         \end{align*}
+%         \STATE 按优先级对未满足条件队列$\mathcal{L}$排序（AllGather：$\pi$升序；AllToAll：$\pi$降序），并对同优先级条件进行随机打散；
+
+%         \STATE 初始化事件队列$\mathrm{EQ}\leftarrow \{0\}$，调度集合$\mathcal{S}\leftarrow \emptyset$；
+%         \WHILE{$\mathcal{L}\neq \emptyset$}
+%             \STATE 从$\mathrm{EQ}$中取出当前时间步$t$；
+%             \STATE TEN推进至$t$并处理$t$时刻的所有到达事件；
+%             \FORALL{到达事件$(t,c,s\rightarrow d)$}
+%                 \IF{$op=\mathrm{AllGather}$ \AND $\mathrm{chunkMap}[c][d]=1$}
+%                     \STATE 执行Replacement策略，用$d$缺失且$s$已拥有的数据块替换$c$（若存在）；
+%                 \ENDIF
+%                 \STATE 更新$\mathrm{chunkMap}$，并从$\mathcal{L}$中移除已满足的后置条件；
+%                 \IF{$op=\mathrm{AllToAll}$}
+%                     \STATE 清除该数据块对应条件的调度标记；
+%                 \ENDIF
+%             \ENDFOR
+
+%             \STATE 初始化本时间步已调度条件集合$\mathrm{scheduled}\leftarrow \emptyset$；
+%             \FORALL{条件$(c,d)\in\mathcal{L}$（按当前优先级顺序）}
+%                 \IF{$op=\mathrm{AllToAll}$ \AND $(c,d)\in \mathrm{scheduled}$}
+%                     \STATE \textbf{continue}；
+%                 \ENDIF
+
+%                 \STATE \textbf{贪心源节点选择}：在满足$\mathrm{chunkMap}[c][s]=1$的设备中选择使$D[s][d]$最小的源节点$s$（同距随机）；
+%                 \IF{不存在可选源节点}
+%                     \STATE \textbf{continue}；
+%                 \ENDIF
+
+%                 \IF{$op=\mathrm{AllGather}$}
+%                     \STATE 设传输目标为$dst\leftarrow d$；
+%                 \ELSE
+%                     \STATE \textbf{AllToAll逐跳路由选择}：若$d\in\mathcal{N}(s)$且可用，则$dst\leftarrow d$；
+%                     \STATE 否则在$\mathcal{N}(s)$中选择满足$D[n][d] < D[s][d]$且可用的下一跳$n$；
+%                     \IF{未找到可行$dst$}
+%                         \STATE \textbf{continue}；
+%                     \ENDIF
+%                 \ENDIF
+
+%                 \STATE \textbf{资源检查与预留}：若TEN在$t$时刻可为$(s\rightarrow dst)$预留链路与交换机端口资源，则执行预留并加入调度$\mathcal{S}$；
+%                 \IF{预留成功}
+%                     \STATE 计算到达时间并加入事件队列：
+%                     \begin{align*}
+%                         t_{\mathrm{arr}} = t + D[s][dst],\quad \mathrm{EQ}\leftarrow \mathrm{EQ}\cup\{t_{\mathrm{arr}}\}.
+%                     \end{align*}
+%                     \IF{$op=\mathrm{AllToAll}$}
+%                         \STATE $\mathrm{scheduled}\leftarrow \mathrm{scheduled}\cup\{(c,d)\}$；
+%                         \STATE 若$dst\neq d$则更新$\pi(c,d)$并对$\mathcal{L}$进行局部重排；
+%                     \ENDIF
+%                 \ENDIF
+%             \ENDFOR
+%         \ENDWHILE
+
+%         \STATE $T_{coll}\leftarrow$ 最后一个到达事件对应的时间；
+%         \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
+%         \end{algorithmic}
+% \end{algorithm}
+% \end{center}
+
+
+
+\subsection{拓扑建模模块}
+\label{subsec:ftacas-topology}
+
+\noindent\textbf{1 多级交换机物理有向图建模}
+
+FTACAS将实际互连拓扑抽象为包含设备节点与交换机节点的物理有向图$G=(V,E)$。其中，设备集合$V_D$对应GPU/NPU等计算设备，交换机集合$V_S$对应NVSwitch、IB交换机等中继组件。每条有向边$e=(u\rightarrow v)\in E$表示一条物理单向链路，包含对应链路参数：带宽$B_{u\rightarrow v}$与静态时延$\alpha_{u\rightarrow v}$。
+
+该抽象允许链路在图中形成任意多级结构（例如设备$\rightarrow$交换机$\rightarrow$交换机$\rightarrow$设备），从而统一刻画多级交换机拓扑；同时也允许在同一对端点之间存在多条并行链路，以支持多条物理链路或多端口并发的建模需求。
+
+\noindent\textbf{2 交换机转发模式与端口并发约束}
+
+为刻画不同交换机的转发行为，FTACAS 为每个交换机节点$s\in V_S$ 定义转发模式$\mathrm{mode}(s)\in\{\mathrm{CT},\mathrm{SAF}\}$。
+% 需要指出的是，这里的转发模式是一种\emph{建模抽象}，
+% 并不严格对应具体硬件的内部实现。
+
+\begin{itemize}
+    \item \textbf{Cut-Through（CT）模式}：
+    交换机在接收数据流的同时即可向下游转发，端到端传输呈现流水化特征。在该模式下，路径上的多段链路可近似视为并行工作，端到端耗时主要由最慢链路及少量固定转发开销决定。该模型可用于刻画NVSwitch等片上高速交换结构，以及现代高性能IB/RoCE交换机的行为。
+
+    \item \textbf{Store-and-Forward（SAF）模式}：
+    交换机需在完整接收数据后再进行转发，各段链路的传输时延在路径上近似逐段累加。该模式用于刻画具有显著缓冲与分段转发特征的交换结构，或在保守建模假设下对网络转发行为进行上界估计。
+\end{itemize}
+
+同时，为限制交换机在同一时刻可并行处理的流数，FTACAS对每个交换机配置入向端口容量$\mathrm{cap}_{in}(s)$与出向端口容量$\mathrm{cap}_{out}(s)$，用于刻画交换机的并发处理能力。TEN在调度过程中将该约束转化为对时间区间重叠数量的限制（见\autoref{subsec:ftacas-ten}）。
+
+\noindent\textbf{3 直达设备邻接表$\mathcal{N}(u)$}
+
+为了保证调度的高效性和灵活性，FTACAS单次传输只调度不跨设备节点的路径，因此定义直达设备邻接关系：若存在从设备$u$到设备$v$的路径，且该路径内部节点均为交换机节点（即不经过中间设备作为路由器），则称$v$是$u$的直达设备邻居，记为$v\in\mathcal{N}(u)$。形式化定义为：
+\begin{align}
+\mathcal{N}(u)=\left\{v\in V_D\setminus\{u\}\;\middle|\;\exists p:u\rightsquigarrow v,\;\forall x\in p\setminus\{u,v\},\;x\in V_S\right\}. \label{eq:ftacas-neighbor-def}
+\end{align}
+直达设备邻接表$\mathcal{N}(\cdot)$在TEN构建阶段预计算并缓存，后续用于AllGather调度过程中的源设备选取与AllToAll调度过程中源设备下一跳设备的选取（见\autoref{subsec:ftacas-synth}）。
+
+
+
+\subsection{算子构建模块}
+\label{subsec:ftacas-collective}
+
+\noindent\textbf{1 算子统一表示：前置条件与后置条件}
+
+为统一刻画不同类型集合通信算子的合成需求，FTACAS采用条件集合的方式定义算子。记设备集合为$V_D$，设备数为$N=|V_D|$。对任意数据块（chunk）编号$c$与设备$d$，定义布尔型前置条件映射$\mathcal{P}(c,d)\in\{0,1\}$与后置条件集合$\mathcal{Q}$：
+\begin{itemize}
+    \item \textbf{前置条件（Precondition）} $\mathcal{P}(c,d)=1$：表示在当前时刻设备$d$已经拥有chunk $c$（该状态会在算法合成过程中动态更新）；
+    \item \textbf{后置条件（Postcondition）} $(c,d)\in\mathcal{Q}$：表示最终目标要求设备$d$必须拥有chunk $c$；当$\mathcal{P}(c,d)$被更新为$1$时，该后置条件被满足并从$\mathcal{Q}$中移除。
+\end{itemize}
+因此，集合通信算子的合成可表述为：在满足链路/交换机资源约束的前提下，构造一组传输调度$\mathcal{S}$，使得所有$(c,d)\in\mathcal{Q}$最终均满足$\mathcal{P}(c,d)=1$。
+
+\noindent\textbf{2 数据块划分}
+
+为探索更细粒度的通信并行性，FTACAS支持对每个设备节点的待通信数据预先进行分块。设每设备数据块划分数为$C$，则每个设备可视为拥有$C$个初始chunk。为便于描述，可将chunk索引映射为二元组$c=(u,k)$：其中$u\in V_D$为chunk来源设备，$k\in\{0,1,\dots,C-1\}$为分块编号。
+
+\noindent\textbf{3 AllGather算子条件构建}
+
+AllGather要求每个设备最终获得所有设备的数据块（即全量聚合分发），其算子语义示意图如\autoref{fig:allgather}所示。
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/AllGather.pdf}
+    \caption{\label{fig:allgather}AllGather算子语义示意图}
+\end{figure}
+
+在chunk划分数为$C$时，其条件构建如下：
+\begin{itemize}
+    \item \textbf{前置条件初始化：}对任意源设备$u\in V_D$及其本地chunk $(u,k)$，令$\mathcal{P}((u,k),u)=1$，且对任意$d\neq u$令$\mathcal{P}((u,k),d)=0$。
+    \item \textbf{后置条件集合：}对所有目的设备$d\in V_D$与所有源设备$u\in V_D$（$u$可等于$d$），以及$k\in\{0,\dots,C-1\}$，若$d$初始不拥有该chunk，则将条件加入：
+    \[
+        \mathcal{Q}\leftarrow \mathcal{Q}\cup \{((u,k),d)\}\quad\text{if}\quad \mathcal{P}((u,k),d)=0.
+    \]
+\end{itemize}
+由此可得AllGather的后置条件总数为$|\mathcal{Q}|=N\cdot (N-1)\cdot C$（不含每个设备本地已满足的后置条件）。
+
+\noindent\textbf{4 AllToAll算子条件构建}
+
+AllToAll要求每个设备将其数据按目的设备切分并分别发送给对应目的设备，其算子语义示意图如\autoref{fig:alltoall}所示。
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter2/AllToAll.pdf}
+    \caption{\label{fig:alltoall}AllToAll算子语义示意图}
+\end{figure}
+
+
+设每个源设备$u$对每个目的设备$d$生成$C$个chunk，记为$(u\rightarrow d,k)$，其中$k\in\{0,\dots,C-1\}$。则：
+\begin{itemize}
+    \item \textbf{前置条件初始化：}对任意$u,d,k$，令$\mathcal{P}((u\rightarrow d,k),u)=1$（该chunk初始位于设备$u$），并对任意$v\neq u$令$\mathcal{P}((u\rightarrow d,k),v)=0$。
+    \item \textbf{后置条件集合：}对任意$u,d,k$（通常$u$可等于$d$），目标是目的设备$d$最终拥有该chunk，因此加入：
+    \[
+        \mathcal{Q}\leftarrow \mathcal{Q}\cup \{((u\rightarrow d,k),d)\}\quad\text{if}\quad\mathcal{P}((u\rightarrow d,k),v)=0.
+    \]
+\end{itemize}
+因此AllToAll的后置条件规模为$|\mathcal{Q}|=N\cdot (N-1)\cdot C$（不包含初始已满足后置条件）。该算子的关键特征在于：每个chunk具有唯一最终目的设备。这也是FTACAS在AllToAll合成中采用“逐跳推进”策略并禁用Replacement机制的主要原因（见\autoref{subsec:ftacas-synth}）。
+
+% \noindent\textbf{5 条件优先级初始化接口}
+
+% 算子构建模块在生成$\mathcal{P}$与$\mathcal{Q}$后，将未满足后置条件交由TEN进行优先级初始化。对任意$(c,d)\in\mathcal{Q}$，根据传输时间矩阵$\boldsymbol{T}$计算初始优先级$\pi(c,d)$：
+% \begin{align}
+%     \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathcal{P}(c,s)=1} T[s][d], \label{eq:ftacas-priority-init-collective}
+% \end{align}
+% 并按算子类型选择不同的排序方式（AllGather：$\pi$升序；AllToAll：$\pi$降序），从而为后续事件驱动贪心匹配提供统一的“任务队列”入口。
+
+\subsection{时间扩展网络模块（TEN）}
+\label{subsec:ftacas-ten}
+
+\noindent\textbf{1 链路传输时间计算与Cut-Through流水化}
+
+TEN基于$\alpha$--$\beta$模型为物理链路计算chunk传输时间。对任意链路$e=(u\rightarrow v)$，传输时间为
+\begin{align}
+\Delta_{u\rightarrow v}(S)=\alpha_{u\rightarrow v}+\frac{S}{B_{u\rightarrow v}}. \label{eq:ftacas-alpha-beta}
+\end{align}
+
+当路径中存在Cut-Through交换机$s$时，TEN将设备$\rightarrow$交换机$\rightarrow$设备的两段传输视为流水化，端到端耗时近似为二者的最大值：
+\begin{align}
+\Delta_{u\rightarrow s\rightarrow v}^{CT}(S)=\max\left(\Delta_{u\rightarrow s}(S),\,\Delta_{s\rightarrow v}(S)\right). \label{eq:ftacas-ct}
+\end{align}
+该近似使得TEN能够同时兼顾链路序列化与交换机流水行为，并与工程实现中的资源预留逻辑保持一致。
+
+\noindent\textbf{2 传输时间矩阵$\boldsymbol{T}$的预计算}
+
+\label{subsec:ftacas-ten-shortest}
+TEN以$\Delta(\cdot)$作为边代价，对每个源设备$u\in V_D$执行Dijkstra最短路径搜索，得到到所有设备节点的传输时间$T[u][\cdot]$，从而构建传输时间矩阵$\boldsymbol{T}=\{T[u][v]\}$。该矩阵在合成阶段用于：
+\begin{itemize}
+    \item 评估后置条件的初始优先级$\pi(c,d)$；
+    \item 贪心匹配时选择传输时间最短的设备；
+    \item 计算调度动作的到达时间$t_{\mathrm{arr}}=t+T[s][dst]$。
+\end{itemize}
+
+\noindent\textbf{3 资源占用状态维护与路由预留}
+
+\label{subsec:ftacas-ten-reserve}
+TEN在合成过程中维护两类关键资源的时间占用状态：
+\begin{itemize}
+    \item \textbf{链路资源：}对每条物理有向链路维护其忙碌截止时间；当存在并行链路时，分别维护每条并行链路的忙碌时间，从而支持同向多流并发。
+    \item \textbf{交换机端口资源：}对每个交换机$s$分别维护入向与出向端口在时间轴上的占用区间集合，并约束任意时刻重叠区间数不超过$\mathrm{cap}_{in}(s)$与$\mathrm{cap}_{out}(s)$。
+\end{itemize}
+
+当合成器尝试在时间$t$调度一次传输$(s\rightarrow dst)$时，TEN会执行“路由可行性检查”，即验证该传输对应路由上所有链路均未被占用，所有交换机端口在区间$[t,\;t+T[s][dst])$内均有足够余量；若检查通过，则TEN完成资源预留并返回成功，否则返回失败并由合成器继续尝试其它候选源/下一跳。
+
+\noindent\textbf{4 到达事件与事件队列}
+
+TEN将每次成功调度的传输转化为到达事件，并插入事件队列$\mathrm{EQ}$。到达事件可写为$(t_{\mathrm{arr}},c,s\rightarrow d)$，表示chunk $c$由$s$发送并于$t_{\mathrm{arr}}$到达$d$。事件队列按时间从小到大弹出，驱动合成器在关键时刻推进TEN状态并触发下一轮贪心匹配，从而避免使用固定时间步长导致的巨大时间扩展图开销。
+
+
+\subsection{合成器模块：事件驱动的贪心合成策略}
+\label{subsec:ftacas-synth}
+
+\noindent\textbf{1 后置条件与优先级排序策略}
+
+FTACAS以“后置条件是否被满足”作为合成过程的核心状态：对任意$(c,d)\in\mathcal{Q}$，当且仅当$\mathcal{P}(c,d)=1$时认为该后置条件被满足。为引导贪心合成的调度方向，FTACAS为每个未满足后置条件定义初始优先级：
+\begin{align}
+\pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathcal{P}(c,s)=1} T[s][d]. \label{eq:ftacas-priority}
+\end{align}
+
+在TEN初始化并计算得到传输时间矩阵$\boldsymbol{T}$后，对$\mathcal{Q}$进行初始化排序：AllGather采用$\pi$升序（优先满足传输时间短的后置条件以加速数据扩散），AllToAll采用$\pi$降序（优先推进传输时间长的后置条件以降低尾延迟）。
+
+\noindent\textbf{2 源设备贪心选择策略}
+
+对每个待满足后置条件$(c,d)$，合成器采用贪心匹配策略选择负责传输对应数据块的源设备：
+\begin{align}
+s=\arg\min\{T[s][d]\mid \mathcal{P}(c,s)=1,\,s\neq d\}. \label{eq:ftacas-source-select}
+\end{align}
+
+该策略优先选择传输时间最短的源设备，从而在局部决策上降低到达时间与资源占用区间长度。若最优源在当前时刻因链路/端口资源不足无法预留，则继续尝试次优的备选源，直至成功或放弃该条件并进入下一条件。
+
+\noindent\textbf{3 事件驱动的合成过程}\\
+
+FTACAS采用事件驱动的合成过程，在数据块到达时触发事件，更新TEN的状态并进行新一轮的调度。具体而言，从事件队列EQ取出最早完成的到达事件，获取当前的事件时间步$t$，处理所有到达事件并更新$\mathcal{P}$，随后根据算子类型执行对应的合成策略，直至所有后置条件均被满足（$\mathcal{Q}=\emptyset$）。
+
+
+
+\noindent\textbf{4 AllGather 合成策略}\\
+
+AllGather的目标是将系统中每个设备初始拥有的数据发送至所有设备。
+其事件驱动的贪心合成过程如\autoref{Algorithm-FTACAS-AllGather}所示。
+在每一个时间步，合成器执行如下核心调度逻辑：
+\begin{enumerate}[label=(\arabic*)]
+    \item \textbf{后置条件选取：}
+    从当前未满足的后置条件集合$\mathcal{Q}$中，
+    选取优先级最高（即$\pi(c,d)$最小）的后置条件$(c,d)$；
+
+    \item \textbf{源设备选取：}
+    在目标设备 $d$ 的直达设备邻接集合$\mathcal{N}(d)$中，
+    从满足$\mathcal{P}(c,s)=1$的设备里，
+    选择使传输时间$T[s][d]$最小的源设备$s$；
+
+    \item \textbf{资源冲突检查与调度：}
+    在当前时刻对路径$(s\rightarrow d)$执行资源冲突检查，
+    若TEN判定链路与交换机端口资源均可预留，
+    则完成资源预留并将对应传输加入调度集合$\mathcal{S}$，
+    同时生成相应的到达事件并加入事件队列$\mathrm{EQ}$。
+\end{enumerate}
+
+在上述调度流程中，只考虑通过不跨设备节点的单次传输能满足的后置条件，因此只从目标设备的直达设备邻居中选取源设备。
+AllGather允许chunk经由中间设备逐步扩散，虽然每次传输限定为直达设备之间的通信，
+但chunk可在不同时间步由不同中间设备继续转发，从而在复杂交换机拓扑下显著提升通信效率。
+
+在AllGather合成过程中，FTACAS还参考TACOS方法引入了Replacement机制以提升整体调度效率：
+\begin{itemize}
+    \item \textbf{Replacement 机制：}
+    为降低重复调度带来的网络资源浪费，
+    当到达事件中的 chunk $c$ 在目标设备 $d$ 处已存在
+    （即$\mathcal{P}(c,d)=1$）时，
+    合成器会尝试用设备 $d$ 仍缺失且源设备 $s$ 已拥有的另一chunk替换 $c$，
+    使得已发生的网络传输尽可能转化为对未满足后置条件的有效贡献
+    （见\autoref{Algorithm-FTACAS-AllGather} 第 5--7 行）。
+\end{itemize}
+
+
+
+\begin{center}
+\begin{algorithm}[!htbp]
+    % \footnotesize
+    % \small
+    \caption{AllGather的事件驱动贪心合成过程}
+    \label{Algorithm-FTACAS-AllGather}
+    \begin{algorithmic}[1]
+        \REQUIRE{前置条件集合$\mathcal{P}$；后置条件集合$\mathcal{Q}$；事件队列$\mathrm{EQ}$；调度集合$\mathcal{S}$；传输时间矩阵$\boldsymbol{D}$}
+        \ENSURE{更新后的调度集合$\mathcal{S}$；完成时间$T_{coll}$}
+
+        \WHILE{$\mathcal{Q}\neq \emptyset$}
+            \STATE 取出当前时间步$t\leftarrow \mathrm{popMin}(\mathrm{EQ})$；
+            \STATE TEN推进至$t$并处理$t$时刻的所有到达事件；
+            \FORALL{到达事件$(t,c,s\rightarrow d)$}
+                \IF{$\mathcal{P}(c,d)=1$}
+                    \STATE 执行Replacement：用$d$缺失且$s$已拥有的chunk替换$c$（若存在）；
+                \ENDIF
+                \STATE 更新$\mathcal{P}$，并从$\mathcal{Q}$中移除已满足的后置条件；
+            \ENDFOR
+
+            \FORALL{条件$(c,d)\in\mathcal{Q}$（按当前优先级顺序）}
+                \STATE 在$\mathcal{N}(d)$中选择源$s=\arg\min\{T[s][d]\mid \mathcal{P}(c,s)=1,\,s\neq d\}$；
+                \IF{不存在可选源$s$}
+                    \STATE \textbf{continue}；
+                \ENDIF
+                \STATE 设传输目标$dst\leftarrow d$；
+                \STATE 若TEN在$t$时刻可为$(s\rightarrow dst)$预留资源，则预留并加入调度$\mathcal{S}$；
+                \IF{预留成功}
+                    \STATE 生成到达事件：$t_{\mathrm{arr}}\leftarrow t+T[s][dst]$，$\mathrm{EQ}\leftarrow \mathrm{EQ}\cup\{t_{\mathrm{arr}}\}$；
+                \ENDIF
+            \ENDFOR
+        \ENDWHILE
+
+        \STATE $T_{coll}\leftarrow$ 最后一个到达事件对应的时间；
+        \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
+    \end{algorithmic}
+\end{algorithm}
+\end{center}
+
+
+
+\noindent\textbf{5 AllToAll 合成策略}\\
+
+AllToAll目标是将每个设备的数据按目的设备划分后，
+分别发送至对应设备。与 AllGather 不同，
+AllToAll中每个数据块具有唯一最终目的设备，
+后置条件的满足过程不涉及数据复制，
+因此FTACAS采用逐跳推进的调度策略。
+其事件驱动的贪心合成过程如\autoref{Algorithm-FTACAS-AllToAll} 所示。
+在每一个时间步$t$，合成器执行如下核心调度逻辑：
+\begin{enumerate}[label=(\arabic*)]
+    \item \textbf{后置条件选取：}  
+    从当前未满足的后置条件集合$\mathcal{Q}$中，
+    选取优先级最高（即$\pi(c,d)$最大）的后置条件$(c,d)$；
+
+    \item \textbf{源设备选取：}  
+    在满足$\mathcal{P}(c,s)=1$且$s\neq d$的设备中，
+    选择使传输时间$T[s][d]$最小的设备$s$作为当前源设备，
+    以保证每一步调度均朝着最终目的设备$d$的方向推进。
+
+    \item \textbf{下一跳设备选取：}  
+    若目标设备$d$属于源设备$s$的直达设备邻接集合
+    （即$d\in\mathcal{N}(s)$），
+    则直接设传输目标$dst\leftarrow d$；
+    否则，从$\mathcal{N}(s)$中选择下一跳设备$n$，
+    使其满足$T[n][d]<T[s][d]$，
+    并设$dst\leftarrow n$，
+    从而将chunk逐步推进至最终目的设备。
+
+    \item \textbf{资源冲突检查与调度：}  
+    若当前时刻在TEN中对路径$(s\rightarrow dst)$的资源冲突检查通过，
+    则完成资源预留并记录相应的传输调度与到达事件。
+    当$dst\neq d$时，后续调度将基于更新后的
+    $\mathcal{P}$与$\pi(c,d)$继续推进。
+\end{enumerate}
+
+
+
+除了上述基本调度流程外，
+FTACAS 在 AllToAll 合成过程中还引入了以下两项关键机制，
+以保证调度过程的正确性与高效性：
+
+\begin{itemize}
+    \item \textbf{防重复调度机制：}
+    为避免在不同时间步内对同一后置条件$(c,d)$进行重复的调度，
+    算法维护已调度但对应chunk尚未到达的条件集合$\mathrm{scheduled}$，
+    对已被调度的条件在当前时间步内不再重复处理
+    （见 \autoref{Algorithm-FTACAS-AllToAll} 第 10--12 行）。
+
+    \item \textbf{动态优先级调整机制：}
+    当 chunk 被调度到中间节点（即$dst\neq d$）时，
+    其到最终目的设备$d$的剩余传输时间将发生变化。
+    为使后续调度顺序与当前系统状态匹配，
+    算法会重新计算对应后置条件的优先级$\pi(c,d)$，
+    并对后置条件集合$\mathcal{Q}$进行局部重排
+    （见 \autoref{Algorithm-FTACAS-AllToAll} 第 31--33 行）。
+\end{itemize}
+
+
+
+\begin{center}
+\begin{algorithm}[!htbp]
+    % \footnotesize
+    % \small
+    \caption{AllToAll的事件驱动贪心合成过程}
+    \label{Algorithm-FTACAS-AllToAll}
+    \scalebox{0.88}{
+    \begin{minipage}{\linewidth}
+    \setlength{\baselineskip}{0.8\baselineskip}
+    \begin{algorithmic}[1]
+        \REQUIRE{前置条件集合$\mathcal{P}$；后置条件集合$\mathcal{Q}$；事件队列$\mathrm{EQ}$；调度集合$\mathcal{S}$；传输时间矩阵$\boldsymbol{D}$；直达设备邻接表$\mathcal{N}(\cdot)$}
+        \ENSURE{更新后的调度集合$\mathcal{S}$；完成时间$T_{coll}$}
+
+        \WHILE{$\mathcal{Q}\neq \emptyset$}
+            \STATE 取出当前时间步$t\leftarrow \mathrm{popMin}(\mathrm{EQ})$；
+            \STATE TEN推进至$t$并处理$t$时刻的所有到达事件；
+            \FORALL{到达事件$(t,c,s\rightarrow d)$}
+                \STATE 更新$\mathcal{P}$，并从$\mathcal{Q}$中移除已满足的后置条件；
+                \STATE 清除该条件的调度标记，使其允许继续逐跳推进；
+            \ENDFOR
+
+            \STATE 初始化本时间步已调度条件集合$\mathrm{scheduled}\leftarrow \emptyset$；
+            \FORALL{条件$(c,d)\in\mathcal{Q}$（按当前优先级顺序）}
+                \IF{$(c,d)\in \mathrm{scheduled}$}
+                    \STATE \textbf{continue}；
+                \ENDIF
+
+                \STATE 选择源$s=\arg\min\{T[s][d]\mid \mathcal{P}(c,s)=1,\,s\neq d\}$；
+                \IF{不存在可选源$s$}
+                    \STATE \textbf{continue}；
+                \ENDIF
+
+                \STATE \textbf{下一跳选择}：
+                \IF{$d\in\mathcal{N}(s)$且路由$(s\rightarrow d)$在$t$可预留}
+                    \STATE $dst\leftarrow d$；
+                \ELSE
+                    \STATE 在$\mathcal{N}(s)$中选取$T[n][d]<T[s][d]$且路由$(s\rightarrow n)$在$t$可预留的下一跳$n$；
+                    \IF{不存在可行下一跳}
+                        \STATE \textbf{continue}；
+                    \ENDIF
+                    \STATE $dst\leftarrow n$；
+                \ENDIF
+
+                \STATE 预留路由$(s\rightarrow dst)$并将传输加入$\mathcal{S}$；
+                \IF{预留成功}
+                    \STATE 生成到达事件：$t_{\mathrm{arr}}\leftarrow t+T[s][dst]$，$\mathrm{EQ}\leftarrow \mathrm{EQ}\cup\{t_{\mathrm{arr}}\}$；
+                    \STATE $\mathrm{scheduled}\leftarrow \mathrm{scheduled}\cup\{(c,d)\}$；
+                    \IF{$dst\neq d$}
+                        \STATE 更新$\pi(c,d)$并对$\mathcal{Q}$进行局部重排；
+                    \ENDIF
+                \ENDIF
+            \ENDFOR
+        \ENDWHILE
+
+        \STATE $T_{coll}\leftarrow$ 最后一个到达事件对应的时间；
+        \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
+    \end{algorithmic}
+    \end{minipage}
+    }
+\end{algorithm}
+\end{center}
+
+
+
+\subsection{复杂度与可扩展性分析}
+\label{subsec:ftacas-complexity}
+
+设物理图节点数$|V|$、边数$|E|$、设备数$N=|V_D|$，后置条件数量为$|\mathcal{Q}|$。
+\begin{itemize}
+    \item \textbf{TEN预计算开销：}预计算时对每个源设备执行一次最短路径搜索，时间复杂度为$O\!\left(N\cdot |E|\log|V|\right)$，并得到$\boldsymbol{T}$矩阵，空间复杂度为$O(N^2)$。
+    \item \textbf{事件驱动合成开销：}
+    设合成过程中共触发$K$个事件时间步，
+    第$k$个时间步中尚未满足的后置条件集合记为$\mathcal{Q}_k$。
+    若合成过程中总调度传输次数为$M$（对应$M$个事件），
+    则事件队列的维护开销约为$O(M\log M)$。
+    在每个事件时间步，
+    最坏情况下需要遍历$\mathcal{Q}_k$并为每个条件选择源设备，
+    若直接扫描源设备集合，则单步复杂度为$O(|\mathcal{Q}_k|\cdot N)$；
+    结合路由可行性检查与资源预留（与路径长度线性相关），
+    总体时间复杂度可表示为
+    $O\!\left(\sum_{k=1}^{K} |\mathcal{Q}_k|\cdot (N+\bar{L})\right)$，
+    其中$\bar{L}$表示平均路由长度。
+\end{itemize}
+
+实际算法实现中，借助事件驱动推进（减少空时间步）、候选条件剪枝、同优先级候选随机化与局部重排等机制，可有效降低常数开销并提升规模扩展能力。
 
 
 
 \section{实验评估}
-本节对提出的计算通信并行方法进行了实验验证，并与Megatron的基准实现进行了对比分析。本文实验在算力自由平台提供的GPU计算节点上完成。实验节点配置8张NVIDIA L40S，每张L40S拥有48GB显存，GPU间通过PCIe 4.0×16接口与主机系统相连，构成多GPU PCIe互连架构。软件层面均使用Pytorch提供的接口实现。
 
-\subsection{实验设置}
-实验测试了不同参数设置的Transformer模型，不同规格模型的参数表如\autoref{tab:transformer_model_para}所示。实验采用TP/DP混合并行模式，使用单节点内8张GPU进行训练，其中TP维度设置为4，DP维度设置为2。
+本节对提出的交换机拓扑感知的通用集合通信算法合成器FTACAS的算法性能进行验证，并与现有方法进行对比分析。实验主要关注算法合成过程的时间开销与合成得到的集合通信算法的算法带宽。所有实验均在同一计算平台上完成，实验平台配备Intel Core i9-12900H处理器。FTACAS采用C++语言实现。
 
+\subsection{对比方法：TECCL}
+
+为了评估所提出FTACAS方法的有效性，本文选取TECCL\cite{liu2024rethinking}方法作为对比基线。TECCL是Liu等人2024年提出的方法，该方法将集合通信算法合成问题描述成多商品流优化问题，借鉴网络流量工程（Traffic Engineering，TE）中的建模与求解思想，在统一的优化框架下考虑路由选择、链路容量约束以及调度时序。TECCL方法将集合通信算法合成问题建模为混合整数线性规划（Mixed Integer Linear Programming，MILP）问题，并采用商业求解器Gurobi进行求解。TECCL方法同样支持多级交换机拓扑结构，支持AllGtaher和AlltoAll算子，在复杂拓扑下表现出较强的适应能力。本文采用作者开源的TECCL实现代码进行对比实验。
+
+\subsection{实验拓扑}
+为全面评估 FTACAS 在不同互连结构下的算法合成性能，并与 TECCL 方法进行对比，本文选取了多种具有代表性的 GPU 集群拓扑作为实验对象。这些拓扑覆盖了直接互连结构、单机箱高带宽互连结构以及多机箱交换机互连结构，能够反映实际系统中常见的通信场景。
+具体而言，实验中使用的拓扑类型包括：直连 Mesh 拓扑（Mesh4×4）、单机箱 DGX1 拓扑（DGX1-1）、双机箱 DGX2 拓扑（DGX2-2）、基于交换机的 NDv2 拓扑（NDv2-2 与 NDv2-4），以及双机箱 AMD GPU 拓扑（AMD-2）。其中，拓扑名称中的数字后缀表示所包含的机箱（chassis）数量。
+\autoref{tab:topology-summary} 给出了每种拓扑中单个机箱内的GPU数量以及机箱数量。FTACAS与TECCL均在相同的拓扑配置下运行。
 \begin{table}[!htbp]
-    \centering
-    \caption{不同规格Transformer模型参数设置}
-    \label{tab:transformer_model_para}
-    \begin{tabular}{cccccc}
-        \toprule
-        模型规格 & Layers & Hidden size & Attention heads & Vocabulary size & Max sequence length\\
-        \midrule
-        一 & 12 & 2048 & 32 & 5000 & 1024\\
-        二 & 24 & 3072 & 48 & 5000 & 1024\\
-        三 & 36 & 4096 & 64 & 5000 & 1024\\
-        \bottomrule
-    \end{tabular}
+\centering
+\caption{实验拓扑配置}
+\label{tab:topology-summary}
+\begin{tabular}{lccc}
+\toprule
+Topology & GPUs per chassis & Chassis  & Total number of GPUs\\
+\midrule
+Mesh($4\times4$)  & 16 & 1 & 16\\
+DGX1-1            & 8  & 1 & 8\\
+DGX2-2            & 16 & 2 & 32\\
+NDv2-2            & 8  & 2 & 16\\
+NDv2-4            & 8  & 4 & 32\\
+AMD-2             & 16 & 2 & 32\\
+\bottomrule
+\end{tabular}
 \end{table}
+
+Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓扑结构可参考\autoref{fig:DGX1}，其物理参数与单机箱 NDv2 拓扑相同。DGX2-2 的拓扑结构如\autoref{fig:DGX2-2}所示。NDv2-4 的拓扑结构如\autoref{fig:NDv2-4}所示，其中 NDv2-2 可视为相同结构下的双机箱拓扑；NDv2 的单机箱拓扑结构与 DGX1 类似，在本实验中采用相同的实验参数。AMD-2 的拓扑结构如\autoref{fig:AMD-2}所示。
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Mesh($4\times4$)拓扑结构\label{fig:Mesh4x4}]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter2/Mesh.pdf}
+    }
+    \subfigure[DGX2-2拓扑结构\label{fig:DGX2-2}\cite{liu2024rethinking}]{
+        \includegraphics[width=0.56\linewidth]{figure/chapter2/DGX2-2.pdf}
+    }
+    \subfigure[NDv2-4拓扑结构\label{fig:NDv2-4}\cite{liu2024rethinking}]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter2/NDv2-4.pdf}
+    }
+    \subfigure[AMD-2拓扑结构\label{fig:AMD-2}\cite{liu2024rethinking}]{
+        \includegraphics[width=0.56\linewidth]{figure/chapter2/AMD-2.pdf}
+    }
+    \caption{实验中使用的不同拓扑结构示意图}
+    \label{fig:topologies}
+\end{figure}
+
+
+
+\subsection{实验设置与评价指标}
+
+本节对 FTACAS 方法的算法合成时间开销以及合成得到的集合通信算法的算法带宽进行评估，并与 TECCL 方法进行对比分析。实验中，FTACAS 与 TECCL 均在相同的拓扑配置下运行。针对每种拓扑结构，分别测试 AllGather 与 AllToAll 两种集合通信算子的合成性能。
+
+为刻画不同数据量下集合通信算子的特征，实验选取了三种数据量设置，分别为 1MB、64MB 与 1GB。本文中，集合通信算子的数据量定义为完整接收缓冲区的大小。此外，考虑到分块策略对集合通信调度与性能的影响，实验中测试了分块数为 1 与 2 的两种场景。
+
+在上述设置下，本节比较了 FTACAS 与 TECCL 在不同拓扑结构上的算法合成时间开销，以及其合成得到的集合通信算法的算法带宽。
+其中，算法带宽$\mathrm{B_{alg}}$（Algorithm Bandwidth）用于衡量合成得到的集合通信算法在运行阶段的数据传输效率，其定义为集合通信过程中完成传输的数据量与对应完成时间的比值，即
+\begin{equation}
+\mathrm{B_{alg}}
+=
+\frac{S_{\mathrm{total}}}{T_{coll}},
+\end{equation}
+
+
 
 \subsection{实验结果与分析}
 
-\autoref{tab:time_speedup}展示了三种规格下基线和改进方法的实跑参数和结果，三种模型规格下均能达到1.25×以上的百分比。\autoref{tab:overlap_fwd_bwd}展示了基线和改进方法实跑具体计算和通信占比与并行时长，其中全模型通信时长可以分为TP通信和DP通信两部分。DP通信仅为关于模型梯度的AllReduce。对于TP通信部分，前向传播过程包括12个Transformer层中的24个AllReduce、嵌入层AllReduce以及输出层ReduceScatter，反向传播过程包括12个Transformer层中的24个AllReduce、嵌入层AllReduce以及输出层ReduceScatter。
+下面将详细对比不同场景下的AllGather与AlltoAll算子的算法带宽与求解时间。
 
-\begin{table}[htbp]
+\noindent\textbf{1 算法带宽}
+
+不同场景下AllGather算子的算法带宽对比结果如\autoref{fig:allgather-bandwidth}所示。
+不同场景下AlltoAll算子的算法带宽对比结果如\autoref{fig:alltoall-bandwidth}所示。
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter2/allgather_bandwidth_all_scenarios.pdf}
+    \caption{不同场景下AllGather算子的算法带宽对比}
+    \label{fig:allgather-bandwidth}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter2/alltoall_bandwidth_all_scenarios.pdf}
+    \caption{不同场景下AlltoAll算子的算法带宽对比}
+    \label{fig:alltoall-bandwidth}
+\end{figure}
+
+\noindent\textbf{2 求解时间}
+
+不同场景下AllGather算子的求解时间对比结果如\autoref {fig:allgather-solving-time}所示。
+不同场景下AlltoAll算子的求解时间对比结果如\autoref {fig:alltoall-solving-time}所示。
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter2/allgather_time_all_scenarios.pdf}
+    \caption{不同场景下AllGather算子的求解时间对比}
+    \label{fig:allgather-solving-time}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter2/alltoall_time_all_scenarios.pdf}
+    \caption{不同场景下AlltoAll算子的求解时间对比}
+    \label{fig:alltoall-solving-time}
+\end{figure}
+
+\noindent\textbf{3. 综合对比分析}
+
+分块数为1时，FTACAS相对于TECCL算法的算法带宽加速比如\autoref {tab:speedup_ab_chunk1_opcol}所示，求解时间加速比如\autoref {tab:speedup_time_chunk1_opcol_sci}所示。
+其中，算法带宽和求解时间的加速比的指标定义分别为：
+\begin{equation}
+\begin{aligned}
+\mathrm{Speedup}_{B} = \frac{B_{\mathrm{alg}}^{\mathrm{FTACAS}}}{B_{\mathrm{alg}}^{\mathrm{TECCL}}}, \quad
+\mathrm{Speedup}_{T} = \frac{T_{\mathrm{coll}}^{\mathrm{TECCL}}}{T_{\mathrm{coll}}^{\mathrm{FTACAS}}}.
+\end{aligned}
+\end{equation}
+
+
+% Required package: \usepackage{booktabs}
+\begin{table}[!htbp]
 \centering
-\caption{不同模型规格的训练时间与加速比对比}
-\label{tab:time_speedup}
-% \small
-\begin{tabular}{c c c c c}
+\caption{FTACAS相对TECCL的算法带宽加速比}
+\label{tab:speedup_ab_chunk1_opcol}
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{lcccccc}
 \toprule
-模型规格 & Global batch size
-& 基线时间(s) & 改进时间(s) & 加速比 \\
+\multirow{2}{*}{Topology} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AllToAll} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+& 1MB & 64MB & 1GB & 1MB & 64MB & 1GB \\
 \midrule
-一 & 64 & 2.347 & 1.876 & 1.25$\times$ \\
-二 & 32 & 2.562 & 1.993 & 1.29$\times$ \\
-三 & 16 & 1.758 & 1.402 & 1.25$\times$ \\
+Mesh
+& 1.00 & 1.00 & 1.00
+& 0.94 & 0.94 & 0.94 \\
+DGX1-1
+& 1.00 & 1.00 & 1.00
+& 1.50 & 1.34 & 1.33 \\
+DGX2-2
+& 1.65 & 1.76 & 1.76
+& 1.00 & 1.03 & 1.03 \\
+NDv2-2
+& 1.60 & 1.01 & 1.00
+& 0.89 & 0.89 & 0.89 \\
+NDv2-4
+& 2.23 & 1.14 & 1.10
+& 0.98 & 0.97 & 0.98 \\
+AMD-2
+& 2.99 & 3.05 & 3.05
+& 0.98 & 0.97 & 0.98 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-
-\begin{table}[htbp]
+% Required package: \usepackage{booktabs}
+\begin{table}[!htbp]
 \centering
-\caption{不同模型规格下前向与反向阶段计算通信并行效果对比（单位：ms）}
-\label{tab:overlap_fwd_bwd}
-% \small
-\scalebox{0.9}{
-\begin{tabular}{c c c c c c c c}
+\caption{FTACAS相对TECCL的合成时间加速比}
+\label{tab:speedup_time_chunk1_opcol_sci}
+\setlength{\tabcolsep}{4.5pt}
+\begin{tabular}{lcccccc}
 \toprule
-模型规格 &  &  
-& 基线计算 & 基线通信 & 基线总时长 & 改进总时长 & 并行时长 \\
+\multirow{2}{*}{Topology} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AllToAll} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+& 1MB & 64MB & 1GB & 1MB & 64MB & 1GB \\
 \midrule
-\multirow{5}{*}{一}
-& \multirow{2}{*}{前向}
-& 嵌入层
-& 5.784 & 18.433 & 24.217 & 21.040 & 3.177 \\
-&& Transformer层
-& 51.613 & 50.585 & 102.198 & 86.621 & 15.577 \\
-\cmidrule(lr){2-8}
-& 反向
-& Transformer层
-& 116.736 & 51.543 & 168.279 & 134.597 & 33.807 \\
-\cmidrule(lr){2-8}
-& \multicolumn{2}{c}{DP 通信}
-& -- & 81.553 & 81.553 & 11.320 & 74.233 \\
-\cmidrule(lr){2-8}
-& \multicolumn{2}{c}{全模型}
-& 1370.162 & 977.478 & 2347.640 & 1875.932 & 471.708 \\
-\midrule
-\multirow{5}{*}{二}
-& \multirow{2}{*}{前向}
-& 嵌入层
-& 5.558 & 19.461 & 25.019 & 21.991 & 3.028 \\
-&& Transformer层
-& 58.819 & 50.238 & 109.057 & 88.651 & 20.405 \\
-\cmidrule(lr){2-8}
-& 反向
-& Transformer层
-& 124.394 & 55.629 & 180.023 & 149.021 & 31.002 \\
-\cmidrule(lr){2-8}
-& \multicolumn{2}{c}{DP 通信}
-& -- & 158.463 & 158.463 & 11.199 & 147.264 \\
-\cmidrule(lr){2-8}
-& \multicolumn{2}{c}{全模型}
-& 1491.636 & 1070.983 & 2562.619 & 1993.885 & 568.734 \\
-\midrule
-\multirow{5}{*}{三}
-& \multirow{2}{*}{前向}
-& 嵌入层
-& 9.817 & 12.798 & 22.615 & 18.744 & 3.871 \\
-&& Transformer层
-& 43.918 & 29.256 & 73.174 & 67.378 & 5.796 \\
-\cmidrule(lr){2-8}
-& 反向
-& Transformer层
-& 73.080 & 32.412 & 105.492 & 97.300 & 8.192 \\
-\cmidrule(lr){2-8}
-& \multicolumn{2}{c}{DP 通信}
-& -- & 261.418 & 261.418 & 21.937 & 239.481 \\
-\cmidrule(lr){2-8}
-& \multicolumn{2}{c}{全模型}
-& 967.714 & 791.237 & 1758.951 & 1402.000 & 356.560 \\
+Mesh
+& $2.36\times10^{3}$ & $2.18\times10^{3}$ & $2.16\times10^{3}$
+& $3.45\times10^{3}$ & $3.31\times10^{3}$ & $3.08\times10^{3}$ \\
+DGX1-1
+& $1.08\times10^{3}$ & $1.08\times10^{3}$ & $1.00\times10^{3}$
+& $5.33\times10^{3}$ & $5.42\times10^{3}$ & $5.74\times10^{3}$ \\
+DGX2-2
+& $5.27\times10^{2}$ & $4.23\times10^{2}$ & $4.49\times10^{2}$
+& $2.33\times10^{3}$ & $2.61\times10^{3}$ & $2.65\times10^{3}$ \\
+NDv2-2
+& $4.72\times10^{3}$ & $5.26\times10^{3}$ & $5.41\times10^{3}$
+& $1.16\times10^{3}$ & $1.27\times10^{3}$ & $1.26\times10^{3}$ \\
+NDv2-4
+& $7.79\times10^{4}$ & $4.84\times10^{4}$ & $5.46\times10^{4}$
+& $3.31\times10^{3}$ & $7.28\times10^{3}$ & $6.38\times10^{3}$ \\
+AMD-2
+& $5.84\times10^{2}$ & $5.63\times10^{2}$ & $5.29\times10^{2}$
+& $9.41\times10^{2}$ & $6.62\times10^{2}$ & $8.18\times10^{2}$ \\
 \bottomrule
 \end{tabular}
-}
 \end{table}
-
-
-图5.4为模型Transformer层前向传播Profiling时间线对比，使用模型规格一的场景进行分析，注意力层和MLP层之间的AllReduce拆分为ReduceScatter和AllGather，并将注意力层的行并行部分计算与ReduceScatte并行，将MLP层的列并行计算与AllGather并行。切分后的计算时间总体比原计算时间长，可能是因为计算矩阵变小，计算核利用率下降。在TP维度为4的情况下，点对点传输的Ring AllReduce共需要六步，ReduceScatter和AllGather部分能够各掩盖三步划分后的矩阵计算。时间线上展示了并行的计算和通信，与预期结果一致。
-
-\begin{figure}[!htbp]   
-    \centering
-    \subfigure[基线方案]{
-        \includegraphics[width=1\linewidth]{figure/chapter3/profiling_forward_base.pdf}
-    }
-    \subfigure[计算通信并行方案]{
-        \includegraphics[width=1\linewidth]{figure/chapter3/profiling_forward_optim.pdf}
-    }
-    \caption{Transformer层前向传播基线方案和计算通信并行方案的Profiling时间线对比}
-    \label{fig:transformer_method}
-\end{figure}
-
-图5.8为模型Transformer层反向传播Profiling时间线对比，使用模型规格一的场景进行分析， AllReduce解耦为ReduceScatter和AllGather，并分别将ReduceScatter与列并行的输入梯度计算分片并行，将AllGather与列并行的权重梯度计算直接并行。切分后的计算时间总体比原计算时间长，可能是因为计算矩阵变小，计算核利用率下降。此外，DP的AllReduce也与TP的计算相并行。时间线上展示了并行的计算和通信，与预期结果一致。
-
-\begin{figure}[!htbp]   
-    \centering
-    \subfigure[基线方案]{
-        \includegraphics[width=1\linewidth]{figure/chapter3/profiling_backward_base.pdf}
-    }
-    \subfigure[计算通信并行方案]{
-        \includegraphics[width=1\linewidth]{figure/chapter3/profiling_backward_optim.pdf}
-    }
-    \caption{Transformer层反向传播基线方案和计算通信并行方案的Profiling时间线对比}
-    \label{fig:transformer_method}
-\end{figure}
 
 
 
 \section{本章小结}
-本项目围绕大规模模型计算与通信并行优化展开了系统性研究，梳理了当前主流的混合并行范式与代表性技术，包括基于张量并行的Megatron、Collective Einsum，基于数据并行的DeepSpeed ZeRO，以及基于流水并行的Zero Bubble调度算法。在此基础上，针对Transformer模型，分别从推理与训练两个阶段提出了改进方案：通过在嵌入层和Transformer块中拆分通信算子、细粒度调度矩阵计算，实现计算与通信的并行，有效减少设备空闲时间；通过在反向传播中优化算子顺序和梯度同步策略，进一步掩盖通信开销，提高端到端吞吐量。
 
-理论分析和实测结果表明，所提出的优化方案能够在不改变模型精度的前提下显著提升大模型分布式训练与推理的性能，具有良好的可扩展性和可移植性。未来工作可进一步探索跨节点异步通信机制、更细粒度流水调度及异构算力环境下的调优策略，以支撑百亿乃至万亿参数级模型的高效训练与推理。

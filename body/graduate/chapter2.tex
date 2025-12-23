@@ -1,10 +1,12 @@
-\chapter{集合通信算法优化}
+\chapter{基于环形算法的高效集合通信算法设计}
 \section{引言}
 
 当前，以AIGC为代表的大模型得到广泛的应用和部署。当前模型参数达到万亿级别，并且仍然保持迅速增长的趋势。随着模型迅速增大，大部分大模型采用了跨节点分布式部署的方式。在跨节点的大模型部署的场景中，节点间需要频繁地执行各种集合通信算子来协同训练，导致通信时间在整个训练过程中占据了相当的比例。因此，能否设计出高效的集合通信算子，是加速大模型分布式训练的至关重要的瓶颈点。
 跨节点的大模型部署场景下，计算集群中存在多种通信链路，如HCCS、PCIE、ROCE/IB等。多种通信链路的并发度和利用率，对集合通信算子整体性能至关重要。本项目计划研发跨节点多链路并发通信技术，提升模型训练和推理的端到端性能。
 
 本章其他小结的内容安排如下：2.2节对分布式深度学习的训练时间进行建模并分析了影响训练时间的特征；2.3节介绍了本章提出的分布式深度学习训练时间预测方法的各部分；2.4节基于真实测量结果对本章所提出方法的效果进行验证分析；2.5节对本章内容进行了总结。
+
+
 
 \section{问题描述}
 
@@ -22,7 +24,9 @@
 
 \subsection{物理拓扑}
 
-物理拓扑描述了计算节点之间的底层物理连接关系，可以由一组图给定。高性能计算集群系统的群物理拓扑中往往存在着明显的多级异构链路，链路信息包含了各链路的带宽以及时延等特性。图\autoref{fig:DGX1}给出了NVIDIA DGX-1系统的机内物理拓扑结构示意图。该系统包含8个计算节点，每个节点配备了8个NVIDIA V100 GPU。节点之间通过高速互连网络NVLink和PCIe进行连接。多个DGX-1系统可以通过以太网或InfiniBand等网络进行互连，形成更大规模的集群系统。通过Infiniband互连的124机DGX-1集群拓扑结构如图\autoref{fig:DGX1-cluster}所示。
+物理拓扑描述了计算节点之间的底层物理连接关系，可以由一组图给定。高性能计算集群系统的群物理拓扑中往往存在着明显的多级异构链路，链路信息包含了各链路的带宽以及时延等特性。
+
+图\autoref{fig:DGX1}给出了NVIDIA DGX-1系统的机内物理拓扑结构示意图。单个DGX1服务器配备了8个NVIDIA V100 GPU, GPU间通过高速互连网络NVLink和PCIe进行连接。多个DGX-1服务器可以通过以太网或InfiniBand等网络进行互连，形成更大规模的集群系统。通过Infiniband互连的124机DGX-1集群拓扑结构如图\autoref{fig:DGX1-cluster}所示。
 
 \begin{figure}[!htbp]
     \centering
@@ -43,829 +47,316 @@ Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节
 
 PairWise算法是一种常用的AlltoAll算子实现方法，它通过在每个通信步骤中让节点与另一个节点交换数据块，逐步完成所有节点间的数据交换。PairWise算法的优点在于其简单性和易于实现，但在大规模集群中可能会导致通信冲突和带宽浪费，同时对于无法建立直接通信链路的节点对，需要中间节点进行转发。为了提高AlltoAll的性能，现有研究提出了多种优化算法，如基于拓扑感知的调度算法和分层通信算法等，这些算法通过优化数据传输路径和减少通信冲突，提高了AlltoAll的效率。
 
-\subsection{时间扩展网络TEN}
+\subsection{Ring AllReduce算法}
+集合通信算法是指实现集合通信算子的具体方法，不同的算法在通信步骤、数据传输方式和节点间协调等方面有所不同。常见的集合通信算法包括环形算法、树形算法和层级算法等。这些算法通过优化数据传输路径和减少通信开销，提高了集合通信的效率和性能。在分布式训练中，针对系统的物理拓扑选择合适的集合通信算法对于提高训练速度和资源利用率具有重要意义。
 
-时间扩展网络（Time-expanded Network，TEN）是一种用于表示动态网络的静态网络模型，通过在时间维度上扩展原始网络来捕捉网络中随时间变化的动态特性。在TEN中，原始网络中的每个节点在不同时间点上被复制为多个时间节点，这些时间节点之间通过有向边连接，表示节点在不同时间点上的状态变化。TEN可以用于分析和优化动态网络中的各种问题，如最短路径、最大流等。Won等人\cite{won2024tacos}在2023年将TEN引入集合通信领域。TEN可以用一组包含时序的有向无环图表示集合通信算子在系统物理拓扑上的具体通信过程，也就是具体的集合通信算法。
+Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的规约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
 
-对于一个给定的物理拓扑，时间扩展网络TEN的构建方式是将其沿着时间维度进行展开，用不同时间下节点间的有向边表示时间序列中可用的节点间传输链路，\autoref{fig:ten}给出了一个简单物理拓扑转换为TEN的示例。
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=0.6\linewidth]{figure/chapter2/TEN.pdf}
-    \caption{\label{fig:ten}示例物理拓扑与对应时间扩展网络TEN示意图\cite{won2024tacos}}
-\end{figure}
-
-我们可以在TEN上直观地表示出集合通信算法的执行过程。\autoref{fig:ten-ring-allgather}给出了Ring AllGather算法的TEN表示。在该TEN中，每个节点在不同时间点上被复制为多个时间节点，表示节点在不同时间点上的状态变化。节点间的有向边表示节点间的数据传输过程，边上的色块表示传输的数据块，图中可以清晰地看到Ring AllGather算法中数据块的传输顺序和环状的传输路径。
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/TEN-Ring-AllGather.pdf}
-    \caption{\label{fig:ten-ring-allgather}Ring AllGather算法的TEN表示\cite{won2024tacos}}
-\end{figure}
-
-\subsection{基于TEN的集合通信算法合成器：TACOS}
-
-Won等人\cite{won2024tacos}提出了TACOS，其可以在无需人工指导或干预的情况下，自主合成网络拓扑上的集合通信算法。TACOS使用TEN表示将集合通信算法合成问题建模为数据块与链路的匹配问题，采用基于贪婪的启发式匹配方法，在约束下最大化链路与数据块的匹配数量。
-
-TACOS的求解原理较为简单，输入包含转换为TEN的物理拓扑，以及目标集合通信算子，其中目标集合通信算子通过初始前置条件和最终后置条件描述。前置条件表示当前时刻节点上目前有哪些可用的数据块，后置条件表示当前时刻节点上还需要收集哪些数据块。整个求解过程迭代运行，不断增加时间t，在每个时刻基于贪婪的启发方法匹配链路与后置条件所需的数据块，直到所有节点的后置条件完全满足。\autoref{fig:tacos}给出了示例非对称四节点物理拓扑上 AllGather算子的端到端合成过程。
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=1\linewidth]{figure/chapter2/TACOS.pdf}
-    \caption{\label{fig:tacos}示例非对称四节点物理拓扑上 AllGather算子的TACOS合成过程\cite{won2024tacos}}
-\end{figure}
-
-TACOS可以高效地合成直连拓扑上的Allgather算子，并且适用于非对称异构的网络环境。然而TACOS算法存在两个严重的局限性：不直接支持交换机拓扑，尤其是多层交换机拓扑；不支持AlltoAll算子的合成。
-
-\section{交换机拓扑感知的通用集合通信算法合成器}
-\subsection{方法概述}
-
-本章提出了一种新的集合通信算法合成方法，我们将其称为交换机拓扑感知的通用集合通信算法合成器（Fabric-Topology-Aware General Collective Algorithm Synthesizer，FTACAS）。\autoref{fig:Fig2-5}为FTACAS的框架图，FTACAS主要由以下四个模块组成：
-\begin{itemize}
-    \item 拓扑建模模块（Topology）：该模块负责将物理拓扑抽象为包含设备节点和交换机节点的物理有向图，支持多级交换机、并行链路以及交换机转发模式（Cut-Through模式和Store-and-Forward模式）选择。
-    \item 算子构建模块（Collective）：该模块负责定义目标集合通信算子的前置条件和后置条件，支持AllGather与AlltoAll算子，同时支持数据块的预先分块设置以探索更细粒度的调度实现。
-    \item 时间扩展网络模块（TEN）：根据集合通信算子的数据量，基于α–β模型计算链路传输时间，在物理图基础上引入时间维度，预计算并缓存拓扑关键信息（节点间传输时间矩阵与直达设备邻接表），并根据传输时间对初始后置条件进行排序。在合成器执行过程中维护链路/交换机端口资源占用状态，实现路由可行性检查、相关资源预留以及到达事件记录的功能。
-    \item 合成器模块（Synthesizer）：合成集合通信算法的主要模块，采用事件驱动的循环模式，在触发数据块到达事件的时间步执行基于贪心思想的链路-数据块匹配策略，直到所有节点的后置条件完全满足。该模块针对AllGather和AlltoAll算子分别设计了不同的匹配策略以高效合成高性能集合通信算法。
-\end{itemize}
-
-为保证后续算法描述与公式推导的一致性，本节统一给出 FTACAS 中涉及的主要符号约定，如 \autoref{tab:ftacas-notation} 所示。在本章描述中，默认链路带宽 $B$、数据块大小 $S$与传输时间 $\Delta(\cdot)$ 采用一致的单位体系。
-
-\begin{table}[!htbp]
-\centering
-\caption{FTACAS符号约定}
-\label{tab:ftacas-notation}
-\begin{tabular}{p{0.26\linewidth}p{0.66\linewidth}}
-\hline
-符号 & 含义 \\
-\hline
-$G=(V,E)$ & 物理拓扑有向图 \\
-$V_D,\;V_S$ & 设备节点集合与交换机节点集合，$V=V_D\cup V_S$ \\
-$N$ & 设备数，$N=|V_D|$ \\
-$C$ & 每设备数据块划分数（用于探索更细粒度调度） \\
-$S$ & 数据块（chunk）大小 \\
-$e=(u\rightarrow v)$ & 节点u到节点v的物理链路\\
-$B_{u\rightarrow v}$ & 节点u到节点v的链路带宽\\
-$\alpha_{u\rightarrow v}$ & 节点u到节点v的静态时延 \\
-$\mathrm{cap}_{in/out}(s)$ & 交换机 $s$ 入/出方向端口并发容量 \\
-$\mathrm{mode}(s)$ & 交换机 $s$ 转发模式（Cut-Through 或 Store-and-Forward） \\
-$\Delta_{u\rightarrow v}(S)$ & 大小为 $S$ 的 chunk 在链路 $u\rightarrow v$ 上的传输时间 \\
-$\boldsymbol{T}$ & 传输时间矩阵，$T[u][v]$ 为设备 $u\rightarrow v$ 的传输时间 \\
-$\mathcal{N}(u)$ & 直达设备邻接表（仅允许经交换机中继，不经过中间设备） \\
-$\mathcal{P}$ & 前置条件集合，$\mathcal{P}(c,d)=1$ 表示设备 $d$ 拥有 chunk $c$ \\
-$\mathcal{Q}$ & 后置条件集合，$(c,d)\in\mathcal{Q}$ 表示设备 $d$ 需要 chunk $c$ \\
-$\pi(c,d)$ & 后置条件 $(c,d)$ 的优先级估计（由传输时间给出） \\
-$\mathrm{EQ}$ & 事件队列（存储未来到达事件的时间戳） \\
-$\mathcal{S}$ & 合成得到的集合通信调度（传输与路由预留的集合） \\
-$T_{coll}$ & 集合通信完成时间（makespan） \\
-$r_e(t;\mathcal{S})$ & 时刻 $t$ 调度 $\mathcal{S}$ 是否占用链路 $e$（取值为0或1） \\
-$r^{in}_s(t;\mathcal{S})$ & 时刻 $t$ 调度 $\mathcal{S}$ 在交换机 $s$ 入向端口的占用（并发数） \\
-$r^{out}_s(t;\mathcal{S})$ & 时刻 $t$ 调度 $\mathcal{S}$ 在交换机 $s$ 出向端口的占用（并发数） \\
-$t$ & 时间变量 \\
-\hline
-\end{tabular}
-\end{table}
-
-在上述符号约定下，FTACAS 的目标是在满足链路容量与交换机端口并发约束的前提下，
-构造一组集合通信调度 $\mathcal{S}$，
-使得所有后置条件 $(c,d)\in\mathcal{Q}$ 最终均被满足，
-并尽可能最小化集合通信完成时间 $T_{coll}$。
-该问题可形式化为如下优化问题：
-
-\begin{equation}
-\label{eq:ftacas-objective}
-\begin{matrix}
-& \underset{\mathcal{S}}{\min}\;\; T_{coll} \\
-\mathrm{s.t.}\;\; &
-\begin{array}{c}
-\mathcal{P}(c,d;T_{coll}) = 1,
-\quad \forall (c,d)\in \mathcal{Q}, \\[0.3em]
-r_e(t;\mathcal{S}) \le 1,
-\quad \forall e\in E,\ \forall t\in[0,T_{coll}], \\[0.3em]
-r^{in}_s(t;\mathcal{S}) \le \mathrm{cap}_{in}(s),
-\quad \forall s\in V_S,\ \forall t\in[0,T_{coll}], \\[0.3em]
-r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
-\quad \forall s\in V_S,\ \forall t\in[0,T_{coll}].
-\end{array}
-\end{matrix}
-\end{equation}
+PairWise算法是一种常用的AlltoAll算子实现方法，它通过在每个通信步骤中让节点与另一个节点交换数据块，逐步完成所有节点间的数据交换。PairWise算法的优点在于其简单性和易于实现，但在大规模集群中可能会导致通信冲突和带宽浪费，同时对于无法建立直接通信链路的节点对，需要中间节点进行转发。为了提高AlltoAll的性能，现有研究提出了多种优化算法，如基于拓扑感知的调度算法和分层通信算法等，这些算法通过优化数据传输路径和减少通信冲突，提高了AlltoAll的效率。
 
 
-\autoref{eq:ftacas-objective} 所描述的问题本质上属于带资源约束的调度与路由组合优化问题，在一般交换机拓扑结构下难以直接获得全局最优解。因此，FTACAS 采用可扩展的事件驱动贪心合成策略，在可控的计算开销下生成高质量的集合通信调度方案。
 
-\autoref{Algorithm-FTACAS-Main}总结了FTACAS的执行流程，其中\autoref{Algorithm-FTACAS-AllGather}和\autoref{Algorithm-FTACAS-AllToAll}在2.3.5节进行详细介绍。
-
-
+\section{参数同步拓扑优化问题求解框架}
+为了求解上一节中描述的参数同步拓扑优化问题，本节提出了如\autoref{fig:Fig3-0}所示的求解框架。将四种场景下的优化问题进行适当变换后，提出定制化的ADMM算法对优化问题进行求解，本节将求解得到的参数同步拓扑称为T-ADMM（Topology Based on ADMM）。进一步地，基于模拟退火算法生成拓扑结构，并将生成的拓扑结构作为ADMM算法求解节点带宽异构和服务器间交换机端口带宽异构场景下的优化问题的初始拓扑，以改进这两种场景下的优化问题求解结果，本节将改进的拓扑求解结果称为T-SA-ADMM（Topology Based on SA and ADMM）。下面分别介绍基于ADMM的拓扑优化问题求解方法和基于模拟退火算法的拓扑生成方法。
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=\linewidth]{figure/chapter2/FTACAS.pdf}
-    \caption{\label{fig:Fig2-5}FTACAS框架图}
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/framework.pdf}
+    \caption{\label{fig:Fig3-0}参数同步拓扑优化问题求解框架}
 \end{figure}
 
 
 
-\begin{center}
-\begin{algorithm}[!htbp]
-    % \footnotesize
-    % \small
-    \caption{FTACAS主流程}
-    \label{Algorithm-FTACAS-Main}
-    \begin{algorithmic}[1]
-        \REQUIRE{物理拓扑$G=(V,E)$（设备集合$V_D$，交换机集合$V_S$，链路带宽$B_e$，链路时延$\alpha_e$，交换机端口容量$\mathrm{cap}_{in/out}$，转发模式$\mathrm{mode}$）；集合通信算子类型$op\in\{\mathrm{AllGather},\mathrm{AllToAll}\}$；设备数$N$；每设备数据块划分数$C$；数据块大小$S$}
-        \ENSURE{集合通信调度$\mathcal{S}$；集合通信完成时间$T_{coll}$}
+\subsection{基于ADMM的拓扑优化问题求解方法}
 
-        \STATE \textbf{算子条件初始化}：根据$op$生成前置条件集合$\mathcal{P}$与后置条件集合$\mathcal{Q}$；
-
-        \STATE \textbf{TEN构建与链路传输时间计算}：对每条物理链路$e=(u\rightarrow v)\in E$，基于$\alpha$--$\beta$模型计算传输时间：
-        \begin{align*}
-            &\Delta_{u\rightarrow v}(S)=\alpha_{u\rightarrow v}+\frac{S}{B_{u\rightarrow v}},\\
-            &\Delta_{u\rightarrow s\rightarrow v}^{CT}(S)=\max\left(\Delta_{u\rightarrow s}(S),\,\Delta_{s\rightarrow v}(S)\right)\quad(\text{Cut-Through}).
-        \end{align*}
-
-
-        \STATE \textbf{节点间最短传输路径搜索}：以$\Delta(\cdot)$为边代价，对每个源设备$u\in V_D$执行最短路径搜索，得到传输时间$T[u][\cdot]$；
-        \STATE \textbf{拓扑关键信息计算与缓存}：构建并缓存传输时间矩阵$\boldsymbol{T}=\{T[u][v]\}$以及直达设备邻接表$\mathcal{N}(u)$；
-
-        \STATE 对每个未满足的后置条件$(c,d)\in\mathcal{Q}$计算初始优先级：
-        \begin{align*}
-            \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathcal{P}(c,s)=1} T[s][d] .
-        \end{align*}
-        \STATE 按优先级对后置条件集合$\mathcal{Q}$排序（AllGather：$\pi$升序；AllToAll：$\pi$降序）；
-        \STATE 初始化事件队列$\mathrm{EQ}\leftarrow \{0\}$，调度集合$\mathcal{S}\leftarrow \emptyset$；
-
-        \IF{$op=\mathrm{AllGather}$}
-            \STATE 调用\autoref{Algorithm-FTACAS-AllGather}执行AllGather事件驱动贪心合成，得到$\mathcal{S}$与$T_{coll}$；
-        \ELSE
-            \STATE 调用\autoref{Algorithm-FTACAS-AllToAll}执行AllToAll事件驱动贪心合成，得到$\mathcal{S}$与$T_{coll}$；
-        \ENDIF
-
-        \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
-    \end{algorithmic}
-\end{algorithm}
-\end{center}
+% 本节使用交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）求解\autoref{section3-2}中描述的参数同步拓扑优化问题。
+交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）主要用于解决约束优化问题，该方法的基本思想是通过将原始问题分解为子问题，并通过交替的方式逐步求解这些子问题进而求解整个问题。下面首先介绍ADMM算法求解基于基数约束的优化问题（CCOP）的基本原理，然后将本章研究的不同场景下的参数同步拓扑优化问题进行适当变换，并提出用于求解这些问题的定制化的ADMM算法。
 
 
 
-% \begin{center}
-% \begin{algorithm}[!htbp]
-%     \footnotesize
-%       \caption{FTACAS执行流程} 
-%       \label{Algorithm-FTACAS} 
-%         \begin{algorithmic}[1]
-%         \REQUIRE{物理拓扑$G=(V,E)$（设备集合$V_D$，交换机集合$V_S$，链路带宽$B_e$，链路时延$\alpha_e$，交换机端口容量$\mathrm{cap}_{in/out}$，转发模式$\mathrm{mode}$）；集合通信算子类型$op\in\{\mathrm{AllGather},\mathrm{AllToAll}\}$；设备数$N$；每设备数据块划分数$C$；数据块大小$S$}
-%         \ENSURE{集合通信调度$\mathcal{S}$；集合通信完成时间$T_{coll}$}
+\subsection{基于模拟退火算法的拓扑生成方法}
 
-%         \STATE \textbf{TEN构建与链路传输时间计算}：对每条物理链路$e=(u\rightarrow v)\in E$，基于$\alpha$--$\beta$模型计算传输时间：
-%         \begin{align*}
-%             &\Delta_{u\rightarrow v}(S)=\alpha_{u\rightarrow v}+\frac{S}{B_{u\rightarrow v}},\\
-%             &\Delta_{u\rightarrow s\rightarrow v}^{CT}(S)=\max\left(\Delta_{u\rightarrow s}(S),\,\Delta_{s\rightarrow v}(S)\right)\quad(\mathrm{CUT\_THROUGH}).
-%         \end{align*}
-
-%         \STATE \textbf{节点间最短传输路径搜索}：以$\Delta(\cdot)$为边代价，对每个源设备$u\in V_D$执行最短路径搜索，得到传输时间$D[u][\cdot]$；
-%         \STATE \textbf{算法数据预计算}：构建并缓存时间距离矩阵$\boldsymbol{D}=\{D[u][v]\}$以及直接设备邻居列表$\mathcal{N}(u)$；
-
-%         \STATE \textbf{算子条件初始化}：根据$op$生成前置条件集合$\mathcal{P}$与后置条件集合$\mathcal{Q}$，并初始化数据可达映射$\mathrm{chunkMap}$；
-%         \STATE 对每个未满足的后置条件$(c,d)\in\mathcal{Q}$计算初始优先级：
-%         \begin{align*}
-%             \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathrm{chunkMap}[c][s]=1} D[s][d] .
-%         \end{align*}
-%         \STATE 按优先级对未满足条件队列$\mathcal{L}$排序（AllGather：$\pi$升序；AllToAll：$\pi$降序），并对同优先级条件进行随机打散；
-
-%         \STATE 初始化事件队列$\mathrm{EQ}\leftarrow \{0\}$，调度集合$\mathcal{S}\leftarrow \emptyset$；
-%         \WHILE{$\mathcal{L}\neq \emptyset$}
-%             \STATE 从$\mathrm{EQ}$中取出当前时间步$t$；
-%             \STATE TEN推进至$t$并处理$t$时刻的所有到达事件；
-%             \FORALL{到达事件$(t,c,s\rightarrow d)$}
-%                 \IF{$op=\mathrm{AllGather}$ \AND $\mathrm{chunkMap}[c][d]=1$}
-%                     \STATE 执行Replacement策略，用$d$缺失且$s$已拥有的数据块替换$c$（若存在）；
-%                 \ENDIF
-%                 \STATE 更新$\mathrm{chunkMap}$，并从$\mathcal{L}$中移除已满足的后置条件；
-%                 \IF{$op=\mathrm{AllToAll}$}
-%                     \STATE 清除该数据块对应条件的调度标记；
-%                 \ENDIF
-%             \ENDFOR
-
-%             \STATE 初始化本时间步已调度条件集合$\mathrm{scheduled}\leftarrow \emptyset$；
-%             \FORALL{条件$(c,d)\in\mathcal{L}$（按当前优先级顺序）}
-%                 \IF{$op=\mathrm{AllToAll}$ \AND $(c,d)\in \mathrm{scheduled}$}
-%                     \STATE \textbf{continue}；
-%                 \ENDIF
-
-%                 \STATE \textbf{贪心源节点选择}：在满足$\mathrm{chunkMap}[c][s]=1$的设备中选择使$D[s][d]$最小的源节点$s$（同距随机）；
-%                 \IF{不存在可选源节点}
-%                     \STATE \textbf{continue}；
-%                 \ENDIF
-
-%                 \IF{$op=\mathrm{AllGather}$}
-%                     \STATE 设传输目标为$dst\leftarrow d$；
-%                 \ELSE
-%                     \STATE \textbf{AllToAll逐跳路由选择}：若$d\in\mathcal{N}(s)$且可用，则$dst\leftarrow d$；
-%                     \STATE 否则在$\mathcal{N}(s)$中选择满足$D[n][d] < D[s][d]$且可用的下一跳$n$；
-%                     \IF{未找到可行$dst$}
-%                         \STATE \textbf{continue}；
-%                     \ENDIF
-%                 \ENDIF
-
-%                 \STATE \textbf{资源检查与预留}：若TEN在$t$时刻可为$(s\rightarrow dst)$预留链路与交换机端口资源，则执行预留并加入调度$\mathcal{S}$；
-%                 \IF{预留成功}
-%                     \STATE 计算到达时间并加入事件队列：
-%                     \begin{align*}
-%                         t_{\mathrm{arr}} = t + D[s][dst],\quad \mathrm{EQ}\leftarrow \mathrm{EQ}\cup\{t_{\mathrm{arr}}\}.
-%                     \end{align*}
-%                     \IF{$op=\mathrm{AllToAll}$}
-%                         \STATE $\mathrm{scheduled}\leftarrow \mathrm{scheduled}\cup\{(c,d)\}$；
-%                         \STATE 若$dst\neq d$则更新$\pi(c,d)$并对$\mathcal{L}$进行局部重排；
-%                     \ENDIF
-%                 \ENDIF
-%             \ENDFOR
-%         \ENDWHILE
-
-%         \STATE $T_{coll}\leftarrow$ 最后一个到达事件对应的时间；
-%         \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
-%         \end{algorithmic}
-% \end{algorithm}
-% \end{center}
-
-
-
-\subsection{拓扑建模模块}
-\label{subsec:ftacas-topology}
-
-\noindent\textbf{1 多级交换机物理有向图建模}
-
-FTACAS将实际互连拓扑抽象为包含设备节点与交换机节点的物理有向图$G=(V,E)$。其中，设备集合$V_D$对应GPU/NPU等计算设备，交换机集合$V_S$对应NVSwitch、IB交换机等中继组件。每条有向边$e=(u\rightarrow v)\in E$表示一条物理单向链路，包含对应链路参数：带宽$B_{u\rightarrow v}$与静态时延$\alpha_{u\rightarrow v}$。
-
-该抽象允许链路在图中形成任意多级结构（例如设备$\rightarrow$交换机$\rightarrow$交换机$\rightarrow$设备），从而统一刻画多级交换机拓扑；同时也允许在同一对端点之间存在多条并行链路，以支持多条物理链路或多端口并发的建模需求。
-
-\noindent\textbf{2 交换机转发模式与端口并发约束}
-
-为刻画不同交换机的转发行为，FTACAS 为每个交换机节点$s\in V_S$ 定义转发模式$\mathrm{mode}(s)\in\{\mathrm{CT},\mathrm{SAF}\}$。
-% 需要指出的是，这里的转发模式是一种\emph{建模抽象}，
-% 并不严格对应具体硬件的内部实现。
-
-\begin{itemize}
-    \item \textbf{Cut-Through（CT）模式}：
-    交换机在接收数据流的同时即可向下游转发，端到端传输呈现流水化特征。在该模式下，路径上的多段链路可近似视为并行工作，端到端耗时主要由最慢链路及少量固定转发开销决定。该模型可用于刻画NVSwitch等片上高速交换结构，以及现代高性能IB/RoCE交换机的行为。
-
-    \item \textbf{Store-and-Forward（SAF）模式}：
-    交换机需在完整接收数据后再进行转发，各段链路的传输时延在路径上近似逐段累加。该模式用于刻画具有显著缓冲与分段转发特征的交换结构，或在保守建模假设下对网络转发行为进行上界估计。
-\end{itemize}
-
-同时，为限制交换机在同一时刻可并行处理的流数，FTACAS对每个交换机配置入向端口容量$\mathrm{cap}_{in}(s)$与出向端口容量$\mathrm{cap}_{out}(s)$，用于刻画交换机的并发处理能力。TEN在调度过程中将该约束转化为对时间区间重叠数量的限制（见\autoref{subsec:ftacas-ten}）。
-
-\noindent\textbf{3 直达设备邻接表$\mathcal{N}(u)$}
-
-为了保证调度的高效性和灵活性，FTACAS单次传输只调度不跨设备节点的路径，因此定义直达设备邻接关系：若存在从设备$u$到设备$v$的路径，且该路径内部节点均为交换机节点（即不经过中间设备作为路由器），则称$v$是$u$的直达设备邻居，记为$v\in\mathcal{N}(u)$。形式化定义为：
-\begin{align}
-\mathcal{N}(u)=\left\{v\in V_D\setminus\{u\}\;\middle|\;\exists p:u\rightsquigarrow v,\;\forall x\in p\setminus\{u,v\},\;x\in V_S\right\}. \label{eq:ftacas-neighbor-def}
-\end{align}
-直达设备邻接表$\mathcal{N}(\cdot)$在TEN构建阶段预计算并缓存，后续用于AllGather调度过程中的源设备选取与AllToAll调度过程中源设备下一跳设备的选取（见\autoref{subsec:ftacas-synth}）。
-
-
-
-\subsection{算子构建模块}
-\label{subsec:ftacas-collective}
-
-\noindent\textbf{1 算子统一表示：前置条件与后置条件}
-
-为统一刻画不同类型集合通信算子的合成需求，FTACAS采用条件集合的方式定义算子。记设备集合为$V_D$，设备数为$N=|V_D|$。对任意数据块（chunk）编号$c$与设备$d$，定义布尔型前置条件映射$\mathcal{P}(c,d)\in\{0,1\}$与后置条件集合$\mathcal{Q}$：
-\begin{itemize}
-    \item \textbf{前置条件（Precondition）} $\mathcal{P}(c,d)=1$：表示在当前时刻设备$d$已经拥有chunk $c$（该状态会在算法合成过程中动态更新）；
-    \item \textbf{后置条件（Postcondition）} $(c,d)\in\mathcal{Q}$：表示最终目标要求设备$d$必须拥有chunk $c$；当$\mathcal{P}(c,d)$被更新为$1$时，该后置条件被满足并从$\mathcal{Q}$中移除。
-\end{itemize}
-因此，集合通信算子的合成可表述为：在满足链路/交换机资源约束的前提下，构造一组传输调度$\mathcal{S}$，使得所有$(c,d)\in\mathcal{Q}$最终均满足$\mathcal{P}(c,d)=1$。
-
-\noindent\textbf{2 数据块划分}
-
-为探索更细粒度的通信并行性，FTACAS支持对每个设备节点的待通信数据预先进行分块。设每设备数据块划分数为$C$，则每个设备可视为拥有$C$个初始chunk。为便于描述，可将chunk索引映射为二元组$c=(u,k)$：其中$u\in V_D$为chunk来源设备，$k\in\{0,1,\dots,C-1\}$为分块编号。
-
-\noindent\textbf{3 AllGather算子条件构建}
-
-AllGather要求每个设备最终获得所有设备的数据块（即全量聚合分发），其算子语义示意图如\autoref{fig:allgather}所示。
-
-\begin{figure}[!htbp]
+由于\autoref{section3-2}中描述的参数同步拓扑优化问题是非凸问题，因此使用\autoref{Algorithm-T-ADMM}求解得到的结果取决于初始值的选取，特别是当节点数目较大时，随机给定\autoref{Algorithm-T-ADMM}的初始值容易使算法陷入局部最优解，从而无法得到一致性速度更快的参数同步拓扑。根据Koibuchi等人\cite{koibuchi2016optical}对高性能计算系统中网络拓扑的介绍，具有较小平均最短路径长度（Average Shortest Path Length，简称ASPL）的网络拓扑通常能够实现较低的延时，从而使系统具有更好的性能。平均最短路径长度指拓扑中所有节点之间最短路径长度的平均值，\autoref{fig:Fig3-3}是平均最短路径长度的一个示例。相较于随机初始化的拓扑结构，具有较小ASPL的拓扑作为初始拓扑可以在一定程度上帮助\autoref{Algorithm-T-ADMM}优化出一致性速度更快的参数同步拓扑。
+%是异构带宽场景下的优化问题，由于引入了离散变量，
+\begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/AllGather.pdf}
-    \caption{\label{fig:allgather}AllGather算子语义示意图}
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-3-ASPL-example.pdf}
+    \caption{\label{fig:Fig3-3}平均最短路径长度示例}
 \end{figure}
 
-在chunk划分数为$C$时，其条件构建如下：
-\begin{itemize}
-    \item \textbf{前置条件初始化：}对任意源设备$u\in V_D$及其本地chunk $(u,k)$，令$\mathcal{P}((u,k),u)=1$，且对任意$d\neq u$令$\mathcal{P}((u,k),d)=0$。
-    \item \textbf{后置条件集合：}对所有目的设备$d\in V_D$与所有源设备$u\in V_D$（$u$可等于$d$），以及$k\in\{0,\dots,C-1\}$，若$d$初始不拥有该chunk，则将条件加入：
-    \[
-        \mathcal{Q}\leftarrow \mathcal{Q}\cup \{((u,k),d)\}\quad\text{if}\quad \mathcal{P}((u,k),d)=0.
-    \]
-\end{itemize}
-由此可得AllGather的后置条件总数为$|\mathcal{Q}|=N\cdot (N-1)\cdot C$（不含每个设备本地已满足的后置条件）。
+寻找具有最小ASPL的无向拓扑的问题在图论中被称为ODP（order/degree problem）\cite{koibuchi2016optical}，此类问题要求拓扑满足给定的节点数目和节点度。虽然ODP的定义很简单，但是因为满足给定节点数和节点度的拓扑非常多，所以该问题有很多局部最优点。本小节基于Nakao等人的工作\cite{nakao2019method, nakao2020parallelization, nakao2021graph}，使用模拟退火算法求解ODP。
 
-\noindent\textbf{4 AllToAll算子条件构建}
+模拟退火算法（Simulated Annealing，简称SA）是一种启发式优化算法，它通过模拟固体在高温时的随机运动，逐渐冷却以达到能量最低点，来搜索问题的全局最优解或近似最优解。SA以一定概率接受较差解的特性使它能够跳出局部最优解，有效地进行全局搜索。另外，与其他进化算法相比，SA更简单、更通用，因此更容易应用于实际问题。
 
-AllToAll要求每个设备将其数据按目的设备切分并分别发送给对应目的设备，其算子语义示意图如\autoref{fig:alltoall}所示。
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/AllToAll.pdf}
-    \caption{\label{fig:alltoall}AllToAll算子语义示意图}
-\end{figure}
+基于SA求解ODP主要包括七个步骤：1）初始化，生成初始拓扑并计算初始能量值，即ASPL值；2）突变，生成新的拓扑；3）评估，计算新生成拓扑与当前拓扑的能量差；4）接受条件，根据能量差计算接受概率并判断是否接受新拓扑；5）更新，如果判断为接受则利用新拓扑更新解；6）冷却，基于退火公式降低温度参数；7）算法终止条件，判断是否终止SA执行。在初始化之后，算法将迭代执行步骤2）到步骤6），直到达到设定的迭代次数则终止算法。下面具体介绍上述算法执行过程中的前六步。
 
-
-设每个源设备$u$对每个目的设备$d$生成$C$个chunk，记为$(u\rightarrow d,k)$，其中$k\in\{0,\dots,C-1\}$。则：
-\begin{itemize}
-    \item \textbf{前置条件初始化：}对任意$u,d,k$，令$\mathcal{P}((u\rightarrow d,k),u)=1$（该chunk初始位于设备$u$），并对任意$v\neq u$令$\mathcal{P}((u\rightarrow d,k),v)=0$。
-    \item \textbf{后置条件集合：}对任意$u,d,k$（通常$u$可等于$d$），目标是目的设备$d$最终拥有该chunk，因此加入：
-    \[
-        \mathcal{Q}\leftarrow \mathcal{Q}\cup \{((u\rightarrow d,k),d)\}\quad\text{if}\quad\mathcal{P}((u\rightarrow d,k),v)=0.
-    \]
-\end{itemize}
-因此AllToAll的后置条件规模为$|\mathcal{Q}|=N\cdot (N-1)\cdot C$（不包含初始已满足后置条件）。该算子的关键特征在于：每个chunk具有唯一最终目的设备。这也是FTACAS在AllToAll合成中采用“逐跳推进”策略并禁用Replacement机制的主要原因（见\autoref{subsec:ftacas-synth}）。
-
-% \noindent\textbf{5 条件优先级初始化接口}
-
-% 算子构建模块在生成$\mathcal{P}$与$\mathcal{Q}$后，将未满足后置条件交由TEN进行优先级初始化。对任意$(c,d)\in\mathcal{Q}$，根据传输时间矩阵$\boldsymbol{T}$计算初始优先级$\pi(c,d)$：
-% \begin{align}
-%     \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathcal{P}(c,s)=1} T[s][d], \label{eq:ftacas-priority-init-collective}
-% \end{align}
-% 并按算子类型选择不同的排序方式（AllGather：$\pi$升序；AllToAll：$\pi$降序），从而为后续事件驱动贪心匹配提供统一的“任务队列”入口。
-
-\subsection{时间扩展网络模块（TEN）}
-\label{subsec:ftacas-ten}
-
-\noindent\textbf{1 链路传输时间计算与Cut-Through流水化}
-
-TEN基于$\alpha$--$\beta$模型为物理链路计算chunk传输时间。对任意链路$e=(u\rightarrow v)$，传输时间为
-\begin{align}
-\Delta_{u\rightarrow v}(S)=\alpha_{u\rightarrow v}+\frac{S}{B_{u\rightarrow v}}. \label{eq:ftacas-alpha-beta}
-\end{align}
-
-当路径中存在Cut-Through交换机$s$时，TEN将设备$\rightarrow$交换机$\rightarrow$设备的两段传输视为流水化，端到端耗时近似为二者的最大值：
-\begin{align}
-\Delta_{u\rightarrow s\rightarrow v}^{CT}(S)=\max\left(\Delta_{u\rightarrow s}(S),\,\Delta_{s\rightarrow v}(S)\right). \label{eq:ftacas-ct}
-\end{align}
-该近似使得TEN能够同时兼顾链路序列化与交换机流水行为，并与工程实现中的资源预留逻辑保持一致。
-
-\noindent\textbf{2 传输时间矩阵$\boldsymbol{T}$的预计算}
-
-\label{subsec:ftacas-ten-shortest}
-TEN以$\Delta(\cdot)$作为边代价，对每个源设备$u\in V_D$执行Dijkstra最短路径搜索，得到到所有设备节点的传输时间$T[u][\cdot]$，从而构建传输时间矩阵$\boldsymbol{T}=\{T[u][v]\}$。该矩阵在合成阶段用于：
-\begin{itemize}
-    \item 评估后置条件的初始优先级$\pi(c,d)$；
-    \item 贪心匹配时选择传输时间最短的设备；
-    \item 计算调度动作的到达时间$t_{\mathrm{arr}}=t+T[s][dst]$。
-\end{itemize}
-
-\noindent\textbf{3 资源占用状态维护与路由预留}
-
-\label{subsec:ftacas-ten-reserve}
-TEN在合成过程中维护两类关键资源的时间占用状态：
-\begin{itemize}
-    \item \textbf{链路资源：}对每条物理有向链路维护其忙碌截止时间；当存在并行链路时，分别维护每条并行链路的忙碌时间，从而支持同向多流并发。
-    \item \textbf{交换机端口资源：}对每个交换机$s$分别维护入向与出向端口在时间轴上的占用区间集合，并约束任意时刻重叠区间数不超过$\mathrm{cap}_{in}(s)$与$\mathrm{cap}_{out}(s)$。
-\end{itemize}
-
-当合成器尝试在时间$t$调度一次传输$(s\rightarrow dst)$时，TEN会执行“路由可行性检查”，即验证该传输对应路由上所有链路均未被占用，所有交换机端口在区间$[t,\;t+T[s][dst])$内均有足够余量；若检查通过，则TEN完成资源预留并返回成功，否则返回失败并由合成器继续尝试其它候选源/下一跳。
-
-\noindent\textbf{4 到达事件与事件队列}
-
-TEN将每次成功调度的传输转化为到达事件，并插入事件队列$\mathrm{EQ}$。到达事件可写为$(t_{\mathrm{arr}},c,s\rightarrow d)$，表示chunk $c$由$s$发送并于$t_{\mathrm{arr}}$到达$d$。事件队列按时间从小到大弹出，驱动合成器在关键时刻推进TEN状态并触发下一轮贪心匹配，从而避免使用固定时间步长导致的巨大时间扩展图开销。
-
-
-\subsection{合成器模块：事件驱动的贪心合成策略}
-\label{subsec:ftacas-synth}
-
-\noindent\textbf{1 后置条件与优先级排序策略}
-
-FTACAS以“后置条件是否被满足”作为合成过程的核心状态：对任意$(c,d)\in\mathcal{Q}$，当且仅当$\mathcal{P}(c,d)=1$时认为该后置条件被满足。为引导贪心合成的调度方向，FTACAS为每个未满足后置条件定义初始优先级：
-\begin{align}
-\pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathcal{P}(c,s)=1} T[s][d]. \label{eq:ftacas-priority}
-\end{align}
-
-在TEN初始化并计算得到传输时间矩阵$\boldsymbol{T}$后，对$\mathcal{Q}$进行初始化排序：AllGather采用$\pi$升序（优先满足传输时间短的后置条件以加速数据扩散），AllToAll采用$\pi$降序（优先推进传输时间长的后置条件以降低尾延迟）。
-
-\noindent\textbf{2 源设备贪心选择策略}
-
-对每个待满足后置条件$(c,d)$，合成器采用贪心匹配策略选择负责传输对应数据块的源设备：
-\begin{align}
-s=\arg\min\{T[s][d]\mid \mathcal{P}(c,s)=1,\,s\neq d\}. \label{eq:ftacas-source-select}
-\end{align}
-
-该策略优先选择传输时间最短的源设备，从而在局部决策上降低到达时间与资源占用区间长度。若最优源在当前时刻因链路/端口资源不足无法预留，则继续尝试次优的备选源，直至成功或放弃该条件并进入下一条件。
-
-\noindent\textbf{3 事件驱动的合成过程}\\
-
-FTACAS采用事件驱动的合成过程，在数据块到达时触发事件，更新TEN的状态并进行新一轮的调度。具体而言，从事件队列EQ取出最早完成的到达事件，获取当前的事件时间步$t$，处理所有到达事件并更新$\mathcal{P}$，随后根据算子类型执行对应的合成策略，直至所有后置条件均被满足（$\mathcal{Q}=\emptyset$）。
-
-
-
-\noindent\textbf{4 AllGather 合成策略}\\
-
-AllGather的目标是将系统中每个设备初始拥有的数据发送至所有设备。
-其事件驱动的贪心合成过程如\autoref{Algorithm-FTACAS-AllGather}所示。
-在每一个时间步，合成器执行如下核心调度逻辑：
-\begin{enumerate}[label=(\arabic*)]
-    \item \textbf{后置条件选取：}
-    从当前未满足的后置条件集合$\mathcal{Q}$中，
-    选取优先级最高（即$\pi(c,d)$最小）的后置条件$(c,d)$；
-
-    \item \textbf{源设备选取：}
-    在目标设备 $d$ 的直达设备邻接集合$\mathcal{N}(d)$中，
-    从满足$\mathcal{P}(c,s)=1$的设备里，
-    选择使传输时间$T[s][d]$最小的源设备$s$；
-
-    \item \textbf{资源冲突检查与调度：}
-    在当前时刻对路径$(s\rightarrow d)$执行资源冲突检查，
-    若TEN判定链路与交换机端口资源均可预留，
-    则完成资源预留并将对应传输加入调度集合$\mathcal{S}$，
-    同时生成相应的到达事件并加入事件队列$\mathrm{EQ}$。
-\end{enumerate}
-
-在上述调度流程中，只考虑通过不跨设备节点的单次传输能满足的后置条件，因此只从目标设备的直达设备邻居中选取源设备。
-AllGather允许chunk经由中间设备逐步扩散，虽然每次传输限定为直达设备之间的通信，
-但chunk可在不同时间步由不同中间设备继续转发，从而在复杂交换机拓扑下显著提升通信效率。
-
-在AllGather合成过程中，FTACAS还参考TACOS方法引入了Replacement机制以提升整体调度效率：
-\begin{itemize}
-    \item \textbf{Replacement 机制：}
-    为降低重复调度带来的网络资源浪费，
-    当到达事件中的 chunk $c$ 在目标设备 $d$ 处已存在
-    （即$\mathcal{P}(c,d)=1$）时，
-    合成器会尝试用设备 $d$ 仍缺失且源设备 $s$ 已拥有的另一chunk替换 $c$，
-    使得已发生的网络传输尽可能转化为对未满足后置条件的有效贡献
-    （见\autoref{Algorithm-FTACAS-AllGather} 第 5--7 行）。
-\end{itemize}
-
-
-
-\begin{center}
-\begin{algorithm}[!htbp]
-    % \footnotesize
-    % \small
-    \caption{AllGather的事件驱动贪心合成过程}
-    \label{Algorithm-FTACAS-AllGather}
-    \begin{algorithmic}[1]
-        \REQUIRE{前置条件集合$\mathcal{P}$；后置条件集合$\mathcal{Q}$；事件队列$\mathrm{EQ}$；调度集合$\mathcal{S}$；传输时间矩阵$\boldsymbol{D}$}
-        \ENSURE{更新后的调度集合$\mathcal{S}$；完成时间$T_{coll}$}
-
-        \WHILE{$\mathcal{Q}\neq \emptyset$}
-            \STATE 取出当前时间步$t\leftarrow \mathrm{popMin}(\mathrm{EQ})$；
-            \STATE TEN推进至$t$并处理$t$时刻的所有到达事件；
-            \FORALL{到达事件$(t,c,s\rightarrow d)$}
-                \IF{$\mathcal{P}(c,d)=1$}
-                    \STATE 执行Replacement：用$d$缺失且$s$已拥有的chunk替换$c$（若存在）；
-                \ENDIF
-                \STATE 更新$\mathcal{P}$，并从$\mathcal{Q}$中移除已满足的后置条件；
-            \ENDFOR
-
-            \FORALL{条件$(c,d)\in\mathcal{Q}$（按当前优先级顺序）}
-                \STATE 在$\mathcal{N}(d)$中选择源$s=\arg\min\{T[s][d]\mid \mathcal{P}(c,s)=1,\,s\neq d\}$；
-                \IF{不存在可选源$s$}
-                    \STATE \textbf{continue}；
-                \ENDIF
-                \STATE 设传输目标$dst\leftarrow d$；
-                \STATE 若TEN在$t$时刻可为$(s\rightarrow dst)$预留资源，则预留并加入调度$\mathcal{S}$；
-                \IF{预留成功}
-                    \STATE 生成到达事件：$t_{\mathrm{arr}}\leftarrow t+T[s][dst]$，$\mathrm{EQ}\leftarrow \mathrm{EQ}\cup\{t_{\mathrm{arr}}\}$；
-                \ENDIF
-            \ENDFOR
-        \ENDWHILE
-
-        \STATE $T_{coll}\leftarrow$ 最后一个到达事件对应的时间；
-        \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
-    \end{algorithmic}
-\end{algorithm}
-\end{center}
-
-
-
-\noindent\textbf{5 AllToAll 合成策略}\\
-
-AllToAll目标是将每个设备的数据按目的设备划分后，
-分别发送至对应设备。与 AllGather 不同，
-AllToAll中每个数据块具有唯一最终目的设备，
-后置条件的满足过程不涉及数据复制，
-因此FTACAS采用逐跳推进的调度策略。
-其事件驱动的贪心合成过程如\autoref{Algorithm-FTACAS-AllToAll} 所示。
-在每一个时间步$t$，合成器执行如下核心调度逻辑：
-\begin{enumerate}[label=(\arabic*)]
-    \item \textbf{后置条件选取：}  
-    从当前未满足的后置条件集合$\mathcal{Q}$中，
-    选取优先级最高（即$\pi(c,d)$最大）的后置条件$(c,d)$；
-
-    \item \textbf{源设备选取：}  
-    在满足$\mathcal{P}(c,s)=1$且$s\neq d$的设备中，
-    选择使传输时间$T[s][d]$最小的设备$s$作为当前源设备，
-    以保证每一步调度均朝着最终目的设备$d$的方向推进。
-
-    \item \textbf{下一跳设备选取：}  
-    若目标设备$d$属于源设备$s$的直达设备邻接集合
-    （即$d\in\mathcal{N}(s)$），
-    则直接设传输目标$dst\leftarrow d$；
-    否则，从$\mathcal{N}(s)$中选择下一跳设备$n$，
-    使其满足$T[n][d]<T[s][d]$，
-    并设$dst\leftarrow n$，
-    从而将chunk逐步推进至最终目的设备。
-
-    \item \textbf{资源冲突检查与调度：}  
-    若当前时刻在TEN中对路径$(s\rightarrow dst)$的资源冲突检查通过，
-    则完成资源预留并记录相应的传输调度与到达事件。
-    当$dst\neq d$时，后续调度将基于更新后的
-    $\mathcal{P}$与$\pi(c,d)$继续推进。
-\end{enumerate}
-
-
-
-除了上述基本调度流程外，
-FTACAS 在 AllToAll 合成过程中还引入了以下两项关键机制，
-以保证调度过程的正确性与高效性：
-
-\begin{itemize}
-    \item \textbf{防重复调度机制：}
-    为避免在不同时间步内对同一后置条件$(c,d)$进行重复的调度，
-    算法维护已调度但对应chunk尚未到达的条件集合$\mathrm{scheduled}$，
-    对已被调度的条件在当前时间步内不再重复处理
-    （见 \autoref{Algorithm-FTACAS-AllToAll} 第 10--12 行）。
-
-    \item \textbf{动态优先级调整机制：}
-    当 chunk 被调度到中间节点（即$dst\neq d$）时，
-    其到最终目的设备$d$的剩余传输时间将发生变化。
-    为使后续调度顺序与当前系统状态匹配，
-    算法会重新计算对应后置条件的优先级$\pi(c,d)$，
-    并对后置条件集合$\mathcal{Q}$进行局部重排
-    （见 \autoref{Algorithm-FTACAS-AllToAll} 第 31--33 行）。
-\end{itemize}
-
-
-
-\begin{center}
-\begin{algorithm}[!htbp]
-    % \footnotesize
-    % \small
-    \caption{AllToAll的事件驱动贪心合成过程}
-    \label{Algorithm-FTACAS-AllToAll}
-    \scalebox{0.88}{
-    \begin{minipage}{\linewidth}
-    \setlength{\baselineskip}{0.8\baselineskip}
-    \begin{algorithmic}[1]
-        \REQUIRE{前置条件集合$\mathcal{P}$；后置条件集合$\mathcal{Q}$；事件队列$\mathrm{EQ}$；调度集合$\mathcal{S}$；传输时间矩阵$\boldsymbol{D}$；直达设备邻接表$\mathcal{N}(\cdot)$}
-        \ENSURE{更新后的调度集合$\mathcal{S}$；完成时间$T_{coll}$}
-
-        \WHILE{$\mathcal{Q}\neq \emptyset$}
-            \STATE 取出当前时间步$t\leftarrow \mathrm{popMin}(\mathrm{EQ})$；
-            \STATE TEN推进至$t$并处理$t$时刻的所有到达事件；
-            \FORALL{到达事件$(t,c,s\rightarrow d)$}
-                \STATE 更新$\mathcal{P}$，并从$\mathcal{Q}$中移除已满足的后置条件；
-                \STATE 清除该条件的调度标记，使其允许继续逐跳推进；
-            \ENDFOR
-
-            \STATE 初始化本时间步已调度条件集合$\mathrm{scheduled}\leftarrow \emptyset$；
-            \FORALL{条件$(c,d)\in\mathcal{Q}$（按当前优先级顺序）}
-                \IF{$(c,d)\in \mathrm{scheduled}$}
-                    \STATE \textbf{continue}；
-                \ENDIF
-
-                \STATE 选择源$s=\arg\min\{T[s][d]\mid \mathcal{P}(c,s)=1,\,s\neq d\}$；
-                \IF{不存在可选源$s$}
-                    \STATE \textbf{continue}；
-                \ENDIF
-
-                \STATE \textbf{下一跳选择}：
-                \IF{$d\in\mathcal{N}(s)$且路由$(s\rightarrow d)$在$t$可预留}
-                    \STATE $dst\leftarrow d$；
-                \ELSE
-                    \STATE 在$\mathcal{N}(s)$中选取$T[n][d]<T[s][d]$且路由$(s\rightarrow n)$在$t$可预留的下一跳$n$；
-                    \IF{不存在可行下一跳}
-                        \STATE \textbf{continue}；
-                    \ENDIF
-                    \STATE $dst\leftarrow n$；
-                \ENDIF
-
-                \STATE 预留路由$(s\rightarrow dst)$并将传输加入$\mathcal{S}$；
-                \IF{预留成功}
-                    \STATE 生成到达事件：$t_{\mathrm{arr}}\leftarrow t+T[s][dst]$，$\mathrm{EQ}\leftarrow \mathrm{EQ}\cup\{t_{\mathrm{arr}}\}$；
-                    \STATE $\mathrm{scheduled}\leftarrow \mathrm{scheduled}\cup\{(c,d)\}$；
-                    \IF{$dst\neq d$}
-                        \STATE 更新$\pi(c,d)$并对$\mathcal{Q}$进行局部重排；
-                    \ENDIF
-                \ENDIF
-            \ENDFOR
-        \ENDWHILE
-
-        \STATE $T_{coll}\leftarrow$ 最后一个到达事件对应的时间；
-        \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
-    \end{algorithmic}
-    \end{minipage}
-    }
-\end{algorithm}
-\end{center}
-
-
-
-\subsection{复杂度与可扩展性分析}
-\label{subsec:ftacas-complexity}
-
-设物理图节点数$|V|$、边数$|E|$、设备数$N=|V_D|$，后置条件数量为$|\mathcal{Q}|$。
-\begin{itemize}
-    \item \textbf{TEN预计算开销：}预计算时对每个源设备执行一次最短路径搜索，时间复杂度为$O\!\left(N\cdot |E|\log|V|\right)$，并得到$\boldsymbol{T}$矩阵，空间复杂度为$O(N^2)$。
-    \item \textbf{事件驱动合成开销：}
-    设合成过程中共触发$K$个事件时间步，
-    第$k$个时间步中尚未满足的后置条件集合记为$\mathcal{Q}_k$。
-    若合成过程中总调度传输次数为$M$（对应$M$个事件），
-    则事件队列的维护开销约为$O(M\log M)$。
-    在每个事件时间步，
-    最坏情况下需要遍历$\mathcal{Q}_k$并为每个条件选择源设备，
-    若直接扫描源设备集合，则单步复杂度为$O(|\mathcal{Q}_k|\cdot N)$；
-    结合路由可行性检查与资源预留（与路径长度线性相关），
-    总体时间复杂度可表示为
-    $O\!\left(\sum_{k=1}^{K} |\mathcal{Q}_k|\cdot (N+\bar{L})\right)$，
-    其中$\bar{L}$表示平均路由长度。
-\end{itemize}
-
-实际算法实现中，借助事件驱动推进（减少空时间步）、候选条件剪枝、同优先级候选随机化与局部重排等机制，可有效降低常数开销并提升规模扩展能力。
 
 
 
 \section{实验评估}
+本节对提出的参数同步拓扑优化方法的有效性进行验证，并与现有的参数同步拓扑进行对比分析。所有实验都是在同一个硬件系统上完成的，该系统配备了2个Intel Xeon Gold 6226R处理器和8个NVIDIA GeForce RTX 2080 Ti，每个GPU有11GB显存。该硬件系统采用\autoref{fig:Fig2-4}所示的标准服务器架构。本节的实验使用pytorch实现。
 
-本节对提出的交换机拓扑感知的通用集合通信算法合成器FTACAS的算法性能进行验证，并与现有方法进行对比分析。实验主要关注算法合成过程的时间开销与合成得到的集合通信算法的算法带宽。所有实验均在同一计算平台上完成，实验平台配备Intel Core i9-12900H处理器。FTACAS采用C++语言实现。
+\subsection{实验设置}
+为了充分评估基于本章提出的方法获得的参数同步拓扑的性能，本节分别进行了一致性实验和分布式深度学习实验。一致性实验是指在给定拓扑上执行\autoref{section3-2-1}中描述的线性平均一致迭代过程，并根据一致性误差随时间的变化评估考虑通信开销时拓扑的一致性速度。在分布式深度学习实验中，训练算法使用分布式随机梯度下降算法（算法细节见{subsection-4-2-1}），数据集选用Cifar10和Cifar100图像分类数据集，神经网络模型采用ResNet-18。Cifar10和Cifar100数据集均包含60000张32×32像素的彩色图像。其中，Cifar10数据集涵盖10个类别，每个类别有6000张图像；而Cifar100数据集则包含100个类别，每个类别有600张图像。在这60000张图像中，50000张被用作训练数据，另外10000张用于测试。在训练开始之前，每个节点从每个类别的训练数据中随机采样相同数量的样本构成本地训练数据集。实验的超参数中批大小设置为32（每个节点），学习率设置为0.05，动量因子设置为0.9，权重衰减设置为0.0001，训练周期数设置为100。
 
-\subsection{对比方法：TECCL}
+另外在参数同步拓扑优化问题求解时，ADMM算法的收敛误差$\epsilon$设置为0.0001，惩罚项的权重$\rho$设置为10，$\alpha$设置为1，SA的迭代次数$N$设置为100000，初始温度参数$T_0$设置为使ASPL值最大的拓扑以50\%的概率被接受的温度值，对于不同的场景，该温度值不同，终止温度参数$T_N$设置为比当前拓扑ASPL值更大的拓扑以不大于0.01\%的概率被接受的温度值，由于采用2-opt进行突变时，比当前拓扑ASPL值更大的拓扑与当前拓扑的能量差至少为2，因此基于\autoref{tab:equ-3-52}设置终止温度参数为0.22。
 
-为了评估所提出FTACAS方法的有效性，本文选取TECCL\cite{liu2024rethinking}方法作为对比基线。TECCL是Liu等人2024年提出的方法，该方法将集合通信算法合成问题描述成多商品流优化问题，借鉴网络流量工程（Traffic Engineering，TE）中的建模与求解思想，在统一的优化框架下考虑路由选择、链路容量约束以及调度时序。TECCL方法将集合通信算法合成问题建模为混合整数线性规划（Mixed Integer Linear Programming，MILP）问题，并采用商业求解器Gurobi进行求解。TECCL方法同样支持多级交换机拓扑结构，支持AllGtaher和AlltoAll算子，在复杂拓扑下表现出较强的适应能力。本文采用作者开源的TECCL实现代码进行对比实验。
-
-\subsection{实验拓扑}
-为全面评估 FTACAS 在不同互连结构下的算法合成性能，并与 TECCL 方法进行对比，本文选取了多种具有代表性的 GPU 集群拓扑作为实验对象。这些拓扑覆盖了直接互连结构、单机箱高带宽互连结构以及多机箱交换机互连结构，能够反映实际系统中常见的通信场景。
-具体而言，实验中使用的拓扑类型包括：直连 Mesh 拓扑（Mesh4×4）、单机箱 DGX1 拓扑（DGX1-1）、双机箱 DGX2 拓扑（DGX2-2）、基于交换机的 NDv2 拓扑（NDv2-2 与 NDv2-4），以及双机箱 AMD GPU 拓扑（AMD-2）。其中，拓扑名称中的数字后缀表示所包含的机箱（chassis）数量。
-\autoref{tab:topology-summary} 给出了每种拓扑中单个机箱内的GPU数量以及机箱数量。FTACAS与TECCL均在相同的拓扑配置下运行。
-\begin{table}[!htbp]
-\centering
-\caption{实验拓扑配置}
-\label{tab:topology-summary}
-\begin{tabular}{lccc}
-\toprule
-Topology & GPUs per chassis & Chassis  & Total number of GPUs\\
-\midrule
-Mesh($4\times4$)  & 16 & 1 & 16\\
-DGX1-1            & 8  & 1 & 8\\
-DGX2-2            & 16 & 2 & 32\\
-NDv2-2            & 8  & 2 & 16\\
-NDv2-4            & 8  & 4 & 32\\
-AMD-2             & 16 & 2 & 32\\
-\bottomrule
-\end{tabular}
-\end{table}
-
-Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓扑结构可参考\autoref{fig:DGX1}，其物理参数与单机箱 NDv2 拓扑相同。DGX2-2 的拓扑结构如\autoref{fig:DGX2-2}所示。NDv2-4 的拓扑结构如\autoref{fig:NDv2-4}所示，其中 NDv2-2 可视为相同结构下的双机箱拓扑；NDv2 的单机箱拓扑结构与 DGX1 类似，在本实验中采用相同的实验参数。AMD-2 的拓扑结构如\autoref{fig:AMD-2}所示。
+本节将优化得到的参数同步拓扑与五种现有的参数同步拓扑进行了对比，包括环形拓扑、网格拓扑（2D-grid）、2D-torus、指数拓扑和随机拓扑，\autoref{fig:Fig3-6}展示了8个节点上这五种拓扑的结构。其中前三种拓扑的权重矩阵基于Metropolis规则\cite{nedic2018network}生成：
+\begin{equation}
+    \label{tab:equ-3-54}
+    W_{ij}=\frac{1}{2\max \left\{ d_i,d_j \right\}} \ i,j\in \left\{ 1,...,n \right\} 
+\end{equation}
+式中$d_i$表示节点$i$的度。指数拓扑为有向拓扑，其每个节点将数据乘以$\frac{1}{d_{out}+1}$后发送给出邻居和节点本身，$d_{out}$为节点的出度。随机拓扑的每条边以0.5的概率生成，并且边的权重等于$\frac{1}{d_{\max}}$，$d_{\max}$为拓扑的最大度（无向拓扑中指度最大的节点的度），例如图\autoref{random-topo}中$d_{\max}=5$。本章研究和对比的拓扑中，除指数拓扑外均为无向拓扑，由于Gossip架构上一条无向边可以看作两条有向边，并且本章考虑的边的数目为无向边的数目，因此令指数拓扑中边的数目为有向边数目的$\frac{1}{2}$。
 
 \begin{figure}[!htbp]
     \centering
-    \subfigure[Mesh($4\times4$)拓扑结构\label{fig:Mesh4x4}]{
-        \includegraphics[width=0.4\linewidth]{figure/chapter2/Mesh.pdf}
+    \subfigure[环形拓扑]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-1-different-topo.pdf}
     }
-    \subfigure[DGX2-2拓扑结构\label{fig:DGX2-2}\cite{liu2024rethinking}]{
-        \includegraphics[width=0.56\linewidth]{figure/chapter2/DGX2-2.pdf}
+    \subfigure[网格拓扑]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-2-different-topo.pdf}
     }
-    \subfigure[NDv2-4拓扑结构\label{fig:NDv2-4}\cite{liu2024rethinking}]{
-        \includegraphics[width=0.4\linewidth]{figure/chapter2/NDv2-4.pdf}
+    \subfigure[2D-Torus]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-3-different-topo.pdf}
     }
-    \subfigure[AMD-2拓扑结构\label{fig:AMD-2}\cite{liu2024rethinking}]{
-        \includegraphics[width=0.56\linewidth]{figure/chapter2/AMD-2.pdf}
+    \subfigure[指数拓扑]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-4-different-topo.pdf}
     }
-    \caption{实验中使用的不同拓扑结构示意图}
-    \label{fig:topologies}
+    \subfigure[随机拓扑]{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-8-5-different-topo.pdf}
+        \label{random-topo}
+    }
+    \caption{\label{fig:Fig3-6}现有的参数同步拓扑}
 \end{figure}
 
-
-
-\subsection{实验设置与评价指标}
-
-本节对 FTACAS 方法的算法合成时间开销以及合成得到的集合通信算法的算法带宽进行评估，并与 TECCL 方法进行对比分析。实验中，FTACAS 与 TECCL 均在相同的拓扑配置下运行。针对每种拓扑结构，分别测试 AllGather 与 AllToAll 两种集合通信算子的合成性能。
-
-为刻画不同数据量下集合通信算子的特征，实验选取了三种数据量设置，分别为 1MB、64MB 与 1GB。本文中，集合通信算子的数据量定义为完整接收缓冲区的大小。此外，考虑到分块策略对集合通信调度与性能的影响，实验中测试了分块数为 1 与 2 的两种场景。
-
-在上述设置下，本节比较了 FTACAS 与 TECCL 在不同拓扑结构上的算法合成时间开销，以及其合成得到的集合通信算法的算法带宽。
-其中，算法带宽（Algorithm Bandwidth）用于衡量合成得到的集合通信算法在运行阶段的数据传输效率，其定义为集合通信过程中完成传输的数据量与对应完成时间的比值，即
-\begin{equation}
-\mathrm{B_{alg}}
-=
-\frac{S_{\mathrm{total}}}{T_{coll}},
-\end{equation}
-
-
+为了模拟不同的带宽场景，本节采用第二章中获得计算时间和通信时间的方法，测试了在单个2080Ti上训练ResNet-18一次迭代的计算时间和在带宽为9.76GB/s的链路上通信ResNet-18的模型参数的通信时间，分别为15.21ms和5.01ms，并以测试结果为基准，对不同场景下一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放。缩放方式如下：
+\begin{itemize}
+    \item 首先计算拓扑中每条边的可用带宽，并确定其中最小的可用带宽，假设为$b_{min}$；
+    \item 对于一致性实验，根据9.76与$b_{min}$的比值对迭代时间进行缩放：
+    \begin{equation}
+        \label{tab:equ-3-55}
+        t_{iter}=\frac{9.76}{b_{min}}\times 5.01;
+    \end{equation}
+    \item 对于分布式深度学习实验，根据9.76与$b_{min}$的比值对每次迭代的通信时间进行缩放，并基于批大小和节点数获得一个训练周期所需的迭代次数$c_{iter}$，进而计算一个训练周期所需时间：
+    \begin{equation}
+        \label{tab:equ-3-56}
+        t_{epoch}=\left( \frac{9.76}{b_{min}}\times 5.01+15.21 \right) \times c_{iter}.
+    \end{equation}
+\end{itemize}
 
 \subsection{实验结果与分析}
+本小节从以下几个方面设计实验以验证本章提出的参数同步拓扑优化方法的有效性：实验1在8个节点上验证了本章提出的定制化ADMM算法求解参数同步拓扑优化问题的收敛性；实验2通过一致性实验和分布式深度学习实验，对比了同构带宽场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能；实验3通过一致性实验和分布式深度学习实验，对比了节点带宽异构场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能；实验4通过一致性实验和分布式深度学习实验，对比了服务器内部链路带宽异构场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能；实验5通过一致性实验和分布式深度学习实验，对比了服务器间交换机端口带宽异构场景下优化得到的参数同步拓扑与现有参数同步拓扑的性能。
 
-下面将详细对比不同场景下的AllGather与AlltoAll算子的算法带宽与求解时间。
-
-\noindent\textbf{1 算法带宽}
-
-不同场景下AllGather算子的算法带宽对比结果如\autoref{fig:allgather-bandwidth}所示。
-不同场景下AlltoAll算子的算法带宽对比结果如\autoref{fig:alltoall-bandwidth}所示。
+\textbf{实验1：}为了验证定制化ADMM算法求解参数同步拓扑优化问题的收敛性，本节以同构带宽场景下的拓扑优化问题为例，令节点数目为8，边的数目为12，求解得到的拓扑和相应的权重矩阵如\autoref{fig:Fig3-7}所示，其中边的粗细表示边的权重大小，边越粗权重越大。可以看到，优化得到的参数同步拓扑中每个节点的度均为3，并且边的权重具有一定的对称性。优化问题求解过程中优化目标值$\tilde{\lambda}$和变量收敛误差随迭代次数的变化如\autoref{fig:Fig3-8}所示。其中优化目标值随迭代次数不断增加，并在达到最优值后保持不变，而且每组变量的误差也能够在1000次迭代后达到$10^{-5}$以下，从而充分说明了\autoref{Algorithm-T-ADMM}的收敛性。
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=1\linewidth]{figure/chapter2/allgather_bandwidth_all_scenarios.pdf}
-    \caption{不同场景下AllGather算子的算法带宽对比}
-    \label{fig:allgather-bandwidth}
+    \subfigure{
+        \includegraphics[width=0.3\linewidth]{figure/chapter3/fig3-6-1-topo-architecture.pdf}
+    }
+    \subfigure{
+        \includegraphics[width=0.54\linewidth]{figure/chapter3/fig3-6-2-weight-matrix.pdf}
+    }
+    \caption{\label{fig:Fig3-7}同构带宽场景下$n=8,r=12$时求解得到的参数同步拓扑}
 \end{figure}
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=1\linewidth]{figure/chapter2/alltoall_bandwidth_all_scenarios.pdf}
-    \caption{不同场景下AlltoAll算子的算法带宽对比}
-    \label{fig:alltoall-bandwidth}
+    \subfigure[优化目标]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-7-1-lambda_.pdf}
+    }
+    \subfigure[收敛误差]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-7-2-resid.pdf}
+    }
+    \caption{\label{fig:Fig3-8}优化目标和收敛误差随迭代次数的变化}
 \end{figure}
 
-\noindent\textbf{2 求解时间}
+\textbf{实验2：}为了验证同构带宽场景下参数同步拓扑优化方法的有效性，本节将基于\autoref{Algorithm-T-ADMM}得到的参数同步拓扑（T-ADMM）与现有的参数同步拓扑进行比较。首先进行一致性实验：令节点数目为16，边的数目分别为16，24，32和54，随机初始化边的权重并求解得到不同边的数目对应的参数同步拓扑；然后，为每个节点随机初始化维度与ResNet-18模型参数量相同的数据（经统计，ResNet-18模型参数量为11689512）；在求解得到的参数同步拓扑和现有的参数同步拓扑上执行线性平均一致问题的迭代过程，并记录一致性误差$\left\| \boldsymbol{x}_k-\bar{\boldsymbol{x}} \right\| _2$随迭代次数$k$的变化。在同构带宽场景下，每个节点的带宽相同，假设为9.76GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\min \left( \frac{9.76}{d_i},\frac{9.76}{d_j} \right) $，$d_i$和$d_j$为节点$i$和节点$j$的度（指数拓扑中为节点的出度/入度）。对迭代时间进行缩放后，不同拓扑的一致性误差随时间的变化如\autoref{fig:Fig3-9}所示。图中$r$为边的数目，$d$为拓扑的最大度。可以看到，当边的数目相同时，T-ADMM的一致性速度均优于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时T-ADMM的一致性速度最快。在对比的拓扑中，指数拓扑的一致性速度最快，为了进一步比较T-ADMM与指数拓扑的性能，本节还在不同的节点数目上对比了两者的渐进收敛因子和一致性误差达到0.0001所需的收敛时间，实验结果如\autoref{tab:iso-bandwidth-consensus}所示。当节点数目从6增加到32时，T-ADMM的渐进收敛因子和收敛时间始终小于指数拓扑，充分说明了T-ADMM在一致性速度上优于指数拓扑。
 
-不同场景下AllGather算子的求解时间对比结果如\autoref {fig:allgather-solving-time}所示。
-不同场景下AlltoAll算子的求解时间对比结果如\autoref {fig:alltoall-solving-time}所示。
-
-\begin{figure}[!htbp]
+\begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=1\linewidth]{figure/chapter2/allgather_time_all_scenarios.pdf}
-    \caption{不同场景下AllGather算子的求解时间对比}
-    \label{fig:allgather-solving-time}
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-9-iso-bandwidth-consensus.pdf}
+    \caption{\label{fig:Fig3-9}同构带宽场景下一致性误差随时间的变化}
 \end{figure}
 
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=1\linewidth]{figure/chapter2/alltoall_time_all_scenarios.pdf}
-    \caption{不同场景下AlltoAll算子的求解时间对比}
-    \label{fig:alltoall-solving-time}
-\end{figure}
-
-\noindent\textbf{3. 综合对比分析}
-
-分块数为1时，FTACAS相对于TECCL算法的算法带宽加速比如\autoref {tab:speedup_ab_chunk1_opcol}所示，求解时间加速比如\autoref {tab:speedup_time_chunk1_opcol_sci}所示。
-
-% Required package: \usepackage{booktabs}
-\begin{table}[!htbp]
-\centering
-\caption{FTACAS相对TECCL的算法带宽加速比}
-\label{tab:speedup_ab_chunk1_opcol}
-\setlength{\tabcolsep}{4.5pt}
-\begin{tabular}{lcccccc}
-\toprule
-\multirow{2}{*}{Topology} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AllToAll} \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}
-& 1MB & 64MB & 1GB & 1MB & 64MB & 1GB \\
-\midrule
-Mesh
-& 1.00 & 1.00 & 1.00
-& 0.94 & 0.94 & 0.94 \\
-DGX1-1
-& 1.00 & 1.00 & 1.00
-& 1.50 & 1.34 & 1.33 \\
-DGX2-2
-& 1.65 & 1.76 & 1.76
-& 1.00 & 1.03 & 1.03 \\
-NDv2-2
-& 1.60 & 1.01 & 1.00
-& 0.89 & 0.89 & 0.89 \\
-NDv2-4
-& 2.23 & 1.14 & 1.10
-& 0.98 & 0.97 & 0.98 \\
-AMD-2
-& 2.99 & 3.05 & 3.05
-& 0.98 & 0.97 & 0.98 \\
-\bottomrule
-\end{tabular}
+\begin{table}[!htpb]
+    \center
+    \caption{同构带宽场景下T-ADMM与指数拓扑在不同节点数目上的一致性速度}
+    \label{tab:iso-bandwidth-consensus}
+    \setlength{\tabcolsep}{1.5mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|c|}
+      \hline
+      \multicolumn{2}{|c|}{节点数目}            & 6 & 8 & 10 & 12 & 14 & 16 & 18 & 20 & 22 & 24 & 26 & 28 & 30 & 32 \\ \hline
+      \multirow{2}{*}{渐进收敛因子} & 指数拓扑 & 0.5 & 0.5 & 0.6 & 0.6 & 0.6 & 0.6 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 & 0.67 \\ \cline{2-16}
+                                   & T-ADMM  & \textbf{0.33} &  \textbf{0.41} & \textbf{0.45} & \textbf{0.5} & \textbf{0.48} & \textbf{0.53} & \textbf{0.45} & \textbf{0.46} & \textbf{0.48} & \textbf{0.51} & \textbf{0.54} & \textbf{0.52} & \textbf{0.54} & \textbf{0.54} \\ \hline
+      \multirow{2}{*}{收敛时间/ms}     & 指数拓扑 & 210 & 210 & 381 & 381 & 381 & 381 & 576 & 576 & 576 & 576 & 576 & 576 & 576 & 576 \\ \cline{2-16}
+                                   & T-ADMM & \textbf{150} & \textbf{180} & \textbf{240} & \textbf{301} & \textbf{351} & \textbf{351} & \textbf{391} & \textbf{421} & \textbf{451} & \textbf{481} & \textbf{511} & \textbf{511} & \textbf{541} & \textbf{541} \\ \hline
+    \end{tabular}
+    }}
 \end{table}
 
-% Required package: \usepackage{booktabs}
-\begin{table}[!htbp]
-\centering
-\caption{FTACAS相对TECCL的合成时间加速比}
-\label{tab:speedup_time_chunk1_opcol_sci}
-\setlength{\tabcolsep}{4.5pt}
-\begin{tabular}{lcccccc}
-\toprule
-\multirow{2}{*}{Topology} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AllToAll} \\
-\cmidrule(lr){2-4}\cmidrule(lr){5-7}
-& 1MB & 64MB & 1GB & 1MB & 64MB & 1GB \\
-\midrule
-Mesh
-& $2.36\times10^{3}$ & $2.18\times10^{3}$ & $2.16\times10^{3}$
-& $3.45\times10^{3}$ & $3.31\times10^{3}$ & $3.08\times10^{3}$ \\
-DGX1-1
-& $1.08\times10^{3}$ & $1.08\times10^{3}$ & $1.00\times10^{3}$
-& $5.33\times10^{3}$ & $5.42\times10^{3}$ & $5.74\times10^{3}$ \\
-DGX2-2
-& $5.27\times10^{2}$ & $4.23\times10^{2}$ & $4.49\times10^{2}$
-& $2.33\times10^{3}$ & $2.61\times10^{3}$ & $2.65\times10^{3}$ \\
-NDv2-2
-& $4.72\times10^{3}$ & $5.26\times10^{3}$ & $5.41\times10^{3}$
-& $1.16\times10^{3}$ & $1.27\times10^{3}$ & $1.26\times10^{3}$ \\
-NDv2-4
-& $7.79\times10^{4}$ & $4.84\times10^{4}$ & $5.46\times10^{4}$
-& $3.31\times10^{3}$ & $7.28\times10^{3}$ & $6.38\times10^{3}$ \\
-AMD-2
-& $5.84\times10^{2}$ & $5.63\times10^{2}$ & $5.29\times10^{2}$
-& $9.41\times10^{2}$ & $6.62\times10^{2}$ & $8.18\times10^{2}$ \\
-\bottomrule
-\end{tabular}
+接下来在16个节点上利用求解得到的参数同步拓扑和现有的参数同步拓扑进行分布式深度学习实验，并根据\autoref{tab:equ-3-56}计算每个训练周期的时间，得到测试准确率\footnote{所有节点的测试准确率取平均值后，利用滑动窗口进行了光滑化，下文同理。}随时间的变化如\autoref{fig:Fig3-10}所示。从图中可以看到，当边的数目相同时，相同时间内T-ADMM上的预测准确率高于现有的参数同步拓扑，并且在所有拓扑中，边的数目为32时T-ADMM上的预测准确率最高。其中环形拓扑和T-ADMM（$r$=16，$d$=2）对应的曲线在250s左右消失的原因是这两个拓扑已经完成100个训练周期的训练。另外，为了定量评估不同参数同步拓扑对分布式深度学习训练性能的影响，统计了在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间\footnote{在本节的实验设置下，84\%和62\%为所有拓扑都能达到的相对较高的预测准确率值。}，如\autoref{tab:iso-bandwidth-accuracy-time}所示。可以看到，边的数目为32时求解得到的参数同步拓扑在Cifar10数据集和Cifar100数据集上预测准确率达到设定值所需的时间分别为110.1s和127.6s，均是所有拓扑中所需时间最少的，并且比环形拓扑和网格拓扑快了1倍左右，比随机拓扑快了1倍多。其他边的数目约束下的T-ADMM不如T-ADMM（$r$=32）的原因是当边的数目更少时拓扑更稀疏，一致性速度更慢，而当边的数目更多时，节点的度更大，每次迭代所需通信时间更多。
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Cifar10]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-10-1-iso-bandwidth-cifar10.pdf}
+    }
+    \subfigure[Cifar100]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-10-2-iso-bandwidth-cifar100.pdf}
+    }
+    \caption{\label{fig:Fig3-10}同构带宽场景下测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
+    \center
+    \caption{同构带宽场景下测试准确率达到设定值所需的时间（单位：s）}
+    \label{tab:iso-bandwidth-accuracy-time}
+    \setlength{\tabcolsep}{1mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|c|}
+      \hline
+      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-ADMM} \\ ($r$=16)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=24)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=32)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=54)}\\ \hline
+      Cifar10 & 229.7 & 227.7 & 189.8 & 134.6 & 262.0 & 165.4 & 144.9 & \textbf{110.1} & 146.1 \\ \hline
+      Cifar100 & 234.7 & 269.1 & 200.1 & 151.8 & 345.1 & 177.8 & 172.5 & \textbf{127.6} & 183.9 \\ \hline
+    \end{tabular}
+    }}
 \end{table}
 
+\textbf{实验3：}下面验证节点带宽异构场景下参数同步拓扑优化方法的有效性。在与现有的参数同步拓扑进行对比前，首先对基于模拟退火算法（SA）生成\autoref{Algorithm-T-ADMM}的初始拓扑的有效性进行验证。改变节点数目和节点带宽的异构性，并分别随机初始化拓扑结构和使用SA生成初始拓扑结构，然后基于\autoref{Algorithm-T-ADMM}求解得到对应的参数同步拓扑，\autoref{tab:bandwidth-constraint-SA-compare}对比了使用两种方式得到的优化目标值$\tilde{\lambda}$和参数同步拓扑的渐进收敛因子。其中T-ADMM为随机初始化并求解优化问题得到的参数同步拓扑，T-SA-ADMM为使用SA生成初始拓扑结构并求解优化问题得到的参数同步拓扑，可以看到，当节点数目为6时，两种方法得到的结果相同，当节点数目增加至8和16时，对于大部分的节点带宽比，T-SA-ADMM得到的结果要优于T-ADMM，说明基于SA初始化拓扑结构确实能够改善求解结果。\autoref{fig:Fig3-11}是几种节点带宽比对应的T-SA-ADMM的拓扑结构图，其中边的粗细表示对应边的权重。
+
+%令边的数目分别为16，32和48，求解得到对应的参数同步拓扑。在求解得到的参数同步拓扑和现有的参数同步拓扑上进行一致性实验和分布式深度学习实验，
+接下来在16个节点上进行一致性实验和分布式深度学习实验，对比T-SA-ADMM与现有参数同步拓扑的性能。设置节点的带宽比为3:3:3:3:3:3:3:3:1:1:1:1:1:1:1:1，其中3对应的带宽为9.76GB/s，1对应的带宽为3.25GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\min \left( \frac{b_i}{d_i},\frac{b_j}{d_j} \right) $，$b_i$和$b_j$为节点$i$和节点$j$的带宽，$d_i$和$d_j$为节点$i$和节点$j$的度。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-12}和\autoref{fig:Fig3-13}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽3.25GB/s的比值。可以看到，一致性速度方面，边的数目为32和48时，T-SA-ADMM优于现有的参数同步拓扑，边的数目为16时，T-SA-ADMM的一致性速度略慢于指数拓扑，但是仍优于其他现有的参数同步拓扑。在分布式深度学习实验中，相同时间内不同边的数目对应的T-SA-ADMM上的预测准确率均高于现有的参数同步拓扑。虽然T-SA-ADMM（$r$=16，$b$=1）的一致性速度慢于指数拓扑，但是由于该拓扑中边的可用带宽更高，使得分布式深度学习一次迭代所需时间更短，从而可以在相同时间内执行更多次数的模型参数更新步骤，加快模型收敛速度。\autoref{tab:bandwidth-constraint-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间。其中不同边的数目对应的T-SA-ADMM所需的时间均明显少于现有的参数同步拓扑。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-12-bandwidth-constraint-consensus.pdf}
+    \caption{\label{fig:Fig3-12}节点带宽异构场景下一致性误差随时间的变化}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Cifar10]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-13-1-bandwidth-constraint-cifar10.pdf}
+    }
+    \subfigure[Cifar100]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-13-2-bandwidth-constraint-cifar100.pdf}
+    }
+    \caption{\label{fig:Fig3-13}节点带宽异构场景下测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
+    \center
+    \caption{节点带宽异构场景下测试准确率达到设定值所需的时间（单位：s）}
+    \label{tab:bandwidth-constraint-accuracy-time}
+    \setlength{\tabcolsep}{1mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|}
+      \hline
+      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=16)} & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=32)} & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=48)}\\ \hline
+      Cifar10 & 412.0 & 486.4 & 405.3 & 287.4 & 663.8 & 275.3 & \textbf{181.6} & 182.9 \\ \hline
+      Cifar100 & 420.9 & 574.9 & 427.5 & 324.3 & 874.26 & 239.76 & 248.1 & \textbf{194.7} \\ \hline
+    \end{tabular}
+    }}
+\end{table}
+
+\textbf{实验4：}下面验证服务器内部链路带宽异构场景下参数同步拓扑优化方法的有效性。由于SA不适用于该场景，因此随机初始化拓扑结构，并基于\autoref{Algorithm-T-ADMM}求解得到参数同步拓扑（T-ADMM）。\autoref{fig:Fig3-14}是不同链路带宽比对应的T-ADMM的拓扑结构图，其中边的粗细表示对应边的权重。接下来设置三种类型的物理链路上的带宽比为$b_{PIX}:b_{NODE}:b_{SYS}$=1:1:2，其中2对应的带宽为9.76GB/s，1对应的带宽为4.88GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\frac{b_{link}}{e_{link}}$，$b_{link}$为边$\left\{ i,j \right\} $所在物理链路的带宽，$e_{link}$为边$\left\{ i,j \right\} $所在物理链路上边的数目。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-15}和\autoref{fig:Fig3-16}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽4.88GB/s的比值。可以看到，相同时间内，T-ADMM的一致性误差和预测准确率均优于现有的参数同步拓扑。另外，在该场景下，指数拓扑的性能有所下降，因为指数拓扑中物理链路SYS上有10条边，导致边的最小可用带宽仅为0.976GB/s，从而大大增加了一致性实验的迭代时间和分布式深度学习实验的训练周期时间。\autoref{tab:bandwidth-constraint-intra-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到61\%所需的时间。其中除了Cifar10上2D-torus与T-ADMM（$r$=16）所需的时间接近外，不同边的数目对应的T-ADMM所需的时间均明显少于现有的参数同步拓扑。
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:1:1 ($r=7$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-1-topo.pdf}
+    }
+    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:1:2 ($r=8$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-2-topo.pdf}
+    }
+    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:2:4 ($r=12$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-3-topo.pdf}
+    }
+    \subfigure[$b_{PIX}:b_{NODE}:b_{SYS}$=1:4:4 ($r=16$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-14-4-topo.pdf}
+    }
+    \caption{\label{fig:Fig3-14}不同链路带宽比对应的T-ADMM的拓扑结构}
+\end{figure}
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-15-bandwidth-constraint-intra-consensus.pdf}
+    \caption{\label{fig:Fig3-15}服务器内部链路带宽异构场景下一致性误差随时间的变化}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Cifar10]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-16-1-bandwidth-constraint-intra-cifar10.pdf}
+    }
+    \subfigure[Cifar100]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-16-2-bandwidth-constraint-intra-cifar100.pdf}
+    }
+    \caption{\label{fig:Fig3-16}服务器内部链路带宽异构场景下测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
+    \center
+    \caption{服务器内部链路带宽异构场景下测试准确率达到设定值所需的时间（单位：s）}
+    \label{tab:bandwidth-constraint-intra-accuracy-time}
+    \setlength{\tabcolsep}{2mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|c|}
+      \hline
+      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-ADMM} \\ ($r$=8)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=12)} & \makecell[c]{\textbf{T-ADMM} \\ ($r$=16)}\\ \hline
+      Cifar10 & 484.1 & 662.4 & 407.1 & 754.0 & 754.0 & \textbf{266.8} & 276.0 & 407.6 \\ \hline
+      Cifar100 & 350.7 & 552.0 & 510.6 & 651.8 & 766.8 & \textbf{261.8} & 269.1 & 310.1 \\ \hline
+    \end{tabular}
+    }}
+\end{table}
+
+\textbf{实验5：}下面验证服务器间交换机端口带宽异构场景下参数同步拓扑优化方法的有效性。在该场景下，对交换机端口上边的数目的约束可以看作是对子拓扑中节点度的约束，因此基于SA生成初始拓扑结构的方法同样适用于该场景下优化问题的求解。设置节点数目为16，交换机层级数为2，每个交换机上的端口数为4，分别令不同层级上的交换机端口带宽比为1：2和2：3，求解优化问题得到的T-SA-ADMM的拓扑结构如\autoref{fig:Fig3-17}所示，其中边的粗细表示对应边的权重。接下来在交换机端口带宽比为1：2的场景下进行一致性实验和分布式深度学习实验，其中2对应的带宽为9.76GB/s，1对应的带宽为4.88GB/s，则边$\left\{ i,j \right\} $上的可用带宽等于$\frac{b_{s_{ij}}}{e_{s_{ij}}}$，$b_{s_{ij}}$为边$\left\{ i,j \right\} $经过的交换机端口的带宽，$e_{s_{ij}}$为边$\left\{ i,j \right\} $经过的交换机端口上边的数目。对一致性实验的迭代时间和分布式深度学习实验的训练周期时间进行缩放后，不同参数同步拓扑的一致性误差和预测准确率随时间的变化分别如\autoref{fig:Fig3-18}和\autoref{fig:Fig3-19}所示。图中$b$为拓扑中边的最小可用带宽与单位带宽4.88GB/s的比值。可以看到，相同时间内，T-SA-ADMM的一致性误差和预测准确率均优于现有的参数同步拓扑。\autoref{tab:bandwidth-constraint-inter-accuracy-time}统计了使用不同拓扑进行分布式训练时，在Cifar10上测试准确率达到84\%和在Cifar100上测试准确率达到62\%所需的时间。很显然，不同边的数目对应的T-SA-ADMM所需的时间均明显少于现有的参数同步拓扑。
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[$b_{s_0}:b_{s_1}$=1:2 ($r=24$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-17-1-topo.pdf}
+    }
+    \subfigure[$b_{s_0}:b_{s_1}$=2:3 ($r=40$)]{
+        \includegraphics[width=0.4\linewidth]{figure/chapter3/fig3-17-2-topo.pdf}
+    }
+    \caption{\label{fig:Fig3-17}不同交换机端口带宽比对应的T-SA-ADMM的拓扑结构}
+\end{figure}
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/fig3-18-bandwidth-constraint-inter-consensus.pdf}
+    \caption{\label{fig:Fig3-18}服务器间交换机端口带宽异构场景下一致性误差随时间的变化}
+\end{figure}
+
+\begin{figure}[!htbp]
+    \centering
+    \subfigure[Cifar10]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-19-1-bandwidth-constraint-inter-cifar10.pdf}
+    }
+    \subfigure[Cifar100]{
+        \includegraphics[width=0.48\linewidth]{figure/chapter3/fig3-19-2-bandwidth-constraint-inter-cifar100.pdf}
+    }
+    \caption{\label{fig:Fig3-19}服务器间交换机端口带宽异构场景下测试准确率随时间的变化}
+\end{figure}
+
+\begin{table}[!htpb]
+    \center
+    \caption{服务器间交换机端口带宽异构场景下测试准确率达到设定值所需的时间（单位：s）}
+    \label{tab:bandwidth-constraint-inter-accuracy-time}
+    \setlength{\tabcolsep}{2mm}{ %可随机设置，调整表格整体长度到适合自己的大小为止
+    \scalebox{0.8}{
+    \begin{tabular}{|c|c|c|c|c|c|c|c|}
+      \hline
+      \diagbox{数据集}{拓扑} & ring & 2D-grid & 2D-torus & exponential & random & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=24)} & \makecell[c]{\textbf{T-SA-ADMM} \\ ($r$=48)} \\ \hline
+      Cifar10 & 320.8 & 227.7 & 189.7 & 134.5 & 262.0 & 101.3 & \textbf{86.25} \\ \hline
+      Cifar100 & 327.8 & 269.1 & 200.1 & 151.8 & 345.1 & 126.0 & \textbf{117.3} \\ \hline
+    \end{tabular}
+    }}
+\end{table}
 
 
 \section{本章小结}
-
+本章从优化分布式深度学习的通信性能出发，研究了参数同步拓扑优化方法。首先，本章分别分析了同构带宽、节点带宽异构、服务器内部链路带宽异构和服务器间交换机端口带宽异构四种场景下影响通信开销的主要因素，其中对于后面三种带宽异构场景，本章提出了一种带宽分配策略，以实现边上带宽的最优分配。然后，以一致性速度为优化目标，对四种场景分别引入通信相关的约束，设计了对应的参数同步拓扑优化问题。接下来提出了定制化的ADMM算法用于求解参数同步拓扑优化问题，为了改进求解得到的结果，本章还通过模拟退火算法生成ADMM算法的初始拓扑结构。最后，在四种场景下分别进行一致性实验和分布式深度学习实验，并与现有的参数同步拓扑进行对比。实验结果表明，基于本章提出的方法得到的参数同步拓扑在一致性速度上优于现有的参数同步拓扑，并且在分布式深度学习中，使用优化出的参数同步拓扑能够在更短的时间内达到设定的预测准确率，从而证明了本章提出的方法的有效性。

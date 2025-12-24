@@ -30,7 +30,7 @@
 
 本章其他小结的内容安排如下：3.2节介绍了典型的线性平均一致问题并分别描述了同构带宽和异构带宽场景下的拓扑优化问题；3.3节介绍了本章提出的参数同步拓扑优化问题求解框架；3.4节通过不同场景下的实验对本章所提出方法的有效性进行验证分析；3.5节对本章内容进行了总结。
 
-\section{问题描述}\label{section3-2}
+\section{数据并行/张量并行基础方法}\label{section3-2}
 \subsection{Transformer模型结构} \label{section3-2-1}
 Transformer模型\cite{vaswani2017attention}是一种基于自注意力机制的神经网络架构，广泛应用于自然语言处理和计算机视觉等领域。Transformer模型主要由编码器（Encoder）和解码器（Decoder）两部分组成，每部分包含多个相同的层。每个层主要包括多头自注意力机制（Multi-Head Self-Attention，MHA）和前馈神经网络（Feed-Forward Neural Network，FFN）两个子层。
 图\autoref {fig:Transformer-overall}给出了Transformer模型的整体架构示意图。图\autoref {fig:Transformer-layer}给出了Transformer层的基本结构示意图。从图中可以看到Transformer层主要由多头自注意力机制和前馈神经网络两部分组成，我们以下简称这两部分为Attention层和MLP层。这两部分都以通用矩阵乘法（General Matrix Multiplication，GEMM）为核心计算操作，通过拆分其中的的矩阵乘法操作，可以实现Transformer模型的张量并行训练。

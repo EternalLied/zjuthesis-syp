@@ -4,44 +4,49 @@
 当前，以AIGC为代表的大模型得到广泛的应用和部署。当前模型参数达到万亿级别，并且仍然保持迅速增长的趋势。随着模型迅速增大，大部分大模型采用了跨节点分布式部署的方式。在跨节点的大模型部署的场景中，节点间需要频繁地执行各种集合通信算子来协同训练，导致通信时间在整个训练过程中占据了相当的比例。因此，能否设计出高效的集合通信算子，是加速大模型分布式训练的至关重要的瓶颈点。
 跨节点的大模型部署场景下，计算集群中存在多种通信链路，如HCCS、PCIE、ROCE/IB等。多种通信链路的并发度和利用率，对集合通信算子整体性能至关重要。本项目计划研发跨节点多链路并发通信技术，提升模型训练和推理的端到端性能。
 
+当前，以AIGC为代表的大模型得到广泛的应用和部署。当前模型参数达到万亿级别，并且仍然保持迅速增长的趋势。随着模型迅速增大，大部分大模型采用了跨节点分布式部署的方式。在跨节点的大模型部署的场景中，节点间需要频繁地执行各种集合通信算子来协同训练，导致通信时间在整个训练过程中占据了相当的比例。因此，能否设计出高效的集合通信算子，是加速大模型分布式训练的至关重要的瓶颈点。
+跨节点的大模型部署场景下，计算集群中存在多种通信链路，如HCCS、PCIE、ROCE/IB等。多种通信链路的并发度和利用率，对集合通信算子整体性能至关重要。本项目计划研发跨节点多链路并发通信技术，提升模型训练和推理的端到端性能。
+
 本章其他小结的内容安排如下：2.2节对分布式深度学习的训练时间进行建模并分析了影响训练时间的特征；2.3节介绍了本章提出的分布式深度学习训练时间预测方法的各部分；2.4节基于真实测量结果对本章所提出方法的效果进行验证分析；2.5节对本章内容进行了总结。
 
-\section{问题描述}
+本章其他小结的内容安排如下：2.2节对分布式深度学习的训练时间进行建模并分析了影响训练时间的特征；2.3节介绍了本章提出的分布式深度学习训练时间预测方法的各部分；2.4节基于真实测量结果对本章所提出方法的效果进行验证分析；2.5节对本章内容进行了总结。
 
-\subsection{集合通信算子}
+\section{集合通信算法合成方法介绍}
 
-集合通信是在并行计算环境中多个进程或节点之间协调和交换数据的一类操作，在大模型场景下，是每个计算节点间同步和交换参数的操作，一个指定的集合通信算子确定了每个计算节点需要发送和接收的数据。常用集合通信算子如\autoref{fig:collective}所示。
+% \subsection{集合通信算子}
 
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=1\linewidth]{figure/chapter2/collective.pdf}
-    \caption{\label{fig:collective}集合通信算子示意图}
-\end{figure}
+% 集合通信是在并行计算环境中多个进程或节点之间协调和交换数据的一类操作，在大模型场景下，是每个计算节点间同步和交换参数的操作，一个指定的集合通信算子确定了每个计算节点需要发送和接收的数据。常用集合通信算子如\autoref{fig:collective}所示。
 
-分布式训练中常用的集合通信算子有AllReduce、ReduceScatter、AllGather、AlltoAll等，其中AllReduce是最常用的算子，AllReduce算子将所有节点的数据进行规约（如求和、求平均等），并将结果分发到所有节点上。在分布式训练中，AllReduce通常用于同步各节点的模型参数或梯度，从而保证每个节点在每次迭代后都拥有一致的模型参数。AllReduce可以看作是ReduceScatter和AllGather两个算子的组合，首先通过ReduceScatter将所有节点的数据进行规约并分发到各节点上，然后通过AllGather将规约后的结果汇总到所有节点上。AllReduce的大部分算法实现也可以拆分成ReduceScatter和AllGather两部分，因此大部分经典研究都是针对AllReduce算子的。除此之外，随着大模型架构的发展，AlltoAll开始广泛应用于分布式训练场景中，如模型并行训练中不同节点间的特征交换和混合专家模型（Mixture of Experts，MOE）中的dispatch和combine操作等。
+% \begin{figure}[!htbp]
+%     \centering
+%     \includegraphics[width=1\linewidth]{figure/chapter2/collective.pdf}
+%     \caption{\label{fig:collective}集合通信算子示意图}
+% \end{figure}
 
-\subsection{物理拓扑}
+% 分布式训练中常用的集合通信算子有AllReduce、ReduceScatter、AllGather、AlltoAll等，其中AllReduce是最常用的算子，AllReduce算子将所有节点的数据进行规约（如求和、求平均等），并将结果分发到所有节点上。在分布式训练中，AllReduce通常用于同步各节点的模型参数或梯度，从而保证每个节点在每次迭代后都拥有一致的模型参数。AllReduce可以看作是ReduceScatter和AllGather两个算子的组合，首先通过ReduceScatter将所有节点的数据进行规约并分发到各节点上，然后通过AllGather将规约后的结果汇总到所有节点上。AllReduce的大部分算法实现也可以拆分成ReduceScatter和AllGather两部分，因此大部分经典研究都是针对AllReduce算子的。除此之外，随着大模型架构的发展，AlltoAll开始广泛应用于分布式训练场景中，如模型并行训练中不同节点间的特征交换和混合专家模型（Mixture of Experts，MOE）中的dispatch和combine操作等。
 
-物理拓扑描述了计算节点之间的底层物理连接关系，可以由一组图给定。高性能计算集群系统的群物理拓扑中往往存在着明显的多级异构链路，链路信息包含了各链路的带宽以及时延等特性。图\autoref{fig:DGX1}给出了NVIDIA DGX-1系统的机内物理拓扑结构示意图。该系统包含8个计算节点，每个节点配备了8个NVIDIA V100 GPU。节点之间通过高速互连网络NVLink和PCIe进行连接。多个DGX-1系统可以通过以太网或InfiniBand等网络进行互连，形成更大规模的集群系统。通过Infiniband互连的124机DGX-1集群拓扑结构如图\autoref{fig:DGX1-cluster}所示。
+% \subsection{物理拓扑}
 
-\begin{figure}[!htbp]
-    \centering
-    \subfigure[机内物理拓扑结构\label{fig:DGX1}]{
-        \includegraphics[width=0.45\linewidth]{figure/chapter2/DGX1.pdf}
-    }
-    \subfigure[124机集群物理拓扑结构\label{fig:DGX1-cluster}]{
-        \includegraphics[width=0.45\linewidth]{figure/chapter2/DGX1-cluster.pdf}
-    }
-    \caption{DGX-1系统物理拓扑结构示意图\cite{nvidia_dgx1_blog}}
-    \label{fig:DGX1-system}
-\end{figure}
+% 物理拓扑描述了计算节点之间的底层物理连接关系，可以由一组图给定。高性能计算集群系统的群物理拓扑中往往存在着明显的多级异构链路，链路信息包含了各链路的带宽以及时延等特性。图\autoref{fig:DGX1}给出了NVIDIA DGX-1系统的机内物理拓扑结构示意图。该系统包含8个计算节点，每个节点配备了8个NVIDIA V100 GPU。节点之间通过高速互连网络NVLink和PCIe进行连接。多个DGX-1系统可以通过以太网或InfiniBand等网络进行互连，形成更大规模的集群系统。通过Infiniband互连的124机DGX-1集群拓扑结构如图\autoref{fig:DGX1-cluster}所示。
 
-\subsection{集合通信算法}
-集合通信算法是指实现集合通信算子的具体方法，不同的算法在通信步骤、数据传输方式和节点间协调等方面有所不同。常见的集合通信算法包括环形算法、树形算法和层级算法等。这些算法通过优化数据传输路径和减少通信开销，提高了集合通信的效率和性能。在分布式训练中，针对系统的物理拓扑选择合适的集合通信算法对于提高训练速度和资源利用率具有重要意义。
+% \begin{figure}[!htbp]
+%     \centering
+%     \subfigure[机内物理拓扑结构\label{fig:DGX1}]{
+%         \includegraphics[width=0.45\linewidth]{figure/chapter2/DGX1.pdf}
+%     }
+%     \subfigure[124机集群物理拓扑结构\label{fig:DGX1-cluster}]{
+%         \includegraphics[width=0.45\linewidth]{figure/chapter2/DGX1-cluster.pdf}
+%     }
+%     \caption{DGX-1系统物理拓扑结构示意图\cite{nvidia_dgx1_blog}}
+%     \label{fig:DGX1-system}
+% \end{figure}
 
-Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的规约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
+% \subsection{集合通信算法}
+% 集合通信算法是指实现集合通信算子的具体方法，不同的算法在通信步骤、数据传输方式和节点间协调等方面有所不同。常见的集合通信算法包括环形算法、树形算法和层级算法等。这些算法通过优化数据传输路径和减少通信开销，提高了集合通信的效率和性能。在分布式训练中，针对系统的物理拓扑选择合适的集合通信算法对于提高训练速度和资源利用率具有重要意义。
 
-PairWise算法是一种常用的AlltoAll算子实现方法，它通过在每个通信步骤中让节点与另一个节点交换数据块，逐步完成所有节点间的数据交换。PairWise算法的优点在于其简单性和易于实现，但在大规模集群中可能会导致通信冲突和带宽浪费，同时对于无法建立直接通信链路的节点对，需要中间节点进行转发。为了提高AlltoAll的性能，现有研究提出了多种优化算法，如基于拓扑感知的调度算法和分层通信算法等，这些算法通过优化数据传输路径和减少通信冲突，提高了AlltoAll的效率。
+% Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的规约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
+
+% PairWise算法是一种常用的AlltoAll算子实现方法，它通过在每个通信步骤中让节点与另一个节点交换数据块，逐步完成所有节点间的数据交换。PairWise算法的优点在于其简单性和易于实现，但在大规模集群中可能会导致通信冲突和带宽浪费，同时对于无法建立直接通信链路的节点对，需要中间节点进行转发。为了提高AlltoAll的性能，现有研究提出了多种优化算法，如基于拓扑感知的调度算法和分层通信算法等，这些算法通过优化数据传输路径和减少通信冲突，提高了AlltoAll的效率。
 
 \subsection{时间扩展网络TEN}
 
@@ -59,7 +64,7 @@ PairWise算法是一种常用的AlltoAll算子实现方法，它通过在每个�
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/TEN-Ring-AllGather.pdf}
+    \includegraphics[width=0.6\linewidth]{figure/chapter2/TEN-Ring-AllGather.pdf}
     \caption{\label{fig:ten-ring-allgather}Ring AllGather算法的TEN表示\cite{won2024tacos}}
 \end{figure}
 
@@ -688,12 +693,12 @@ FTACAS 在 AllToAll 合成过程中还引入了以下两项关键机制，
 
 本节对提出的交换机拓扑感知的通用集合通信算法合成器FTACAS的算法性能进行验证，并与现有方法进行对比分析。实验主要关注算法合成过程的时间开销与合成得到的集合通信算法的算法带宽。所有实验均在同一计算平台上完成，实验平台配备Intel Core i9-12900H处理器。FTACAS采用C++语言实现。
 
-\subsection{对比方法：TECCL}
+\subsection{基线方法：TECCL}
 
 为了评估所提出FTACAS方法的有效性，本文选取TECCL\cite{liu2024rethinking}方法作为对比基线。TECCL是Liu等人2024年提出的方法，该方法将集合通信算法合成问题描述成多商品流优化问题，借鉴网络流量工程（Traffic Engineering，TE）中的建模与求解思想，在统一的优化框架下考虑路由选择、链路容量约束以及调度时序。TECCL方法将集合通信算法合成问题建模为混合整数线性规划（Mixed Integer Linear Programming，MILP）问题，并采用商业求解器Gurobi进行求解。TECCL方法同样支持多级交换机拓扑结构，支持AllGtaher和AlltoAll算子，在复杂拓扑下表现出较强的适应能力。本文采用作者开源的TECCL实现代码进行对比实验。
 
 \subsection{实验拓扑}
-为全面评估 FTACAS 在不同互连结构下的算法合成性能，并与 TECCL 方法进行对比，本文选取了多种具有代表性的 GPU 集群拓扑作为实验对象。这些拓扑覆盖了直接互连结构、单机箱高带宽互连结构以及多机箱交换机互连结构，能够反映实际系统中常见的通信场景。
+为全面评估 FTACAS 在不同拓扑结构下的算法合成性能，并与 TECCL 方法进行对比，本文选取了多种具有代表性的 GPU 集群拓扑作为实验对象。这些拓扑覆盖了直接互连结构、单机箱高带宽互连结构以及多机箱交换机互连结构，能够反映实际系统中常见的通信场景。
 具体而言，实验中使用的拓扑类型包括：直连 Mesh 拓扑（Mesh4×4）、单机箱 DGX1 拓扑（DGX1-1）、双机箱 DGX2 拓扑（DGX2-2）、基于交换机的 NDv2 拓扑（NDv2-2 与 NDv2-4），以及双机箱 AMD GPU 拓扑（AMD-2）。其中，拓扑名称中的数字后缀表示所包含的机箱（chassis）数量。
 \autoref{tab:topology-summary} 给出了每种拓扑中单个机箱内的GPU数量以及机箱数量。FTACAS与TECCL均在相同的拓扑配置下运行。
 \begin{table}[!htbp]

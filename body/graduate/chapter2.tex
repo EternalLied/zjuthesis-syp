@@ -1,8 +1,10 @@
 \chapter{基于环形算法的高效集合通信算法设计}
 \section{引言}
 
-当前，以AIGC为代表的大模型得到广泛的应用和部署。当前模型参数达到万亿级别，并且仍然保持迅速增长的趋势。随着模型迅速增大，大部分大模型采用了跨节点分布式部署的方式。在跨节点的大模型部署的场景中，节点间需要频繁地执行各种集合通信算子来协同训练，导致通信时间在整个训练过程中占据了相当的比例。因此，能否设计出高效的集合通信算子，是加速大模型分布式训练的至关重要的瓶颈点。
-跨节点的大模型部署场景下，计算集群中存在多种通信链路，如HCCS、PCIE、ROCE/IB等。多种通信链路的并发度和利用率，对集合通信算子整体性能至关重要。本项目计划研发跨节点多链路并发通信技术，提升模型训练和推理的端到端性能。
+当前，以AIGC为代表的大模型得到广泛的应用和部署。当前模型参数达到万亿级别，并且仍然保持迅速增长的趋势。随着模型迅速增大，大部分大模型采用了跨节点分布式部署的方式。在跨节点的大模型部署的场景中，节点间需要频繁地执行各种集合通信操作来协同训练，导致通信时间在整个训练过程中占据了相当的比例。因此，能否设计出高效的集合通信算法，提升节点间的通信效率，是加速大模型分布式训练的至关重要的瓶颈点。
+跨节点的大模型部署场景下，计算集群中存在多种通信链路，如HCCS、PCIE、ROCE/IB等。多种通信链路的并发度和利用率，对集合通信整体性能至关重要。
+
+基于以上背景，本章提出了适用于AllReduce/ReduceScatter/Allgather的双半环算法，能够充分利用多种通信链路的带宽资源，提高集合通信的效率。
 
 本章其他小结的内容安排如下：2.2节对分布式深度学习的训练时间进行建模并分析了影响训练时间的特征；2.3节介绍了本章提出的分布式深度学习训练时间预测方法的各部分；2.4节基于真实测量结果对本章所提出方法的效果进行验证分析；2.5节对本章内容进行了总结。
 
@@ -14,6 +16,7 @@
 
 物理拓扑描述了计算节点之间的底层物理连接关系，可以由一组图给定。高性能计算集群系统的群物理拓扑中往往存在着明显的多级异构链路，链路信息包含了各链路的带宽以及静态时延等特性。
 
+目前分布式训练中，常用的设备是英伟达的NVIDIA系列GPU，常用的高性能计算集群系统有NVIDIA DGX系列系统。
 图\autoref{fig:DGX1}给出了NVIDIA DGX-1系统的机内物理拓扑结构示意图。单个DGX1服务器配备了8个NVIDIA V100 GPU, GPU间通过高速互连网络NVLink和PCIe进行连接。多个DGX-1服务器可以通过以太网或InfiniBand等网络进行互连，形成更大规模的集群系统。通过Infiniband互连的124机DGX-1集群拓扑结构如图\autoref{fig:DGX1-cluster}所示。
 
 \begin{figure}[!htbp]
@@ -28,9 +31,16 @@
     \label{fig:DGX1-system}
 \end{figure}
 
+此外，近些年来，国产GPU和面向AI的NPU加速器也得到了快速发展。比较知名的国产GPU有摩尔线程的MTT系列，比较知名的国产NPU有寒武纪的MLU系列与昇腾的910系列。昇腾最新的的910C系列NPU采用双晶片架构，其简化拓扑结构如\autoref{fig:910C}所示。单个910C服务器内包含多个NPU，每个NPU内包含两个晶片Die，NPU内的Die间通过SIO链路相连，不同NPU的Die通过HCCS链路连接到同一个交换机上。多个910C服务器可以组成超节点，超节点内部通过多级HCCS交换机可以实现高速互联，不同超节点之间则通过RDMA进行通信。
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{figure/chapter4/910C_topo.pdf}
+    \caption{\label{fig:910C}昇腾910C集群简化拓扑结构示意图}
+\end{figure}
+
 \subsection{集合通信算子}
 
-集合通信是在并行计算环境中多个进程或节点之间协调和交换数据的一类操作，在大模型场景下，是每个计算节点间同步和交换参数的操作，一个指定的集合通信算子确定了每个计算节点需要发送和接收的数据。常用集合通信算子如\autoref{fig:collective}所示。
+集合通信是在并行计算环境中多个进程或节点之间协调和交换数据的一类操作，在分布式训练场景下，是每个计算节点间同步和交换参数的操作。一个指定的集合通信算子确定了每个计算节点需要发送和接收的数据。常用集合通信算子如\autoref{fig:collective}所示。
 
 \begin{figure}[!htbp]
     \centering
@@ -38,10 +48,18 @@
     \caption{\label{fig:collective}集合通信算子示意图}
 \end{figure}
 
-分布式训练中常用的集合通信算子有AllReduce、ReduceScatter、AllGather、AlltoAll等，其中AllReduce是最常用的算子，AllReduce算子将所有节点的数据进行规约（如求和、求平均等），并将结果分发到所有节点上。在分布式训练中，AllReduce通常用于同步各节点的模型参数或梯度，从而保证每个节点在每次迭代后都拥有一致的模型参数。AllReduce可以看作是ReduceScatter和AllGather两个算子的组合，首先通过ReduceScatter将所有节点的数据进行规约并分发到各节点上，然后通过AllGather将规约后的结果汇总到所有节点上。AllReduce的大部分算法实现也可以拆分成ReduceScatter和AllGather两部分，因此大部分经典研究都是针对AllReduce算子的。除此之外，随着大模型架构的发展，AlltoAll开始广泛应用于分布式训练场景中，如模型并行训练中不同节点间的特征交换和混合专家模型（Mixture of Experts，MOE）中的dispatch和combine操作等。
+分布式训练中常用的集合通信算子有AllReduce、ReduceScatter、AllGather、AlltoAll等，其中AllReduce是最常用的算子，AllReduce算子将所有节点的数据进行规约（一般为求平均操作，还可以进行求和、求最大/最小值等操作），并将结果分发到所有节点上。在分布式训练中，AllReduce通常用于同步各节点的模型参数或梯度，从而保证每个节点在每次迭代后都拥有一致的模型参数。AllReduce可以看作是ReduceScatter和AllGather两个算子的组合，首先通过ReduceScatter将所有节点的数据进行规约并分发到各节点上，然后通过AllGather将规约后的结果汇总到所有节点上。AllReduce的大部分算法实现也可以拆分成ReduceScatter和AllGather两部分，因此大部分经典研究都是针对AllReduce算子的。此外，随着大模型架构的发展，AlltoAll开始广泛应用于分布式训练场景中，如不同节点间的特征交换和混合专家模型（Mixture of Experts，MOE）中的Dispatch和Combine操作等。
 
 \subsection{集合通信算法}
 集合通信算法是指实现集合通信算子的具体方法，不同的算法在通信步骤、数据传输方式和节点间协调等方面有所不同。常见的集合通信算法包括环形算法、树形算法和层级算法等。这些算法通过优化数据传输路径和减少通信开销，提高了集合通信的效率和性能。在分布式训练中，针对系统的物理拓扑选择合适的集合通信算法对于提高训练速度和资源利用率具有重要意义。集合通信算法通常指定一组逻辑数据传输路径和传输流程，可以视为在物理拓扑之上的逻辑拓扑。
+
+\autoref{fig:collective_alg}给出了几种常用的AllReduce算法流程示意图，这几种算法适用于AllReduce系列算子（AllReduce/ReduceScatter/AllGather）的实现。对于AlltoAll算子，常用的算法有PairWise算法和Bruck算法等。
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter4/collective_alg.pdf}
+    \caption{\label{fig:collective_alg}常用AllReduce算法示意图}
+\end{figure}
 
 % Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的规约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
 
@@ -51,27 +69,57 @@
 
 Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的规约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
 
+设节点数为n，Ring AllReduce的具体执行流程如下：（a）将所有节点编号并连接成一个环形结构，初始化对应的通信链路；（b）每个节点将数据分为n块，执行n-1次发送与接收操作，每次操作向下一节点发送一个数据块，从上一节点接收一个数据块，在n-1次操作后，所有节点对收到的数据块求平均，每个节点就都拥有了某特定索引数据块的完整数据，这一过程相当于执行ReduceScatter算子；（c）各节点将汇总后的得到的完整数据块以（b）中相同的方式沿环进行传输，传输n-1次后所有节点就都得到了包含全部n个数据块的完整数据，这一过程相当于执行AllGather算子。在n=4的情况下整个算法执行流程如\autoref{fig:ring_allreduce}所示。
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter4/Ring_AllReduce2.pdf}
+    \caption{\label{fig:ring_allreduce}4节点Ring AllReduce算法执行流程示意图}
+\end{figure}
+
+上述Ring AllReduce算法受限于环形链路中的最慢链路，因此只适用于单机的同构带宽场景。为了适应多机的异构带宽场景，现有研究提出了多种Ring AllReduce的改进算法，比如腾讯提出的分层Ring AllReduce算法\cite{jia2018highly}和索尼提出的2D-Torus算法\cite{mikami2018massively}等。
+
+IBM提出了基于整数分解的分层AllReduce算法框架BlueConnect\cite{cho2019blueconnect}，其主要思想是对节点总数$P$进行整数分解，按分解后的$P_i$对节点进行分组，将AllReduce分解为可并行化的多阶段ReduceScatter和AllGather。
+BlueConnect基于下式对节点进行分组：
+\begin{equation}
+P = p_0 p_1 p_2 \cdots p_{k-1}
+= \prod_{i<k} p_i,
+\quad p_i \in \mathbb{N},\; p_i > 1.
+\end{equation}
+分解后按\autoref{fig:blueconnect}所示步骤进行通信，该算法实现也可以顺序拆分为ReduceScatter和AllGather两个算子。
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.8\linewidth]{figure/chapter4/BlueConnect.pdf}
+    \caption{\label{fig:blueconnect}BlueConnect算法执行流程示意图\cite{cho2019blueconnect}}
+\end{figure}
+对于多维对称性系统，通过合适的分解，BlueConnect算法能够建立物理拓扑与逻辑拓扑之间的合理映射，从而提高算法性能。BlueConnect可以看作分层Ring AllReduce在多维度下的拓展，对多维的带宽异构系统具有更高的适应性。在实际系统中部署Ring AllReduce算法时，大都采用了和BlueConnect类似的分层实现方式。
 
 \subsection{常用的集合通信库介绍}
 
 集合通信算法的具体实现与性能表现都和硬件平台密切相关，为了方便不同硬件环境下的集合通信算法的高效实现，业界将与底层硬件和通信协议相关的实现封装起来，提供了多种集合通信库作为集合通信算法的实现接口以及开发平台。
 
+集合通信库和具体硬件平台相关，不同的集合通信库支持不同的硬件平台和通信协议。针对AI分布式训练，常用的集合通信库包括NVIDIA NCCL、Intel OneCCL、华为HCCL、阿里ACCL等，这些集合通信库都提供了高效的AllReduce/ReduceScatter/AllGather/AlltoAll等算子的实现，并且针对各自支持的硬件平台进行了优化。
+
+目前使用最广泛的集合通信库是NVIDIA NCCL（NVIDIA Collective Communications Library），NCCL专为NVIDIA GPU设计，支持多种通信协议如NVLink、PCIe和InfiniBand等。NCCL提供了高效的Ring AllReduce和Tree AllReduce等算法实现，能够充分利用NVIDIA GPU的硬件特性。
+
+华为针对昇腾系列NPU开发了HCCL（Huawei Collective Communication Library），HCCL支持昇腾NPU的多种内部通信协议。HCCL同样提供了高效的集合通信算法实现，适用于昇腾NPU的分布式训练场景。同时，HCCL的软件栈进行了高度的模块化设计，方便根据实际硬件型号和客户需求进行定制化的集合通信算法开发。HCCL软件架构如\autoref{fig:hccl_arch}所示。本章实验在昇腾NPU上进行，使用HCCL实现了本章提出的双半环算法。
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=0.6\linewidth]{figure/chapter4/HCCL.pdf}
+    \caption{\label{fig:hccl_arch}HCCL软件架构示意图\cite{hccl-doc}}
+\end{figure}
+
 
 
 \section{链路聚合的高效双半环算法}
-为了求解上一节中描述的参数同步拓扑优化问题，本节提出了如\autoref{fig:Fig3-0}所示的求解框架。将四种场景下的优化问题进行适当变换后，提出定制化的ADMM算法对优化问题进行求解，本节将求解得到的参数同步拓扑称为T-ADMM（Topology Based on ADMM）。进一步地，基于模拟退火算法生成拓扑结构，并将生成的拓扑结构作为ADMM算法求解节点带宽异构和服务器间交换机端口带宽异构场景下的优化问题的初始拓扑，以改进这两种场景下的优化问题求解结果，本节将改进的拓扑求解结果称为T-SA-ADMM（Topology Based on SA and ADMM）。下面分别介绍基于ADMM的拓扑优化问题求解方法和基于模拟退火算法的拓扑生成方法。
 
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter3/framework.pdf}
-    \caption{\label{fig:Fig3-0}参数同步拓扑优化问题求解框架}
-\end{figure}
+本章提出了一种具有链路聚合特性的双半环算法，能够充分利用并行通信链路从而提高集合通信的效率。该算法适用于AllReduce/ReduceScatter/AllGather算子，当系统中存在可并行的双向环形链路时，相比于链路直接并行的Ring算法能够实现更低的通信静态时延和更高的带宽利用率。本节首先以语义最简单的AllGather算子为例介绍双半环算法的设计思路与实现方法，然后介绍ReduceScatter和AllReduce算子的双半环算法实现，接着介绍多机场景下的分层双半环算法设计，最后对提出的双半环算法进行理论性能分析。
 
 
 
 \subsection{双半环AllGather算法}
 
-交替方向乘子法（Alternating Direction Method of Multipliers，简称ADMM）主要用于解决约束优化问题，该方法的基本思想是通过将原始问题分解为子问题，并通过交替的方式逐步求解这些子问题进而求解整个问题。下面首先介绍ADMM算法求解基于基数约束的优化问题（CCOP）的基本原理，然后将本章研究的不同场景下的参数同步拓扑优化问题进行适当变换，并提出用于求解这些问题的定制化的ADMM算法。
+AllGather算子的目标是将每个节点初始拥有的数据块分发到所有节点上，我们将第$i$个节点上的数据块标号为$i$,
 
 
 
@@ -101,7 +149,7 @@ Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节
 
 \subsection{实验拓扑与基线方法}
 
-本实验中采用3种规模的拓扑，节点数（以Die为单元节点）分别为16、32和64，16节点拓扑所有节点均在一个Server内，32节点拓扑由两个Server组成，64节点拓扑由两个Pod组成，每个Pod内包含两个Server。\autoref{fig:910C_exp}展示了这三种规模下的910C集群物理拓扑示意图。
+本实验中采用3种规模的拓扑，节点数（以Die为单元节点）分别为16、32和64，16节点拓扑所有节点均在一个Server内，32节点拓扑由两个Server组成，64节点拓扑由两个Pod组成，每个Pod内包含两个Server。\autoref{fig:910C_exp}展示了这三种规模下的昇腾910C集群物理拓扑示意图。
 \begin{figure}[!htbp]
     \centering
     \subfigure[16节点物理拓扑\label{fig:910C_16}]{

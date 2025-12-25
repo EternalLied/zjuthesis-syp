@@ -588,7 +588,7 @@ FTACAS 在 AllToAll 合成过程中还引入了以下两项关键机制，
     为避免在不同时间步内对同一后置条件$(c,d)$进行重复的调度，
     算法维护已调度但对应chunk尚未到达的条件集合$\mathrm{scheduled}$，
     对已被调度的条件在当前时间步内不再重复处理
-    （见 \autoref{Algorithm-FTACAS-AllToAll} 第 10--12 行）。
+    （见\autoref{Algorithm-FTACAS-AllToAll}第10--12行）。
 
     \item \textbf{动态优先级调整机制：}
     当 chunk 被调度到中间节点（即$dst\neq d$）时，
@@ -596,7 +596,7 @@ FTACAS 在 AllToAll 合成过程中还引入了以下两项关键机制，
     为使后续调度顺序与当前系统状态匹配，
     算法会重新计算对应后置条件的优先级$\pi(c,d)$，
     并对后置条件集合$\mathcal{Q}$进行局部重排
-    （见 \autoref{Algorithm-FTACAS-AllToAll} 第 31--33 行）。
+    （见\autoref{Algorithm-FTACAS-AllToAll}第31--33行）。
 \end{itemize}
 
 

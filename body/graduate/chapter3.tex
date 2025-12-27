@@ -80,12 +80,14 @@ TACOS的求解原理较为简单，输入包含转换为TEN的物理拓扑，以
     \caption{\label{fig:tacos}示例非对称四节点物理拓扑上 AllGather算子的TACOS合成过程\cite{won2024tacos}}
 \end{figure}
 
-TACOS可以高效地合成直连拓扑上的Allgather算子，并且适用于非对称异构的网络环境。然而TACOS算法存在两个严重的局限性：不直接支持交换机拓扑，尤其是多层交换机拓扑；不支持AlltoAll算子的合成。
+TACOS可以高效地合成直连拓扑上的Allgather算子，并且适用于非对称异构的网络环境。然而TACOS算法存在两个严重的局限性：不直接支持交换机拓扑，尤其是多级交换机拓扑；不支持AlltoAll算子的合成。
 
 \section{交换机拓扑感知的通用集合通信算法合成器}
 \subsection{方法概述}
 
-本章提出了一种新的集合通信算法合成方法，我们将其称为交换机拓扑感知的通用集合通信算法合成器（Fabric-Topology-Aware General Collective Algorithm Synthesizer，FTACAS）。\autoref{fig:Fig2-5}为FTACAS的框架图，FTACAS主要由以下四个模块组成：
+本章提出了一种新的集合通信算法合成方法，我们将其称为交换机拓扑感知的通用集合通信算法合成器（Fabric-Topology-Aware General Collective Algorithm Synthesizer，FTACAS）。
+FTACAS使用时间扩展网络TEN对集合通信算法合成问题进行建模，支持多级交换机拓扑结构，并且同时支持AllGather和AlltoAll两种基础集合通信算子。
+\autoref{fig:Fig2-5}为FTACAS的框架图，FTACAS主要由以下四个模块组成：
 \begin{itemize}
     \item 拓扑建模模块（Topology）：该模块负责将物理拓扑抽象为包含设备节点和交换机节点的物理有向图，支持多级交换机、并行链路以及交换机转发模式（Cut-Through模式和Store-and-Forward模式）选择。
     \item 算子构建模块（Collective）：该模块负责定义目标集合通信算子的前置条件和后置条件，支持AllGather与AlltoAll算子，同时支持数据块的预先分块设置以探索更细粒度的调度实现。
@@ -299,9 +301,8 @@ r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
 
 \noindent\textbf{1 多级交换机物理有向图建模}
 
-FTACAS将实际互连拓扑抽象为包含设备节点与交换机节点的物理有向图$G=(V,E)$。其中，设备集合$V_D$对应GPU/NPU等计算设备，交换机集合$V_S$对应NVSwitch、IB交换机等中继组件。每条有向边$e=(u\rightarrow v)\in E$表示一条物理单向链路，包含对应链路参数：带宽$B_{u\rightarrow v}$与静态时延$\alpha_{u\rightarrow v}$。
-
-该抽象允许链路在图中形成任意多级结构（例如设备$\rightarrow$交换机$\rightarrow$交换机$\rightarrow$设备），从而统一刻画多级交换机拓扑；同时也允许在同一对端点之间存在多条并行链路，以支持多条物理链路或多端口并发的建模需求。
+FTACAS将实际互连拓扑建模为包含设备节点与交换机节点的物理有向图$G=(V,E)$。其中，设备集合$V_D$对应GPU/NPU等计算设备，交换机集合$V_S$对应NVSwitch、IB交换机等中继组件。每条有向边$e=(u\rightarrow v)\in E$表示一条物理单向链路，包含对应链路参数：带宽$B_{u\rightarrow v}$与静态时延$\alpha_{u\rightarrow v}$。该建模允许链路在图中形成任意多级结构（例如设备$\rightarrow$交换机$\rightarrow$交换机$\rightarrow$设备），从而统一刻画多级交换机拓扑。
+% 同时也允许在同一对端点之间存在多条并行链路，以支持多条物理链路或多端口并发的建模需求。
 
 \noindent\textbf{2 交换机转发模式与端口并发约束}
 
@@ -325,7 +326,7 @@ FTACAS将实际互连拓扑抽象为包含设备节点与交换机节点的物�
 \begin{align}
 \mathcal{N}(u)=\left\{v\in V_D\setminus\{u\}\;\middle|\;\exists p:u\rightsquigarrow v,\;\forall x\in p\setminus\{u,v\},\;x\in V_S\right\}. \label{eq:ftacas-neighbor-def}
 \end{align}
-直达设备邻接表$\mathcal{N}(\cdot)$在TEN构建阶段预计算并缓存，后续用于AllGather调度过程中的源设备选取与AllToAll调度过程中源设备下一跳设备的选取（见\autoref{subsec:ftacas-synth}）。
+直达设备邻接表$\mathcal{N}(\cdot)$在TEN构建阶段预计算并缓存，后续用于AllGather调度过程中的源设备选取与AllToAll调度过程中源设备的下一跳设备选取（见\autoref{subsec:ftacas-synth}）。
 
 
 

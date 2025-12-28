@@ -1,52 +1,17 @@
 \chapter{拓扑感知的集合通信算法合成方法}
 \section{引言}
 
-当前，以AIGC为代表的大模型得到广泛的应用和部署。当前模型参数达到万亿级别，并且仍然保持迅速增长的趋势。随着模型迅速增大，大部分大模型采用了跨节点分布式部署的方式。在跨节点的大模型部署的场景中，节点间需要频繁地执行各种集合通信算子来协同训练，导致通信时间在整个训练过程中占据了相当的比例。因此，能否设计出高效的集合通信算子，是加速大模型分布式训练的至关重要的瓶颈点。
-跨节点的大模型部署场景下，计算集群中存在多种通信链路，如HCCS、PCIE、ROCE/IB等。多种通信链路的并发度和利用率，对集合通信算子整体性能至关重要。本项目计划研发跨节点多链路并发通信技术，提升模型训练和推理的端到端性能。
+近年来，生成式人工智能（AIGC）推动的大规模深度学习模型在多领域加速部署，模型参数规模从百亿级快速迈向万亿级。伴随规模扩张，单机计算与存储资源难以满足训练需求，跨节点分布式训练逐渐成为主流。在该过程中，梯度与参数需要在设备间频繁同步，AllReduce、AllGather、AllToAll 等集合通信算子被大量调用，使得通信开销在总体训练时间中的占比不断上升，成为影响扩展效率的重要瓶颈。
 
-当前，以AIGC为代表的大模型得到广泛的应用和部署。当前模型参数达到万亿级别，并且仍然保持迅速增长的趋势。随着模型迅速增大，大部分大模型采用了跨节点分布式部署的方式。在跨节点的大模型部署的场景中，节点间需要频繁地执行各种集合通信算子来协同训练，导致通信时间在整个训练过程中占据了相当的比例。因此，能否设计出高效的集合通信算子，是加速大模型分布式训练的至关重要的瓶颈点。
-跨节点的大模型部署场景下，计算集群中存在多种通信链路，如HCCS、PCIE、ROCE/IB等。多种通信链路的并发度和利用率，对集合通信算子整体性能至关重要。本项目计划研发跨节点多链路并发通信技术，提升模型训练和推理的端到端性能。
+在真实集群中，通信系统往往由多层异构链路与交换结构共同构成：机内互连（如 HCCS、PCIe）与机间互连（如 RoCE/IB）在带宽、时延与并发能力上差异显著，多级交换机还带来端口容量与转发模式等资源约束。集合通信性能不仅取决于单链路指标，更依赖于复杂拓扑下的路径选择与并发调度方式。传统基于固定模板（Ring/Tree/分层）或经验规则的算法难以充分挖掘多链路并行与交换结构带来的潜在带宽，因而在异构拓扑中常出现性能不稳定的问题。为提升对复杂拓扑的适配性，近年出现了集合通信“算法合成”思路：通过显式建模通信过程，在给定拓扑与约束下自动生成调度。时间扩展网络（TEN）能够将动态传输刻画为静态图问题，典型合成器 TACOS 在直连拓扑上可高效合成 AllGather，但对多级交换机拓扑与 AllToAll 等算子支持不足；TECCL 等基于 MILP 的方法虽具备更强表达能力，却可能带来较高的求解成本。如何在表达能力与可扩展性之间取得平衡，是面向真实集群的关键挑战。
 
-本章其他小结的内容安排如下：2.2节对分布式深度学习的训练时间进行建模并分析了影响训练时间的特征；2.3节介绍了本章提出的分布式深度学习训练时间预测方法的各部分；2.4节基于真实测量结果对本章所提出方法的效果进行验证分析；2.5节对本章内容进行了总结。
+针对上述问题，本章提出交换机拓扑感知的通用集合通信算法合成器 FTACAS（Fabric-Topology-Aware General Collective Algorithm Synthesizer）。FTACAS 以真实物理拓扑为输入，显式建模设备/交换机节点、链路带宽与时延以及端口并发约束，在 α–β 传输模型基础上构建 TEN，并采用事件驱动的贪心合成框架，分别为 AllGather 与 AllToAll 设计匹配与资源预留策略，从而在可控开销下生成高质量的集合通信调度。
 
-本章其他小结的内容安排如下：2.2节对分布式深度学习的训练时间进行建模并分析了影响训练时间的特征；2.3节介绍了本章提出的分布式深度学习训练时间预测方法的各部分；2.4节基于真实测量结果对本章所提出方法的效果进行验证分析；2.5节对本章内容进行了总结。
+本章其余内容安排如下：第 3.2 节介绍 TEN 与 TACOS，并分析其局限；第 3.3 节详细阐述 FTACAS 的整体框架与关键设计；第 3.4 节在多种典型拓扑上与 TECCL 对比评估合成时间与算法带宽；第 3.5 节总结本章工作。
+
+
 
 \section{集合通信算法合成方法介绍}
-
-% \subsection{集合通信算子}
-
-% 集合通信是在并行计算环境中多个进程或节点之间协调和交换数据的一类操作，在大模型场景下，是每个计算节点间同步和交换参数的操作，一个指定的集合通信算子确定了每个计算节点需要发送和接收的数据。常用集合通信算子如\autoref{fig:collective}所示。
-
-% \begin{figure}[!htbp]
-%     \centering
-%     \includegraphics[width=1\linewidth]{figure/chapter2/collective.pdf}
-%     \caption{\label{fig:collective}集合通信算子示意图}
-% \end{figure}
-
-% 分布式训练中常用的集合通信算子有AllReduce、ReduceScatter、AllGather、AlltoAll等，其中AllReduce是最常用的算子，AllReduce算子将所有节点的数据进行规约（如求和、求平均等），并将结果分发到所有节点上。在分布式训练中，AllReduce通常用于同步各节点的模型参数或梯度，从而保证每个节点在每次迭代后都拥有一致的模型参数。AllReduce可以看作是ReduceScatter和AllGather两个算子的组合，首先通过ReduceScatter将所有节点的数据进行规约并分发到各节点上，然后通过AllGather将规约后的结果汇总到所有节点上。AllReduce的大部分算法实现也可以拆分成ReduceScatter和AllGather两部分，因此大部分经典研究都是针对AllReduce算子的。除此之外，随着大模型架构的发展，AlltoAll开始广泛应用于分布式训练场景中，如模型并行训练中不同节点间的特征交换和混合专家模型（Mixture of Experts，MOE）中的dispatch和combine操作等。
-
-% \subsection{物理拓扑}
-
-% 物理拓扑描述了计算节点之间的底层物理连接关系，可以由一组图给定。高性能计算集群系统的群物理拓扑中往往存在着明显的多级异构链路，链路信息包含了各链路的带宽以及时延等特性。图\autoref{fig:DGX1}给出了NVIDIA DGX-1系统的机内物理拓扑结构示意图。该系统包含8个计算节点，每个节点配备了8个NVIDIA V100 GPU。节点之间通过高速互连网络NVLink和PCIe进行连接。多个DGX-1系统可以通过以太网或InfiniBand等网络进行互连，形成更大规模的集群系统。通过Infiniband互连的124机DGX-1集群拓扑结构如图\autoref{fig:DGX1-cluster}所示。
-
-% \begin{figure}[!htbp]
-%     \centering
-%     \subfigure[机内物理拓扑结构\label{fig:DGX1}]{
-%         \includegraphics[width=0.45\linewidth]{figure/chapter2/DGX1.pdf}
-%     }
-%     \subfigure[124机集群物理拓扑结构\label{fig:DGX1-cluster}]{
-%         \includegraphics[width=0.45\linewidth]{figure/chapter2/DGX1-cluster.pdf}
-%     }
-%     \caption{DGX-1系统物理拓扑结构示意图\cite{nvidia_dgx1_blog}}
-%     \label{fig:DGX1-system}
-% \end{figure}
-
-% \subsection{集合通信算法}
-% 集合通信算法是指实现集合通信算子的具体方法，不同的算法在通信步骤、数据传输方式和节点间协调等方面有所不同。常见的集合通信算法包括环形算法、树形算法和层级算法等。这些算法通过优化数据传输路径和减少通信开销，提高了集合通信的效率和性能。在分布式训练中，针对系统的物理拓扑选择合适的集合通信算法对于提高训练速度和资源利用率具有重要意义。
-
-% Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的规约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
-
-% PairWise算法是一种常用的AlltoAll算子实现方法，它通过在每个通信步骤中让节点与另一个节点交换数据块，逐步完成所有节点间的数据交换。PairWise算法的优点在于其简单性和易于实现，但在大规模集群中可能会导致通信冲突和带宽浪费，同时对于无法建立直接通信链路的节点对，需要中间节点进行转发。为了提高AlltoAll的性能，现有研究提出了多种优化算法，如基于拓扑感知的调度算法和分层通信算法等，这些算法通过优化数据传输路径和减少通信冲突，提高了AlltoAll的效率。
 
 \subsection{时间扩展网络TEN}
 
@@ -756,16 +721,23 @@ Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓�
 \frac{S_{\mathrm{total}}}{T_{coll}},
 \end{equation}
 
-
+此外，为了更直观体现FTACAS相对于TECCL的性能提升，本节计算了FTACAS相对于TECCL在算法带宽和求解时间这两个指标上的加速比。算法带宽和求解时间的加速比分别定义为：
+\begin{equation}
+\begin{aligned}
+\mathrm{Speedup}_{B} = \frac{B_{\mathrm{alg}}^{\mathrm{FTACAS}}}{B_{\mathrm{alg}}^{\mathrm{TECCL}}}, \quad
+\mathrm{Speedup}_{T} = \frac{T_{\mathrm{coll}}^{\mathrm{TECCL}}}{T_{\mathrm{coll}}^{\mathrm{FTACAS}}}.
+\end{aligned}
+\end{equation}
 
 \subsection{实验结果与分析}
 
-下面将详细对比不同场景下的AllGather与AlltoAll算子的算法带宽与求解时间。
+下面将详细对比不同场景下的AllGather与AlltoAll的算法带宽与求解时间。
 
 \noindent\textbf{1 算法带宽}
 
-不同场景下AllGather算子的算法带宽对比结果如\autoref{fig:allgather-bandwidth}所示。
-不同场景下AlltoAll算子的算法带宽对比结果如\autoref{fig:alltoall-bandwidth}所示。
+不同场景下AllGather的算法带宽对比结果如\autoref {fig:allgather-bandwidth}所示。
+对于NDv2-4与AMD-2拓扑，当分块数为2时，TECCL无法在2小时内求解出AllGather算法，故对应数据点缺失。
+对于AllGather算子，在所有场景下FTACAS的算法带宽均大于等于TECCL的算法带宽。在小规模直连拓扑中（Mesh与DGX1-1），两者的算法带宽相当，均逼近理论最优值；在NDv2-2拓扑中，FTACAS的算法带宽略大于TECCL；而在更大规模的复杂拓扑中（DGX2-2、NDv2-4与AMD-2），FTACAS的算法带宽显著优于TECCL，尤其是在DGX2-2与AMD-2拓扑中，FTACAS的算法带宽可以达到TECCL的2$\sim$3倍。这表明FTACAS在复杂拓扑下能够更有效地合成AllGather算法。
 
 \begin{figure}[!htbp]
     \centering
@@ -774,6 +746,13 @@ Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓�
     \label{fig:allgather-bandwidth}
 \end{figure}
 
+在不同数据量与不同分块数下合成AllGather时，FTACAS表现出较强的适应能力，算法带宽性能稳定。对于NDv2系列拓扑，1MB的小数据量情况下，TECCL的算法带宽相对于FTACAS出现了明显的劣化。
+此外，从表中数据可以观察到，算法带宽随着数据量减小而减小，这主要是由于小数据量下通信静态时延占比更大，导致整体传输效率下降。当数据量较大时，增加分块数可以进行更细粒度的调度，从而提升算法带宽；而在小数据量下，增加分块数增大了此时对算法带宽有显著影响的静态时延，因此反而会降低算法带宽。
+
+不同场景下AlltoAll的算法带宽对比结果如\autoref{fig:alltoall-bandwidth}所示。
+对于NDv2-4与AMD-2拓扑，当分块数为2时，TECCL无法在2小时内求解出AlltoAll算法，故对应数据点缺失。
+对于AlltoAll算子，大部分场景下FTACAS的算法带宽接近TECCL，在部分拓扑中优于TECCL。在Mesh、NDv2-2、NDv2-4与AMD-2拓扑中，FTACAS的算法带宽略低于TECCL；而在DGX1-1与DGX2-2拓扑中，FTACAS的算法带宽优于TECCL，尤其是在DGX1-1拓扑中，FTACAS的算法带宽可以达到TECCL的1.5倍以上。这表明FTACAS在某些复杂拓扑下能够更有效地合成AlltoAll算法，但是由于AlltoAll的复杂度高，搜索空间大，采用贪心合成策略的FTACAS在部分场景下更容易陷入局部最优，导致算法带宽略低于TECCL。
+
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=1\linewidth]{figure/chapter2/alltoall_bandwidth_all_scenarios.pdf}
@@ -781,36 +760,9 @@ Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓�
     \label{fig:alltoall-bandwidth}
 \end{figure}
 
-\noindent\textbf{2 求解时间}
+在不同数据量与不同分块数下合成AlltoAll时，FTACAS表现出较强的适应能力，算法带宽性能稳定。和AllGather类似，算法带宽随着数据量减小而减小。当数据量较大时，增加分块数可以进行更细粒度的调度，从而提升算法带宽；而在小数据量下，增加分块数增大了静态时延占比，因此反而会降低算法带宽。
 
-不同场景下AllGather算子的求解时间对比结果如\autoref {fig:allgather-solving-time}所示。
-不同场景下AlltoAll算子的求解时间对比结果如\autoref {fig:alltoall-solving-time}所示。
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=1\linewidth]{figure/chapter2/allgather_time_all_scenarios.pdf}
-    \caption{不同场景下AllGather算子的求解时间对比}
-    \label{fig:allgather-solving-time}
-\end{figure}
-
-\begin{figure}[!htbp]
-    \centering
-    \includegraphics[width=1\linewidth]{figure/chapter2/alltoall_time_all_scenarios.pdf}
-    \caption{不同场景下AlltoAll算子的求解时间对比}
-    \label{fig:alltoall-solving-time}
-\end{figure}
-
-\noindent\textbf{3. 综合对比分析}
-
-分块数为1时，FTACAS相对于TECCL算法的算法带宽加速比如\autoref {tab:speedup_ab_chunk1_opcol}所示，求解时间加速比如\autoref {tab:speedup_time_chunk1_opcol_sci}所示。
-其中，算法带宽和求解时间的加速比的指标定义分别为：
-\begin{equation}
-\begin{aligned}
-\mathrm{Speedup}_{B} = \frac{B_{\mathrm{alg}}^{\mathrm{FTACAS}}}{B_{\mathrm{alg}}^{\mathrm{TECCL}}}, \quad
-\mathrm{Speedup}_{T} = \frac{T_{\mathrm{coll}}^{\mathrm{TECCL}}}{T_{\mathrm{coll}}^{\mathrm{FTACAS}}}.
-\end{aligned}
-\end{equation}
-
+为了更直观换的对比FTACAS和TECCL的算法带宽性能，我们给出了分块数为1时，FTACAS相对于TECCL的算法带宽加速比，如\autoref {tab:speedup_ab_chunk1_opcol}所示。对于AllGather算子，FTACAS的算法带宽性能显著优于TECCL，可以达到TECCL的1$\sim$3倍；而对于AlltoAll算子，FTACAS的算法带宽性能与TECCL相当，部分拓扑下略低于TECCL，但差距很小，均能达到TECCL的89\%及以上，部分拓扑下显著优于TECCL，能达到TECCL的1.5倍。
 
 % Required package: \usepackage{booktabs}
 \begin{table}[!htbp]
@@ -845,6 +797,44 @@ AMD-2
 \bottomrule
 \end{tabular}
 \end{table}
+
+
+
+\noindent\textbf{2 求解时间}
+
+不同场景下AllGather的求解时间对比结果如\autoref {fig:allgather-solving-time}所示。
+对于NDv2-4与AMD-2拓扑，当分块数为2时，TECCL无法在2小时内求解出AllGather算法，故对应数据点缺失。
+对于AllGather算子，在所有场景下FTACAS的求解时间均显著优于TECCL。
+
+
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter2/allgather_time_all_scenarios.pdf}
+    \caption{不同场景下AllGather算子的求解时间对比}
+    \label{fig:allgather-solving-time}
+\end{figure}
+
+
+
+不同场景下AlltoAll的求解时间对比结果如\autoref {fig:alltoall-solving-time}所示。
+对于NDv2-4与AMD-2拓扑，当分块数为2时，TECCL无法在2小时内求解出AlltoAll算法，故对应数据点缺失。
+对于AlltoAll算子，在所有场景下FTACAS的求解时间均显著优于TECCL。
+
+
+
+\begin{figure}[!htbp]
+    \centering
+    \includegraphics[width=1\linewidth]{figure/chapter2/alltoall_time_all_scenarios.pdf}
+    \caption{不同场景下AlltoAll算子的求解时间对比}
+    \label{fig:alltoall-solving-time}
+\end{figure}
+
+
+
+为了更直观换的对比FTACAS和TECCL的求解时间。我们给出了分块数为1时，FTACAS相对于TECCL算法的求解时间加速比，如\autoref {tab:speedup_time_chunk1_opcol_sci}所示。
+
+
 
 % Required package: \usepackage{booktabs}
 \begin{table}[!htbp]
@@ -884,3 +874,8 @@ AMD-2
 
 \section{本章小结}
 
+本章围绕复杂异构互连拓扑下集合通信性能难以充分发挥的问题展开研究。首先介绍了时间扩展网络（Time-Expanded Network, TEN）对集合通信过程的建模方式，并回顾了基于 TEN 的集合通信算法合成器 TACOS，分析其在多级交换机拓扑建模能力以及 AllToAll 等算子支持方面的局限性，从而明确了面向真实集群环境进行改进的研究动机。
+
+针对上述不足，本章提出了一种交换机拓扑感知的通用集合通信算法合成器 FTACAS。该方法以真实物理拓扑为输入，统一建模设备节点与交换机节点，并显式刻画链路带宽、时延参数、交换机转发模式（Cut-Through / Store-and-Forward）以及端口并发约束。在此基础上，FTACAS 采用统一的前置条件与后置条件描述集合通信算子，通过数据分块挖掘更细粒度的通信并行性，并在 TEN 上维护链路与端口的时间占用状态，构建事件驱动的贪心合成流程。针对 AllGather 算子，引入基于直达设备邻接关系的源节点选择与 Replacement 机制以提高有效传输比例；针对 AllToAll 算子，设计逐跳推进、去重调度与动态优先级调整策略，以保证调度正确性并降低尾部通信延迟。同时，本章对算法的时间复杂度与可扩展性进行了分析，表明该方法能够在可控的合成开销下适配更大规模与更复杂的拓扑结构。
+
+最后，本章在多种典型 GPU 集群拓扑上，对 FTACAS 与基于混合整数线性规划的 TECCL 方法进行了对比评估。实验结果表明，在多级交换机拓扑的 AllGather 场景中，FTACAS 在多组数据规模下均取得了显著的算法带宽优势，最高可达到约 $3.05\times$；在 AllToAll 场景下，FTACAS 的整体性能与 TECCL 相当，并在部分拓扑与配置中获得最高约 $1.50\times$ 的提升。同时，相较于 TECCL，FTACAS 的算法合成时间实现了数量级上的下降，在不同拓扑与数据规模下可获得 $10^{2}\!\sim\!10^{4}$ 量级的加速，最高可达 $7.79\times10^{4}$ 倍。综上所述，FTACAS 在保持较高调度质量的同时显著提升了合成效率，为复杂拓扑环境下集合通信算法的自动化设计提供了一种更具通用性与工程可行性的解决方案。

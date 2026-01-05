@@ -123,8 +123,6 @@ r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
 \end{array}
 \end{matrix}
 \end{equation}
-
-
 \autoref{eq:ftacas-objective} 所描述的问题本质上属于带资源约束的调度与路由组合优化问题，在一般交换机拓扑结构下难以直接获得全局最优解。因此，FTACAS 采用可扩展的事件驱动贪心合成策略，在可控的计算开销下生成高质量的集合通信调度方案。
 
 \autoref{Algorithm-FTACAS-Main}总结了FTACAS的执行流程，其中\autoref{Algorithm-FTACAS-AllGather}和\autoref{Algorithm-FTACAS-AllToAll}在2.3.5节进行详细介绍。
@@ -143,7 +141,7 @@ r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
 \begin{algorithm}[!htbp]
     % \footnotesize
     % \small
-    \caption{FTACAS主流程}
+    \caption{FTACAS算法流程}
     \label{Algorithm-FTACAS-Main}
     \begin{algorithmic}[1]
         \REQUIRE{物理拓扑$G=(V,E)$（设备集合$V_D$，交换机集合$V_S$，链路带宽$B_e$，链路时延$\alpha_e$，交换机端口容量$\mathrm{cap}_{in/out}$，转发模式$\mathrm{mode}$）；集合通信算子类型$op\in\{\mathrm{AllGather},\mathrm{AllToAll}\}$；设备数$N$；每设备数据块划分数$C$；数据块大小$S$}

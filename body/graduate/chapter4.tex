@@ -21,7 +21,7 @@
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.5\linewidth]{figure/chapter3/3D-parallel.pdf}
+    \includegraphics[width=0.6\linewidth]{figure/chapter3/3D-parallel-self.pdf}
     \caption{\label{fig:3D-parallel}数据并行、张量并行、流水并行结合的3D并行模式示意图}
 \end{figure}
 
@@ -370,8 +370,8 @@ TP/DP混合并行是分布式训练中常用的设置，我们针对TP/DP混合�
 嵌入层中，AllReduce通信的数据量为
 $
 V_{\mathrm{AR}}^{\mathrm{emb}}
-= \frac{B \times S \times H}{N_{\mathrm{DP}}}.
-$
+= \frac{B \times S \times H}{N_{\mathrm{DP}}}
+$。
 采用Ring AllReduce算法时，其通信时间为
 \begin{equation}
   T_{\mathrm{AR}}^{\mathrm{emb}}

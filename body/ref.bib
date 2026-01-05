@@ -1309,13 +1309,6 @@
   year={2017}
 }
 
-@misc{hccl-doc,
-  title        = {HCCL: Huawei Collective Communication Library},
-  author       = {{Huawei Ascend}},
-  howpublished = {\url{https://gitee.com/ascend/cann-hccl}},
-  note         = {Accessed: 2025-12-25}
-}
-
 @inproceedings{cao2025syccl,
   title={Syccl: Exploiting symmetry for efficient collective communication scheduling},
   author={Cao, Jiamin and Shi, Shangfeng and Gao, Jiaqi and Liu, Weisen and Yang, Yifan and Xu, Yichi and Zheng, Zhilong and Guan, Yu and Qian, Kun and Liu, Ying and others},
@@ -1460,4 +1453,159 @@
   booktitle={Proceedings of the 28th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 2},
   pages={502--514},
   year={2023}
+}
+
+@article{hammer2025short,
+  title={Short-circuiting Rings for Low-Latency AllReduce},
+  author={Hammer, Sarah-Michelle and Schmid, Stefan and Singh, Rachee and Addanki, Vamsi},
+  journal={arXiv preprint arXiv:2510.03491},
+  year={2025}
+}
+
+@article{ouyang2021communication,
+  title={Communication optimization strategies for distributed deep neural network training: A survey},
+  author={Ouyang, Shuo and Dong, Dezun and Xu, Yemao and Xiao, Liquan},
+  journal={Journal of parallel and distributed computing},
+  volume={149},
+  pages={52--65},
+  year={2021},
+  publisher={Elsevier}
+}
+
+@inproceedings{peng2019generic,
+  title={A generic communication scheduler for distributed DNN training acceleration},
+  author={Peng, Yanghua and Zhu, Yibo and Chen, Yangrui and Bao, Yixin and Yi, Bairen and Lan, Chang and Wu, Chuan and Guo, Chuanxiong},
+  booktitle={Proceedings of the 27th ACM Symposium on Operating Systems Principles},
+  pages={16--29},
+  year={2019}
+}
+
+@article{shi2021mg,
+  title={MG-WFBP: Merging gradients wisely for efficient communication in distributed deep learning},
+  author={Shi, Shaohuai and Chu, Xiaowen and Li, Bo},
+  journal={IEEE Transactions on Parallel and Distributed Systems},
+  volume={32},
+  number={8},
+  pages={1903--1917},
+  year={2021},
+  publisher={IEEE}
+}
+
+@article{duan2023accelerating,
+  title={Accelerating distributed dnn training via transport layer scheduling},
+  author={Duan, Qingyang and Peng, Chao and Wang, Zeqin and Xu, Yuedong and Liu, Shaoteng and Wu, Jun and Lui, John CS},
+  journal={IEEE Transactions on Parallel and Distributed Systems},
+  volume={34},
+  number={5},
+  pages={1650--1666},
+  year={2023},
+  publisher={IEEE}
+}
+
+@inproceedings{narayanan2019pipedream,
+  title={PipeDream: Generalized pipeline parallelism for DNN training},
+  author={Narayanan, Deepak and Harlap, Aaron and Phanishayee, Amar and Seshadri, Vivek and Devanur, Nikhil R and Ganger, Gregory R and Gibbons, Phillip B and Zaharia, Matei},
+  booktitle={Proceedings of the 27th ACM symposium on operating systems principles},
+  pages={1--15},
+  year={2019}
+}
+
+@inproceedings{narayanan2021memory,
+  title={Memory-efficient pipeline-parallel dnn training},
+  author={Narayanan, Deepak and Phanishayee, Amar and Shi, Kaiyu and Chen, Xie and Zaharia, Matei},
+  booktitle={International Conference on Machine Learning},
+  pages={7937--7947},
+  year={2021},
+  organization={PMLR}
+}
+
+@article{zhuang2023optimizing,
+  title={On optimizing the communication of model parallelism},
+  author={Zhuang, Yonghao and Zheng, Lianmin and Li, Zhuohan and Xing, Eric and Ho, Qirong and Gonzalez, Joseph and Stoica, Ion and Zhang, Hao and Zhao, Hexu},
+  journal={Proceedings of Machine Learning and Systems},
+  volume={5},
+  pages={526--540},
+  year={2023}
+}
+
+@inproceedings{wang2022overlap,
+  title={Overlap communication with dependent computation via decomposition in large deep learning models},
+  author={Wang, Shibo and Wei, Jinliang and Sabne, Amit and Davis, Andy and Ilbeyi, Berkin and Hechtman, Blake and Chen, Dehao and Murthy, Karthik Srinivasa and Maggioni, Marcello and Zhang, Qiao and others},
+  booktitle={Proceedings of the 28th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 1},
+  pages={93--106},
+  year={2022}
+}
+
+@inproceedings{rashidi2021enabling,
+  title={Enabling compute-communication overlap in distributed deep learning training platforms},
+  author={Rashidi, Saeed and Denton, Matthew and Sridharan, Srinivas and Srinivasan, Sudarshan and Suresh, Amoghavarsha and Nie, Jade and Krishna, Tushar},
+  booktitle={2021 ACM/IEEE 48th Annual International Symposium on Computer Architecture (ISCA)},
+  pages={540--553},
+  year={2021},
+  organization={IEEE}
+}
+
+@inproceedings{chen2024centauri,
+  title={Centauri: Enabling efficient scheduling for communication-computation overlap in large model training via communication partitioning},
+  author={Chen, Chang and Li, Xiuhong and Zhu, Qianchao and Duan, Jiangfei and Sun, Peng and Zhang, Xingcheng and Yang, Chao},
+  booktitle={Proceedings of the 29th ACM International Conference on Architectural Support for Programming Languages and Operating Systems, Volume 3},
+  pages={178--191},
+  year={2024}
+}
+
+@article{zhang2025comet,
+  title={Comet: Fine-grained computation-communication overlapping for mixture-of-experts},
+  author={Zhang, Shulai and Zheng, Ningxin and Lin, Haibin and Jiang, Ziheng and Bao, Wenlei and Jiang, Chengquan and Hou, Qi and Cui, Weihao and Zheng, Size and Chang, Li-Wen and others},
+  journal={arXiv preprint arXiv:2502.19811},
+  year={2025}
+}
+
+@article{weingram2023xccl,
+  title={xccl: A survey of industry-led collective communication libraries for deep learning},
+  author={Weingram, Adam and Li, Yuke and Qi, Hao and Ng, Darren and Dai, Liuyao and Lu, Xiaoyi},
+  journal={Journal of Computer Science and Technology},
+  volume={38},
+  number={1},
+  pages={166--195},
+  year={2023},
+  publisher={Springer}
+}
+
+@article{dong2021accl,
+  title={Accl: Architecting highly scalable distributed training systems with highly efficient collective communication library},
+  author={Dong, Jianbo and Wang, Shaochuang and Feng, Fei and Cao, Zheng and Pan, Heng and Tang, Lingbo and Li, Pengcheng and Li, Hao and Ran, Qianyuan and Guo, Yiqun and others},
+  journal={IEEE micro},
+  volume={41},
+  number={5},
+  pages={85--92},
+  year={2021},
+  publisher={IEEE}
+}
+
+@misc{hccl_doc,
+  title        = {HCCL: Huawei Collective Communication Library},
+  author       = {{Huawei Ascend}},
+  howpublished = {\url{https://gitee.com/ascend/cann-hccl}},
+  note         = {Accessed: 2025-12-25}
+}
+
+@misc{nccl_doc,
+  author       = {{NVIDIA}},
+  title        = {NVIDIA Collective Communication Library (NCCL) Documentation},
+  howpublished = {\url{https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/index.html}},
+  note         = {Accessed: 2025-12-25}
+}
+
+@misc{oneccl_guide,
+  author       = {{Intel}},
+  title        = {Intel oneAPI Collective Communications Library (oneCCL) — Programming Guide},
+  howpublished = {\url{https://www.intel.com/content/www/us/en/docs/oneapi/programming-guide/2024-2/intel-oneapi-collective-communications-library.html}},
+  note         = {Accessed: 2025-12-25}
+}
+
+@misc{msccl_github,
+  author       = {{Microsoft}},
+  title        = {microsoft/msccl: Microsoft Collective Communication Library},
+  howpublished = {\url{https://github.com/microsoft/msccl}},
+  note         = {Accessed: 2025-12-25}
 }

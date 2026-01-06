@@ -317,7 +317,7 @@ AllGather要求每个设备最终获得所有设备的数据块（即全量聚�
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/AllGather.pdf}
+    \includegraphics[width=1\linewidth]{figure/chapter2/AllGather_crop.pdf}
     \caption{\label{fig:allgather}AllGather算子语义示意图}
 \end{figure}
 
@@ -336,7 +336,7 @@ AllGather要求每个设备最终获得所有设备的数据块（即全量聚�
 AllToAll要求每个设备将其数据按目的设备切分并分别发送给对应目的设备，其算子语义示意图如\autoref{fig:alltoall}所示。
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter2/AllToAll.pdf}
+    \includegraphics[width=1\linewidth]{figure/chapter2/AllToAll_crop.pdf}
     \caption{\label{fig:alltoall}AllToAll算子语义示意图}
 \end{figure}
 
@@ -420,7 +420,7 @@ FTACAS以“后置条件是否被满足”作为合成过程的核心状态：�
 s=\arg\min\{T[s][d]\mid \mathcal{P}(c,s)=1,\,s\neq d\}. \label{eq:ftacas-source-select}
 \end{align}
 
-该策略优先选择传输时间最短的源设备，从而在局部决策上降低到达时间与资源占用区间长度。若最优源在当前时刻因链路/端口资源不足无法预留，则继续尝试次优的备选源，直至成功或放弃该条件并进入下一条件。
+该策略优先选择传输时间最短的源设备，从而在局部决策上降低到达时间与资源占用区间长度。若最优源在当前时刻因链路/端口资源不足无法预留，则继续尝试次优的备选源，直至成功或放弃该条件并进入下一条件。（对于AllGather算子源设备的选择，还需满足源设备与目标设备间存在直达设备邻接关系，即$s\in\mathcal{N}(d)$，以符合单次传输不跨设备节点的限制。）
 
 \noindent\textbf{3 事件驱动的合成过程}\\
 

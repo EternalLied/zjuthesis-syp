@@ -51,7 +51,7 @@
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=1\linewidth]{figure/chapter2/collective.pdf}
-    \caption{\label{fig:collective}集合通信算子示意图}
+    \caption{\label{fig:collective}集合通信算子示意图\cite{woolley2015nccl}}
 \end{figure}
 
 分布式训练中常用的集合通信算子有AllReduce、ReduceScatter、AllGather、AlltoAll等，其中AllReduce是最常用的算子，AllReduce算子将所有节点的数据进行规约（一般为求平均操作，还可以进行求和、求最大/最小值等操作），并将结果分发到所有节点上。在分布式训练中，AllReduce通常用于同步各节点的模型参数或梯度，从而保证每个节点在每次迭代后都拥有一致的模型参数。AllReduce可以看作是ReduceScatter和AllGather两个算子的组合，首先通过ReduceScatter将所有节点的数据进行规约并分发到各节点上，然后通过AllGather将规约后的结果汇总到所有节点上。AllReduce的大部分算法实现也可以拆分成ReduceScatter和AllGather两部分，因此大部分经典研究都是针对AllReduce算子的。此外，随着大模型架构的发展，AlltoAll开始广泛应用于分布式训练场景中，如不同节点间的特征交换和混合专家模型（Mixture of Experts，MOE）中的Dispatch和Combine操作等。
@@ -76,10 +76,10 @@
 Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的规约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
 
 设节点数为$n$，Ring AllReduce的具体执行流程如下：（a）将所有节点编号并连接成一个环形结构，初始化对应的通信链路；（b）每个节点将数据分为$n$块，执行$n-1$次发送与接收操作，每次操作向下一节点发送一个数据块，从上一节点接收一个数据块，在$n-1$次操作后，所有节点对收到的数据块求平均，每个节点就都拥有了某特定索引数据块的完整数据，这一过程相当于执行ReduceScatter算子；（c）各节点将汇总后的得到的完整数据块以（b）中相同的方式沿环进行传输，传输$n-1$次后所有节点就都得到了包含全部$n$个数据块的完整数据，这一过程相当于执行AllGather算子。在$n=4$的情况下整个算法执行流程如\autoref{fig:ring_allreduce}所示。
-
++
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=1\linewidth]{figure/chapter4/Ring_AllReduce2.pdf}
+    \includegraphics[width=1\linewidth]{figure/chapter4/Ring_AllReduce_self.pdf}
     \caption{\label{fig:ring_allreduce}4节点Ring AllReduce算法执行流程示意图}
 \end{figure}
 
@@ -108,7 +108,7 @@ P = p_0 p_1 p_2 \cdots p_{k-1}
 
 目前使用最广泛的集合通信库是NVIDIA NCCL（NVIDIA Collective Communications Library），NCCL专为NVIDIA GPU设计，支持多种通信协议如NVLink、PCIe和InfiniBand等。NCCL提供了高效的Ring AllReduce和Tree AllReduce等算法实现，能够充分利用NVIDIA GPU的硬件特性。
 
-华为针对昇腾系列NPU开发了HCCL（Huawei Collective Communication Library），HCCL支持昇腾NPU的多种内部通信协议。HCCL同样提供了高效的集合通信算法实现，适用于昇腾NPU的分布式训练场景。同时，HCCL的软件栈进行了高度的模块化设计，方便根据实际硬件型号和客户需求进行定制化的集合通信算法开发。HCCL软件架构如\autoref{fig:hccl_arch}所示。本章实验在昇腾NPU上进行，使用HCCL实现了本章提出的双半环算法。
+华为针对昇腾系列NPU开发了HCCL（Huawei Collective Communication Library），HCCL支持昇腾NPU的多种内部通信协议。HCCL同样提供了高效的集合通信算法实现，适用于昇腾NPU的分布式训练场景。同时，HCCL的软件栈进行了高度的模块化设计，方便根据实际硬件型号和客户需求进行定制化的集合通信算法开发。HCCL软件架构如\autoref{fig:hccl_arch}所示。本章实验在昇腾NPU上进行，使用HCCL进行自定义算法实现。
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=0.6\linewidth]{figure/chapter4/HCCL.pdf}

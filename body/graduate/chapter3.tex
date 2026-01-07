@@ -5,17 +5,21 @@
 
 然而，现有集合通信算法多基于固定通信模板或经验规则（如 Ring、Tree、分层通信）进行设计。在规则拓扑或单一互连环境中，这类方法实现简单且性能稳定；但面对多链路并存、多级交换机以及链路性能显著异构的真实系统时，固定模板难以灵活调整通信路径与并发方式，往往无法充分挖掘潜在的多链路并行能力，甚至因资源冲突导致性能下降。
 
-为提升对复杂拓扑的适配性，近年来出现了集合通信“算法合成”思路：通过显式建模通信过程，在给定拓扑与资源约束下自动生成调度。时间扩展网络（Time-Expanded Network, TEN）可将动态传输刻画为静态图问题，典型合成器 TACOS 在直连拓扑上能够高效合成 AllGather，但对多级交换机拓扑与 AllToAll 等算子支持不足；TECCL 等基于混合整数线性规划（MILP）的方法虽具备更强表达能力，却可能带来较高的求解开销。如何在建模精度与合成效率之间取得平衡，仍是面向真实系统落地的关键挑战。
+为提升对复杂拓扑的适配性，近年来出现了集合通信“算法合成”思路：通过显式建模通信过程，在给定拓扑与资源约束下自动生成调度。
+% 时间扩展网络（Time-Expanded Network, TEN）可将动态传输刻画为静态图问题，
+典型合成器 TACOS 在直连拓扑上能够高效合成 AllGather，但对多级交换机拓扑与 AlltoAll 等算子支持不足；TECCL 等基于混合整数线性规划（MILP）的方法虽具备更强表达能力，却可能带来较高的求解开销。如何在建模精度与合成效率之间取得平衡，仍是面向真实系统落地的关键挑战。
 
-针对上述问题，本章提出交换机拓扑感知的通用集合通信算法合成器 FTACAS（Fabric-Topology-Aware General Collective Algorithm Synthesizer）。FTACAS 以真实物理拓扑为输入，显式建模设备/交换机节点、链路带宽与时延以及端口并发约束，在 $\alpha$--$\beta$ 传输模型基础上构建 TEN，并采用事件驱动的贪心合成框架，为 AllGather 与 AllToAll 设计匹配与资源预留策略，从而在可控开销下生成高质量的集合通信调度。
+针对上述问题，本章提出交换机拓扑感知的通用集合通信算法合成器 FTACAS
+% （Fabric-Topology-Aware General Collective Algorithm Synthesizer）
+。FTACAS 以真实物理拓扑为输入，显式建模设备/交换机节点、链路带宽与时延以及端口并发约束，在 $\alpha$--$\beta$ 传输模型基础上构建时间扩展网络，并采用事件驱动的贪心合成框架，为 AllGather 与 AlltoAll 设计匹配与资源预留策略，从而在可控开销下生成高质量的集合通信算法。
 
-本章其余内容安排如下：第 3.2 节介绍 TEN 与 TACOS 并分析其局限；第 3.3 节阐述 FTACAS 的整体框架与关键设计；第 3.4 节在多种典型拓扑上与 TECCL 对比评估合成时间与算法带宽；第 3.5 节总结本章工作。
+本章其余内容安排如下：第 3.2 节介绍时间扩展网络与基于时间扩展网络的集合通信算法合成框架；第 3.3 节阐述 FTACAS 的整体框架与关键设计；第 3.4 节在多种典型拓扑上与 TECCL 对比评估合成时间与算法带宽；第 3.5 节总结本章工作。
 
 
 
-\section{集合通信算法合成方法介绍}
+\section{预备知识}
 
-\subsection{时间扩展网络TEN}
+\subsection{时间扩展网络}
 
 时间扩展网络（Time-expanded Network，TEN）是一种用于表示动态网络的静态网络模型，通过在时间维度上扩展原始网络来捕捉网络中随时间变化的动态特性。在TEN中，原始网络中的每个节点在不同时间点上被复制为多个时间节点，这些时间节点之间通过有向边连接，表示节点在不同时间点上的状态变化。TEN可以用于分析和优化动态网络中的各种问题，如最短路径、最大流等。Won等人\cite{won2024tacos}在2023年将TEN引入集合通信领域。TEN可以用一组包含时序的有向无环图表示集合通信算子在系统物理拓扑上的具体通信过程，也就是具体的集合通信算法。
 
@@ -35,7 +39,7 @@
     \caption{\label{fig:ten-ring-allgather}Ring AllGather算法的TEN表示\cite{won2024tacos}}
 \end{figure}
 
-\subsection{基于TEN的集合通信算法合成器：TACOS}
+\subsection{基于时间扩展网络的集合通信算法合成}
 
 Won等人\cite{won2024tacos}提出了TACOS，其可以在无需人工指导或干预的情况下，自主合成网络拓扑上的集合通信算法。TACOS使用TEN表示将集合通信算法合成问题建模为数据块与链路的匹配问题，采用基于贪婪的启发式匹配方法，在约束下最大化链路与数据块的匹配数量。
 
@@ -50,7 +54,7 @@ TACOS的求解原理较为简单，输入包含转换为TEN的物理拓扑，以
 TACOS可以高效地合成直连拓扑上的Allgather算子，并且适用于非对称异构的网络环境。然而TACOS算法存在两个严重的局限性：不直接支持交换机拓扑，尤其是多级交换机拓扑；不支持AlltoAll算子的合成。
 
 \section{交换机拓扑感知的通用集合通信算法合成器}
-\subsection{方法概述}
+\subsection{算法框架}
 
 本章提出了一种新的集合通信算法合成方法，我们将其称为交换机拓扑感知的通用集合通信算法合成器（Fabric-Topology-Aware General Collective Algorithm Synthesizer，FTACAS）。
 FTACAS使用时间扩展网络TEN对集合通信算法合成问题进行建模，支持多级交换机拓扑结构，并且同时支持AllGather和AlltoAll两种基础集合通信算子。
@@ -125,7 +129,7 @@ r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
 \end{equation}
 \autoref{eq:ftacas-objective} 所描述的问题本质上属于带资源约束的调度与路由组合优化问题，在一般交换机拓扑结构下难以直接获得全局最优解。因此，FTACAS 采用可扩展的事件驱动贪心合成策略，在可控的计算开销下生成高质量的集合通信调度方案。
 
-\autoref{Algorithm-FTACAS-Main}总结了FTACAS的执行流程，其中\autoref{Algorithm-FTACAS-AllGather}和\autoref{Algorithm-FTACAS-AllToAll}在2.3.5节进行详细介绍。
+\autoref{Algorithm-FTACAS-Main}总结了FTACAS的执行流程，其中\autoref{Algorithm-FTACAS-AllGather}和\autoref{Algorithm-FTACAS-AlltoAll}在2.3.5节进行详细介绍。
 
 
 
@@ -144,7 +148,7 @@ r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
     \caption{FTACAS算法流程}
     \label{Algorithm-FTACAS-Main}
     \begin{algorithmic}[1]
-        \REQUIRE{物理拓扑$G=(V,E)$（设备集合$V_D$，交换机集合$V_S$，链路带宽$B_e$，链路时延$\alpha_e$，交换机端口容量$\mathrm{cap}_{in/out}$，转发模式$\mathrm{mode}$）；集合通信算子类型$op\in\{\mathrm{AllGather},\mathrm{AllToAll}\}$；设备数$N$；每设备数据块划分数$C$；数据块大小$S$}
+        \REQUIRE{物理拓扑$G=(V,E)$（设备集合$V_D$，交换机集合$V_S$，链路带宽$B_e$，链路时延$\alpha_e$，交换机端口容量$\mathrm{cap}_{in/out}$，转发模式$\mathrm{mode}$）；集合通信算子类型$op\in\{\mathrm{AllGather},\mathrm{AlltoAll}\}$；设备数$N$；每设备数据块划分数$C$；数据块大小$S$}
         \ENSURE{集合通信调度$\mathcal{S}$；集合通信完成时间$T_{coll}$}
 
         \STATE \textbf{算子条件初始化}：根据$op$生成前置条件集合$\mathcal{P}$与后置条件集合$\mathcal{Q}$；
@@ -163,13 +167,13 @@ r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
         \begin{align*}
             \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathcal{P}(c,s)=1} T[s][d] .
         \end{align*}
-        \STATE 按优先级对后置条件集合$\mathcal{Q}$排序（AllGather：$\pi$升序；AllToAll：$\pi$降序）；
+        \STATE 按优先级对后置条件集合$\mathcal{Q}$排序（AllGather：$\pi$升序；AlltoAll：$\pi$降序）；
         \STATE 初始化事件队列$\mathrm{EQ}\leftarrow \{0\}$，调度集合$\mathcal{S}\leftarrow \emptyset$；
 
         \IF{$op=\mathrm{AllGather}$}
             \STATE 调用\autoref{Algorithm-FTACAS-AllGather}执行AllGather事件驱动贪心合成，得到$\mathcal{S}$与$T_{coll}$；
         \ELSE
-            \STATE 调用\autoref{Algorithm-FTACAS-AllToAll}执行AllToAll事件驱动贪心合成，得到$\mathcal{S}$与$T_{coll}$；
+            \STATE 调用\autoref{Algorithm-FTACAS-AlltoAll}执行AlltoAll事件驱动贪心合成，得到$\mathcal{S}$与$T_{coll}$；
         \ENDIF
 
         \STATE \textbf{return} $\mathcal{S},\,T_{coll}$；
@@ -185,7 +189,7 @@ r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
 %       \caption{FTACAS执行流程} 
 %       \label{Algorithm-FTACAS} 
 %         \begin{algorithmic}[1]
-%         \REQUIRE{物理拓扑$G=(V,E)$（设备集合$V_D$，交换机集合$V_S$，链路带宽$B_e$，链路时延$\alpha_e$，交换机端口容量$\mathrm{cap}_{in/out}$，转发模式$\mathrm{mode}$）；集合通信算子类型$op\in\{\mathrm{AllGather},\mathrm{AllToAll}\}$；设备数$N$；每设备数据块划分数$C$；数据块大小$S$}
+%         \REQUIRE{物理拓扑$G=(V,E)$（设备集合$V_D$，交换机集合$V_S$，链路带宽$B_e$，链路时延$\alpha_e$，交换机端口容量$\mathrm{cap}_{in/out}$，转发模式$\mathrm{mode}$）；集合通信算子类型$op\in\{\mathrm{AllGather},\mathrm{AlltoAll}\}$；设备数$N$；每设备数据块划分数$C$；数据块大小$S$}
 %         \ENSURE{集合通信调度$\mathcal{S}$；集合通信完成时间$T_{coll}$}
 
 %         \STATE \textbf{TEN构建与链路传输时间计算}：对每条物理链路$e=(u\rightarrow v)\in E$，基于$\alpha$--$\beta$模型计算传输时间：
@@ -202,7 +206,7 @@ r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
 %         \begin{align*}
 %             \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathrm{chunkMap}[c][s]=1} D[s][d] .
 %         \end{align*}
-%         \STATE 按优先级对未满足条件队列$\mathcal{L}$排序（AllGather：$\pi$升序；AllToAll：$\pi$降序），并对同优先级条件进行随机打散；
+%         \STATE 按优先级对未满足条件队列$\mathcal{L}$排序（AllGather：$\pi$升序；AlltoAll：$\pi$降序），并对同优先级条件进行随机打散；
 
 %         \STATE 初始化事件队列$\mathrm{EQ}\leftarrow \{0\}$，调度集合$\mathcal{S}\leftarrow \emptyset$；
 %         \WHILE{$\mathcal{L}\neq \emptyset$}
@@ -213,14 +217,14 @@ r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
 %                     \STATE 执行Replacement策略，用$d$缺失且$s$已拥有的数据块替换$c$（若存在）；
 %                 \ENDIF
 %                 \STATE 更新$\mathrm{chunkMap}$，并从$\mathcal{L}$中移除已满足的后置条件；
-%                 \IF{$op=\mathrm{AllToAll}$}
+%                 \IF{$op=\mathrm{AlltoAll}$}
 %                     \STATE 清除该数据块对应条件的调度标记；
 %                 \ENDIF
 %             \ENDFOR
 
 %             \STATE 初始化本时间步已调度条件集合$\mathrm{scheduled}\leftarrow \emptyset$；
 %             \FORALL{条件$(c,d)\in\mathcal{L}$（按当前优先级顺序）}
-%                 \IF{$op=\mathrm{AllToAll}$ \AND $(c,d)\in \mathrm{scheduled}$}
+%                 \IF{$op=\mathrm{AlltoAll}$ \AND $(c,d)\in \mathrm{scheduled}$}
 %                     \STATE \textbf{continue}；
 %                 \ENDIF
 
@@ -232,7 +236,7 @@ r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
 %                 \IF{$op=\mathrm{AllGather}$}
 %                     \STATE 设传输目标为$dst\leftarrow d$；
 %                 \ELSE
-%                     \STATE \textbf{AllToAll逐跳路由选择}：若$d\in\mathcal{N}(s)$且可用，则$dst\leftarrow d$；
+%                     \STATE \textbf{AlltoAll逐跳路由选择}：若$d\in\mathcal{N}(s)$且可用，则$dst\leftarrow d$；
 %                     \STATE 否则在$\mathcal{N}(s)$中选择满足$D[n][d] < D[s][d]$且可用的下一跳$n$；
 %                     \IF{未找到可行$dst$}
 %                         \STATE \textbf{continue}；
@@ -245,7 +249,7 @@ r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
 %                     \begin{align*}
 %                         t_{\mathrm{arr}} = t + D[s][dst],\quad \mathrm{EQ}\leftarrow \mathrm{EQ}\cup\{t_{\mathrm{arr}}\}.
 %                     \end{align*}
-%                     \IF{$op=\mathrm{AllToAll}$}
+%                     \IF{$op=\mathrm{AlltoAll}$}
 %                         \STATE $\mathrm{scheduled}\leftarrow \mathrm{scheduled}\cup\{(c,d)\}$；
 %                         \STATE 若$dst\neq d$则更新$\pi(c,d)$并对$\mathcal{L}$进行局部重排；
 %                     \ENDIF
@@ -264,12 +268,12 @@ r^{out}_s(t;\mathcal{S}) \le \mathrm{cap}_{out}(s),
 \subsection{拓扑建模模块}
 \label{subsec:ftacas-topology}
 
-\noindent\textbf{1 多级交换机物理有向图建模}
+\noindent\quad\textbf{1）多级交换机物理有向图建模}
 
 FTACAS将实际互连拓扑建模为包含设备节点与交换机节点的物理有向图$G=(V,E)$。其中，设备集合$V_D$对应GPU/NPU等计算设备，交换机集合$V_S$对应NVSwitch、IB交换机等中继组件。每条有向边$e=(u\rightarrow v)\in E$表示一条物理单向链路，包含对应链路参数：带宽$B_{u\rightarrow v}$与静态时延$\alpha_{u\rightarrow v}$。该建模允许链路在图中形成任意多级结构（例如设备$\rightarrow$交换机$\rightarrow$交换机$\rightarrow$设备），从而统一刻画多级交换机拓扑。
 % 同时也允许在同一对端点之间存在多条并行链路，以支持多条物理链路或多端口并发的建模需求。
 
-\noindent\textbf{2 交换机转发模式与端口并发约束}
+\noindent\quad\textbf{2）交换机转发模式与端口并发约束}
 
 为刻画不同交换机的转发行为，FTACAS 为每个交换机节点$s\in V_S$ 定义转发模式$\mathrm{mode}(s)\in\{\mathrm{CT},\mathrm{SAF}\}$。
 % 需要指出的是，这里的转发模式是一种\emph{建模抽象}，
@@ -285,20 +289,20 @@ FTACAS将实际互连拓扑建模为包含设备节点与交换机节点的物�
 
 同时，为限制交换机在同一时刻可并行处理的流数，FTACAS对每个交换机配置入向端口容量$\mathrm{cap}_{in}(s)$与出向端口容量$\mathrm{cap}_{out}(s)$，用于刻画交换机的并发处理能力。TEN在调度过程中将该约束转化为对时间区间重叠数量的限制（见\autoref{subsec:ftacas-ten}）。
 
-\noindent\textbf{3 直达设备邻接表$\mathcal{N}(u)$}
+\noindent\quad\textbf{3）直达设备邻接表$\mathcal{N}(u)$}
 
 为了保证调度的高效性和灵活性，FTACAS单次传输只调度不跨设备节点的路径，因此定义直达设备邻接关系：若存在从设备$u$到设备$v$的路径，且该路径内部节点均为交换机节点（即不经过中间设备作为路由器），则称$v$是$u$的直达设备邻居，记为$v\in\mathcal{N}(u)$。形式化定义为：
 \begin{align}
 \mathcal{N}(u)=\left\{v\in V_D\setminus\{u\}\;\middle|\;\exists p:u\rightsquigarrow v,\;\forall x\in p\setminus\{u,v\},\;x\in V_S\right\}. \label{eq:ftacas-neighbor-def}
 \end{align}
-直达设备邻接表$\mathcal{N}(\cdot)$在TEN构建阶段预计算并缓存，后续用于AllGather调度过程中的源设备选取与AllToAll调度过程中源设备的下一跳设备选取（见\autoref{subsec:ftacas-synth}）。
+直达设备邻接表$\mathcal{N}(\cdot)$在TEN构建阶段预计算并缓存，后续用于AllGather调度过程中的源设备选取与AlltoAll调度过程中源设备的下一跳设备选取（见\autoref{subsec:ftacas-synth}）。
 
 
 
 \subsection{算子构建模块}
 \label{subsec:ftacas-collective}
 
-\noindent\textbf{1 算子统一表示：前置条件与后置条件}
+\noindent\quad\textbf{1）算子统一表示：前置条件与后置条件}
 
 为统一刻画不同类型集合通信算子的合成需求，FTACAS采用条件集合的方式定义算子。记设备集合为$V_D$，设备数为$N=|V_D|$。对任意数据块（chunk）编号$c$与设备$d$，定义布尔型前置条件映射$\mathcal{P}(c,d)\in\{0,1\}$与后置条件集合$\mathcal{Q}$：
 \begin{itemize}
@@ -307,17 +311,16 @@ FTACAS将实际互连拓扑建模为包含设备节点与交换机节点的物�
 \end{itemize}
 因此，集合通信算子的合成可表述为：在满足链路/交换机资源约束的前提下，构造一组传输调度$\mathcal{S}$，使得所有$(c,d)\in\mathcal{Q}$最终均满足$\mathcal{P}(c,d)=1$。
 
-\noindent\textbf{2 数据块划分}
+\noindent\quad\textbf{2）数据块划分}
 
 为探索更细粒度的通信并行性，FTACAS支持对每个设备节点的待通信数据预先进行分块。设每设备数据块划分数为$C$，则每个设备可视为拥有$C$个初始chunk。为便于描述，可将chunk索引映射为二元组$c=(u,k)$：其中$u\in V_D$为chunk来源设备，$k\in\{0,1,\dots,C-1\}$为分块编号。
 
-\noindent\textbf{3 AllGather算子条件构建}
-
+\noindent\quad\textbf{3）AllGather算子条件构建}
 AllGather要求每个设备最终获得所有设备的数据块（即全量聚合分发），其算子语义示意图如\autoref{fig:allgather}所示。
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=1\linewidth]{figure/chapter2/AllGather_crop.pdf}
+    \includegraphics[width=1\linewidth]{figure/chapter2/AllGather-self.pdf}
     \caption{\label{fig:allgather}AllGather算子语义示意图}
 \end{figure}
 
@@ -331,13 +334,13 @@ AllGather要求每个设备最终获得所有设备的数据块（即全量聚�
 \end{itemize}
 由此可得AllGather的后置条件总数为$|\mathcal{Q}|=N\cdot (N-1)\cdot C$（不含每个设备本地已满足的后置条件）。
 
-\noindent\textbf{4 AllToAll算子条件构建}
+\noindent\quad\textbf{4）AlltoAll算子条件构建}
 
-AllToAll要求每个设备将其数据按目的设备切分并分别发送给对应目的设备，其算子语义示意图如\autoref{fig:alltoall}所示。
+AlltoAll要求每个设备将其数据按目的设备切分并分别发送给对应目的设备，其算子语义示意图如\autoref{fig:alltoall}所示。
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=1\linewidth]{figure/chapter2/AllToAll_crop.pdf}
-    \caption{\label{fig:alltoall}AllToAll算子语义示意图}
+    \includegraphics[width=1\linewidth]{figure/chapter2/AlltoAll-self.pdf}
+    \caption{\label{fig:alltoall}AlltoAll算子语义示意图}
 \end{figure}
 
 
@@ -349,20 +352,20 @@ AllToAll要求每个设备将其数据按目的设备切分并分别发送给对
         \mathcal{Q}\leftarrow \mathcal{Q}\cup \{((u\rightarrow d,k),d)\}\quad\text{if}\quad\mathcal{P}((u\rightarrow d,k),v)=0.
     \]
 \end{itemize}
-因此AllToAll的后置条件规模为$|\mathcal{Q}|=N\cdot (N-1)\cdot C$（不包含初始已满足后置条件）。该算子的关键特征在于：每个chunk具有唯一最终目的设备。这也是FTACAS在AllToAll合成中采用“逐跳推进”策略并禁用Replacement机制的主要原因（见\autoref{subsec:ftacas-synth}）。
+因此AlltoAll的后置条件规模为$|\mathcal{Q}|=N\cdot (N-1)\cdot C$（不包含初始已满足后置条件）。该算子的关键特征在于：每个chunk具有唯一最终目的设备。这也是FTACAS在AlltoAll合成中采用“逐跳推进”策略并禁用Replacement机制的主要原因（见\autoref{subsec:ftacas-synth}）。
 
-% \noindent\textbf{5 条件优先级初始化接口}
+% \noindent\quad\textbf{5 条件优先级初始化接口}
 
 % 算子构建模块在生成$\mathcal{P}$与$\mathcal{Q}$后，将未满足后置条件交由TEN进行优先级初始化。对任意$(c,d)\in\mathcal{Q}$，根据传输时间矩阵$\boldsymbol{T}$计算初始优先级$\pi(c,d)$：
 % \begin{align}
 %     \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathcal{P}(c,s)=1} T[s][d], \label{eq:ftacas-priority-init-collective}
 % \end{align}
-% 并按算子类型选择不同的排序方式（AllGather：$\pi$升序；AllToAll：$\pi$降序），从而为后续事件驱动贪心匹配提供统一的“任务队列”入口。
+% 并按算子类型选择不同的排序方式（AllGather：$\pi$升序；AlltoAll：$\pi$降序），从而为后续事件驱动贪心匹配提供统一的“任务队列”入口。
 
-\subsection{时间扩展网络模块（TEN）}
+\subsection{时间扩展网络模块}
 \label{subsec:ftacas-ten}
 
-\noindent\textbf{1 链路传输时间计算与Cut-Through流水化}
+\noindent\quad\textbf{1）链路传输时间计算与Cut-Through流水化}
 
 TEN基于$\alpha$--$\beta$模型为物理链路计算chunk传输时间。对任意链路$e=(u\rightarrow v)$，传输时间为
 \begin{align}
@@ -375,7 +378,7 @@ TEN基于$\alpha$--$\beta$模型为物理链路计算chunk传输时间。对任�
 \end{align}
 该近似使得TEN能够同时兼顾链路序列化与交换机流水行为，并与工程实现中的资源预留逻辑保持一致。
 
-\noindent\textbf{2 传输时间矩阵$\boldsymbol{T}$的预计算}
+\noindent\quad\textbf{2）传输时间矩阵$\boldsymbol{T}$的预计算}
 
 \label{subsec:ftacas-ten-shortest}
 TEN以$\Delta(\cdot)$作为边代价，对每个源设备$u\in V_D$执行Dijkstra最短路径搜索，得到到所有设备节点的传输时间$T[u][\cdot]$，从而构建传输时间矩阵$\boldsymbol{T}=\{T[u][v]\}$。该矩阵在合成阶段用于：
@@ -385,7 +388,7 @@ TEN以$\Delta(\cdot)$作为边代价，对每个源设备$u\in V_D$执行Dijkstr
     \item 计算调度动作的到达时间$t_{\mathrm{arr}}=t+T[s][dst]$。
 \end{itemize}
 
-\noindent\textbf{3 资源占用状态维护与路由预留}
+\noindent\quad\textbf{3）资源占用状态维护与路由预留}
 
 \label{subsec:ftacas-ten-reserve}
 TEN在合成过程中维护两类关键资源的时间占用状态：
@@ -396,24 +399,24 @@ TEN在合成过程中维护两类关键资源的时间占用状态：
 
 当合成器尝试在时间$t$调度一次传输$(s\rightarrow dst)$时，TEN会执行“路由可行性检查”，即验证该传输对应路由上所有链路均未被占用，所有交换机端口在区间$[t,\;t+T[s][dst])$内均有足够余量；若检查通过，则TEN完成资源预留并返回成功，否则返回失败并由合成器继续尝试其它候选源/下一跳。
 
-\noindent\textbf{4 到达事件与事件队列}
+\noindent\quad\textbf{4）到达事件与事件队列}
 
 TEN将每次成功调度的传输转化为到达事件，并插入事件队列$\mathrm{EQ}$。到达事件可写为$(t_{\mathrm{arr}},c,s\rightarrow d)$，表示chunk $c$由$s$发送并于$t_{\mathrm{arr}}$到达$d$。事件队列按时间从小到大弹出，驱动合成器在关键时刻推进TEN状态并触发下一轮贪心匹配，从而避免使用固定时间步长导致的巨大时间扩展图开销。
 
 
-\subsection{合成器模块：事件驱动的贪心合成策略}
+\subsection{合成器模块}
 \label{subsec:ftacas-synth}
 
-\noindent\textbf{1 后置条件与优先级排序策略}
+\noindent\quad\textbf{1）后置条件与优先级排序策略}
 
 FTACAS以“后置条件是否被满足”作为合成过程的核心状态：对任意$(c,d)\in\mathcal{Q}$，当且仅当$\mathcal{P}(c,d)=1$时认为该后置条件被满足。为引导贪心合成的调度方向，FTACAS为每个未满足后置条件定义初始优先级：
 \begin{align}
 \pi(c,d)=\min_{s\in V_D,\ s\neq d,\ \mathcal{P}(c,s)=1} T[s][d]. \label{eq:ftacas-priority}
 \end{align}
 
-在TEN初始化并计算得到传输时间矩阵$\boldsymbol{T}$后，对$\mathcal{Q}$进行初始化排序：AllGather采用$\pi$升序（优先满足传输时间短的后置条件以加速数据扩散），AllToAll采用$\pi$降序（优先推进传输时间长的后置条件以降低尾延迟）。
+在TEN初始化并计算得到传输时间矩阵$\boldsymbol{T}$后，对$\mathcal{Q}$进行初始化排序：AllGather采用$\pi$升序（优先满足传输时间短的后置条件以加速数据扩散），AlltoAll采用$\pi$降序（优先推进传输时间长的后置条件以降低尾延迟）。
 
-\noindent\textbf{2 源设备贪心选择策略}
+\noindent\quad\textbf{2）源设备贪心选择策略}
 
 对每个待满足后置条件$(c,d)$，合成器采用贪心匹配策略选择负责传输对应数据块的源设备：
 \begin{align}
@@ -422,13 +425,13 @@ s=\arg\min\{T[s][d]\mid \mathcal{P}(c,s)=1,\,s\neq d\}. \label{eq:ftacas-source-
 
 该策略优先选择传输时间最短的源设备，从而在局部决策上降低到达时间与资源占用区间长度。若最优源在当前时刻因链路/端口资源不足无法预留，则继续尝试次优的备选源，直至成功或放弃该条件并进入下一条件。（对于AllGather算子源设备的选择，还需满足源设备与目标设备间存在直达设备邻接关系，即$s\in\mathcal{N}(d)$，以符合单次传输不跨设备节点的限制。）
 
-\noindent\textbf{3 事件驱动的合成过程}\\
+\noindent\quad\textbf{3）事件驱动的合成过程}\\
 
 FTACAS采用事件驱动的合成过程，在数据块到达时触发事件，更新TEN的状态并进行新一轮的调度。具体而言，从事件队列EQ取出最早完成的到达事件，获取当前的事件时间步$t$，处理所有到达事件并更新$\mathcal{P}$，随后根据算子类型执行对应的合成策略，直至所有后置条件均被满足（$\mathcal{Q}=\emptyset$）。
 
 
 
-\noindent\textbf{4 AllGather 合成策略}\\
+\noindent\quad\textbf{4）AllGather 合成策略}\\
 
 AllGather的目标是将系统中每个设备初始拥有的数据发送至所有设备。
 其事件驱动的贪心合成过程如\autoref{Algorithm-FTACAS-AllGather}所示。
@@ -508,14 +511,14 @@ AllGather允许chunk经由中间设备逐步扩散，虽然每次传输限定为
 
 
 
-\noindent\textbf{5 AllToAll 合成策略}\\
+\noindent\quad\textbf{5）AlltoAll 合成策略}\\
 
-AllToAll目标是将每个设备的数据按目的设备划分后，
+AlltoAll目标是将每个设备的数据按目的设备划分后，
 分别发送至对应设备。与 AllGather 不同，
-AllToAll中每个数据块具有唯一最终目的设备，
+AlltoAll中每个数据块具有唯一最终目的设备，
 后置条件的满足过程不涉及数据复制，
 因此FTACAS采用逐跳推进的调度策略。
-其事件驱动的贪心合成过程如\autoref{Algorithm-FTACAS-AllToAll} 所示。
+其事件驱动的贪心合成过程如\autoref{Algorithm-FTACAS-AlltoAll} 所示。
 在每一个时间步$t$，合成器执行如下核心调度逻辑：
 \begin{enumerate}[label=(\arabic*)]
     \item \textbf{后置条件选取：}  
@@ -546,7 +549,7 @@ AllToAll中每个数据块具有唯一最终目的设备，
 
 
 除了上述基本调度流程外，
-FTACAS 在 AllToAll 合成过程中还引入了以下两项关键机制，
+FTACAS 在 AlltoAll 合成过程中还引入了以下两项关键机制，
 以保证调度过程的正确性与高效性：
 
 \begin{itemize}
@@ -554,7 +557,7 @@ FTACAS 在 AllToAll 合成过程中还引入了以下两项关键机制，
     为避免在不同时间步内对同一后置条件$(c,d)$进行重复的调度，
     算法维护已调度但对应chunk尚未到达的条件集合$\mathrm{scheduled}$，
     对已被调度的条件在当前时间步内不再重复处理
-    （见\autoref{Algorithm-FTACAS-AllToAll}第10--12行）。
+    （见\autoref{Algorithm-FTACAS-AlltoAll}第10--12行）。
 
     \item \textbf{动态优先级调整机制：}
     当 chunk 被调度到中间节点（即$dst\neq d$）时，
@@ -562,7 +565,7 @@ FTACAS 在 AllToAll 合成过程中还引入了以下两项关键机制，
     为使后续调度顺序与当前系统状态匹配，
     算法会重新计算对应后置条件的优先级$\pi(c,d)$，
     并对后置条件集合$\mathcal{Q}$进行局部重排
-    （见\autoref{Algorithm-FTACAS-AllToAll}第31--33行）。
+    （见\autoref{Algorithm-FTACAS-AlltoAll}第31--33行）。
 \end{itemize}
 
 
@@ -571,8 +574,8 @@ FTACAS 在 AllToAll 合成过程中还引入了以下两项关键机制，
 \begin{algorithm}[!htbp]
     % \footnotesize
     % \small
-    \caption{AllToAll的事件驱动贪心合成过程}
-    \label{Algorithm-FTACAS-AllToAll}
+    \caption{AlltoAll的事件驱动贪心合成过程}
+    \label{Algorithm-FTACAS-AlltoAll}
     \scalebox{0.88}{
     \begin{minipage}{\linewidth}
     \setlength{\baselineskip}{0.8\baselineskip}
@@ -657,13 +660,16 @@ FTACAS 在 AllToAll 合成过程中还引入了以下两项关键机制，
 
 \section{实验评估}
 
-本节对提出的交换机拓扑感知的通用集合通信算法合成器FTACAS的算法性能进行验证，并与现有方法进行对比分析。实验主要关注算法合成过程的时间开销与合成得到的集合通信算法的算法带宽。所有实验均在同一计算平台上完成，实验平台配备Intel Core i9-12900H处理器。FTACAS采用C++语言实现。
+本节对提出的交换机拓扑感知的通用集合通信算法合成器FTACAS的算法性能进行验证，并与现有方法进行对比分析。实验主要关注合成得到的集合通信算法的算法带宽与算法合成过程的时间开销。所有实验均在同一计算平台上完成，实验平台配备Intel Core i9-12900H处理器。FTACAS采用C++语言实现。
 
-\subsection{基线方法：TECCL}
+% \subsection{基线方法：TECCL}
+
+% 为了评估所提出FTACAS方法的有效性，本文选取TECCL\cite{liu2024rethinking}方法作为对比基线。TECCL 是 Liu 等人发表于 SIGCOMM 2024 的集合通信算法合成方法，该方法将集合通信算法合成问题描述成多商品流优化问题，借鉴网络流量工程（Traffic Engineering，TE）中的建模与求解思想，在统一的优化框架下考虑路由选择、链路容量约束以及调度时序。TECCL方法将集合通信算法合成问题建模为混合整数线性规划（Mixed Integer Linear Programming，MILP）问题，并采用商业求解器Gurobi进行求解。TECCL方法同样支持多级交换机拓扑结构，支持AllGtaher和AlltoAll算子，在复杂拓扑下表现出较强的适应能力。本文采用作者开源的TECCL实现代码进行对比实验。
+
+\subsection{实验拓扑与基线方法}
 
 为了评估所提出FTACAS方法的有效性，本文选取TECCL\cite{liu2024rethinking}方法作为对比基线。TECCL 是 Liu 等人发表于 SIGCOMM 2024 的集合通信算法合成方法，该方法将集合通信算法合成问题描述成多商品流优化问题，借鉴网络流量工程（Traffic Engineering，TE）中的建模与求解思想，在统一的优化框架下考虑路由选择、链路容量约束以及调度时序。TECCL方法将集合通信算法合成问题建模为混合整数线性规划（Mixed Integer Linear Programming，MILP）问题，并采用商业求解器Gurobi进行求解。TECCL方法同样支持多级交换机拓扑结构，支持AllGtaher和AlltoAll算子，在复杂拓扑下表现出较强的适应能力。本文采用作者开源的TECCL实现代码进行对比实验。
 
-\subsection{实验拓扑}
 为全面评估 FTACAS 在不同拓扑结构下的算法合成性能，并与 TECCL 方法进行对比，本文选取了多种具有代表性的 GPU 集群拓扑作为实验对象。这些拓扑覆盖了直接互连结构、单机箱高带宽互连结构以及多机箱交换机互连结构，能够反映实际系统中常见的通信场景。
 具体而言，实验中使用的拓扑类型包括：直连 Mesh 拓扑（Mesh4×4）、单机箱 DGX1 拓扑（DGX1-1）、双机箱 DGX2 拓扑（DGX2-2）、基于交换机的 NDv2 拓扑（NDv2-2 与 NDv2-4），以及双机箱 AMD GPU 拓扑（AMD-2）。其中，拓扑名称中的数字后缀表示所包含的机箱（chassis）数量。
 \autoref{tab:topology-summary} 给出了每种拓扑中单个机箱内的GPU数量以及机箱数量。FTACAS与TECCL均在相同的拓扑配置下运行。
@@ -685,20 +691,34 @@ AMD-2             & 16 & 2 & 32\\
 \end{tabular}
 \end{table}
 
-Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓扑结构可参考\autoref{fig:DGX1}，其物理参数与单机箱 NDv2 拓扑相同。DGX2-2 的拓扑结构如\autoref{fig:DGX2-2}所示。NDv2-4 的拓扑结构如\autoref{fig:NDv2-4}所示，其中 NDv2-2 可视为相同结构下的双机箱拓扑；NDv2 的单机箱拓扑结构与 DGX1 类似，在本实验中采用相同的实验参数。AMD-2 的拓扑结构如\autoref{fig:AMD-2}所示。
+% Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓扑结构可参考\autoref{fig:DGX1}，其物理参数与单机箱 NDv2 拓扑相同。DGX2-2 的拓扑结构如\autoref{fig:DGX2-2}所示。NDv2-4 的拓扑结构如\autoref{fig:NDv2-4}所示，其中 NDv2-2 可视为相同结构下的双机箱拓扑；NDv2 的单机箱拓扑结构与 DGX1 类似，在本实验中采用相同的实验参数。AMD-2 的拓扑结构如\autoref{fig:AMD-2}所示。
 
+Mesh（$4\times4$）拓扑是一种典型的二维网格直连结构，如\autoref{fig:Mesh4x4}所示。该拓扑包含16个GPU设备节点，采用对称的$4\times4$网格布局，每个设备通过双向链路与其相邻设备直接连接，无需经过交换机进行中继转发。
+% 这种拓扑结构简单规整，适合用于验证算法在规则直连拓扑下的基本性能。
+DGX2-2 拓扑由2个DGX2机箱组成，如\autoref{fig:DGX2-2}所示。每个机箱内包含16个GPU，通过NVSwitch实现机箱内部的全互连，机箱间通过8条高速IB链路进行连接，形成跨机箱的通信路径。
+% 该拓扑结构在单机箱内具有极高的通信带宽，但跨机箱通信受限于IB链路数量和带宽，呈现出明显的层次化特征。
+NDv2-4 的拓扑结构如\autoref{fig:NDv2-4}所示，包含4个机箱共32个GPU，每个机箱内8个GPU通过直连链路链接，机箱间通过交换机进行连接。NDv2-2 可视为相同结构下的双机箱配置，包含2个机箱共16个GPU。
+DGX1 的拓扑结构可参考\autoref{fig:DGX1}，其拓扑结构与单机箱 NDv2 拓扑类似，在本实验中采用相同的实验参数。
+% 该系列拓扑具有良好的可扩展性，但多级交换机结构也带来了更复杂的路由选择和资源调度挑战。
+AMD-2 拓扑由2个AMD GPU机箱组成，如\autoref{fig:AMD-2}所示。每个机箱包含16个GPU。
+机箱内部通过多种直连链路和多个内部交换机实现GPU间的高速通信，机箱间通过二级交换机进行连接。
+% 该拓扑在单机箱内提供了较高的通信带宽，同时支持跨机箱的大规模扩展。
+
+
+
+% 需要进行重绘
 \begin{figure}[!htbp]
     \centering
     \subfigure[Mesh($4\times4$)拓扑结构\label{fig:Mesh4x4}]{
         \includegraphics[width=0.4\linewidth]{figure/chapter2/Mesh.pdf}
     }
-    \subfigure[DGX2-2拓扑结构\label{fig:DGX2-2}\cite{liu2024rethinking}]{
+    \subfigure[DGX2-2拓扑结构\label{fig:DGX2-2}]{
         \includegraphics[width=0.56\linewidth]{figure/chapter2/DGX2-2.pdf}
     }
-    \subfigure[NDv2-4拓扑结构\label{fig:NDv2-4}\cite{liu2024rethinking}]{
+    \subfigure[NDv2-4拓扑结构\label{fig:NDv2-4}]{
         \includegraphics[width=0.4\linewidth]{figure/chapter2/NDv2-4.pdf}
     }
-    \subfigure[AMD-2拓扑结构\label{fig:AMD-2}\cite{liu2024rethinking}]{
+    \subfigure[AMD-2拓扑结构\label{fig:AMD-2}]{
         \includegraphics[width=0.56\linewidth]{figure/chapter2/AMD-2.pdf}
     }
     \caption{实验中使用的不同拓扑结构示意图}
@@ -709,7 +729,7 @@ Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓�
 
 \subsection{实验设置与评价指标}
 
-本节对 FTACAS 方法的算法合成时间开销以及合成得到的集合通信算法的算法带宽进行评估，并与 TECCL 方法进行对比分析。实验中，FTACAS 与 TECCL 均在相同的拓扑配置下运行。针对每种拓扑结构，分别测试 AllGather 与 AllToAll 两种集合通信算子的合成性能。
+本节对 FTACAS 方法的算法合成时间开销以及合成得到的集合通信算法的算法带宽进行评估，并与 TECCL 方法进行对比分析。实验中，FTACAS 与 TECCL 均在相同的拓扑配置下运行。针对每种拓扑结构，分别测试 AllGather 与 AlltoAll 的合成性能。
 
 为刻画不同数据量下集合通信算子的特征，实验选取了三种数据量设置，分别为 1MB、64MB 与 1GB。本文中，集合通信算子的数据量定义为完整接收缓冲区的大小。此外，考虑到分块策略对集合通信调度与性能的影响，实验中测试了分块数为 1 与 2 的两种场景。此外，为保证在合理时间内完成求解，实验中对求解时间设置了 2 小时的上限，若在该时间内未能得到可行解，则视为求解失败。
 
@@ -733,11 +753,14 @@ Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓�
 
 下面将详细对比不同场景下的AllGather与AlltoAll算子的算法带宽与求解时间。
 
-\noindent\textbf{1 算法带宽}
+\noindent\quad\textbf{1 算法带宽}
 
 不同场景下AllGather的算法带宽对比结果如\autoref {fig:allgather-bandwidth}所示。
 对于 NDv2-4 与 AMD-2 拓扑，在分块数为 2 的配置下，TECCL 方法在设定的 2 小时求解时间上限内未能完成 AllGather 算法的求解，因而对应实验结果在柱状图中未给出。
 对于AllGather算子，在所有场景下FTACAS的算法带宽均大于等于TECCL的算法带宽。在小规模直连拓扑中（Mesh与DGX1-1），两者的算法带宽相当，均逼近理论最优值；在NDv2-2拓扑中，FTACAS的算法带宽略大于TECCL；而在更大规模的复杂拓扑中（DGX2-2、NDv2-4与AMD-2），FTACAS的算法带宽显著优于TECCL，尤其是在DGX2-2与AMD-2拓扑中，FTACAS的算法带宽可以达到TECCL的2$\sim$3倍。这表明FTACAS在复杂拓扑下能够更有效地合成AllGather算法。
+
+在不同数据量与不同分块数下合成AllGather时，FTACAS表现出较强的适应能力，算法带宽性能稳定。对于NDv2系列拓扑，1MB的小数据量情况下，TECCL的算法带宽相对于FTACAS出现了明显的劣化。
+此外，从表中数据可以观察到，算法带宽随着数据量减小而减小，这主要是由于小数据量下通信静态时延占比更大，导致整体传输效率下降。当数据量较大时，增加分块数可以进行更细粒度的调度，从而提升算法带宽；而在小数据量下，增加分块数增大了此时对算法带宽有显著影响的静态时延，因此反而会降低算法带宽。
 
 \begin{figure}[!htbp]
     \centering
@@ -746,11 +769,9 @@ Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓�
     \label{fig:allgather-bandwidth}
 \end{figure}
 
-在不同数据量与不同分块数下合成AllGather时，FTACAS表现出较强的适应能力，算法带宽性能稳定。对于NDv2系列拓扑，1MB的小数据量情况下，TECCL的算法带宽相对于FTACAS出现了明显的劣化。
-此外，从表中数据可以观察到，算法带宽随着数据量减小而减小，这主要是由于小数据量下通信静态时延占比更大，导致整体传输效率下降。当数据量较大时，增加分块数可以进行更细粒度的调度，从而提升算法带宽；而在小数据量下，增加分块数增大了此时对算法带宽有显著影响的静态时延，因此反而会降低算法带宽。
 
 不同场景下AlltoAll的算法带宽对比结果如\autoref{fig:alltoall-bandwidth}所示。
-对于 NDv2-4 与 AMD-2 拓扑，在分块数为 2 的配置下，TECCL 方法在设定的 2 小时求解时间上限内未能完成 AllToAll 算法的求解，因而对应实验结果在柱状图中未给出。
+对于 NDv2-4 与 AMD-2 拓扑，在分块数为 2 的配置下，TECCL 方法在设定的 2 小时求解时间上限内未能完成 AlltoAll 算法的求解，因而对应实验结果在柱状图中未给出。
 对于AlltoAll算子，大部分场景下FTACAS的算法带宽接近TECCL，在部分拓扑中优于TECCL。在Mesh、NDv2-2、NDv2-4与AMD-2拓扑中，FTACAS的算法带宽略低于TECCL；而在DGX1-1与DGX2-2拓扑中，FTACAS的算法带宽优于TECCL，尤其是在DGX1-1拓扑中，FTACAS的算法带宽可以达到TECCL的1.5倍以上。这表明FTACAS在某些复杂拓扑下能够更有效地合成AlltoAll算法，但是由于AlltoAll的复杂度高，搜索空间大，采用贪心合成策略的FTACAS在部分场景下更容易陷入局部最优，导致算法带宽略低于TECCL。
 
 \begin{figure}[!htbp]
@@ -772,7 +793,7 @@ Mesh（$4\times4$）的拓扑结构如\autoref{fig:Mesh4x4}所示。DGX1 的拓�
 \setlength{\tabcolsep}{4.5pt}
 \begin{tabular}{lcccccc}
 \toprule
-\multirow{2}{*}{Topology} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AllToAll} \\
+\multirow{2}{*}{Topology} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AlltoAll} \\
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
 & 1MB & 64MB & 1GB & 1MB & 64MB & 1GB \\
 \midrule
@@ -800,13 +821,15 @@ AMD-2
 
 
 
-\noindent\textbf{2 求解时间}
+\noindent\quad\textbf{2 求解时间}
 
 不同场景下AllGather的求解时间对比结果如\autoref {fig:allgather-solving-time}所示。
 对于 NDv2-4 与 AMD-2 拓扑，在分块数为 2 的配置下，TECCL 方法在设定的 2 小时求解时间上限内未能完成 AllGather 算法的求解，因而对应实验结果在柱状图中未给出。
 对于AllGather算子，在所有场景下FTACAS的求解时间均显著优于TECCL，且比TECCL快2到4个数量级。不同数据量对于求解时间无显著影响。分块数增加时，求解变量数量增加，相当于扩大了问题规模，两种方法的求解时间都显著增加，但FTACAS的求解时间增幅更小，表现出更好的可扩展性。对于 NDv2-4 与 AMD-2 拓扑，分块数为2时，根据拓扑规模类似的DGX2-2拓扑上的实验数据（即分块数分别为1与2配置下的求解时间比例），TECCL的求解时间预计将远超10小时，而FTACAS的求解时间仍能控制在几秒以内。
 
-
+不同场景下AlltoAll的求解时间对比结果如\autoref {fig:alltoall-solving-time}所示。
+NDv2-4 与 AMD-2 拓扑的分块数为 2 的实验结果同样未在2小时内完成求解，因此相关数据未给出。
+对于AlltoAll算子，在所有场景下FTACAS的求解时间均显著优于TECCL，且比TECCL快2到4个数量级。数据量和分块数对于求解时间的影响和AllGather类似，FTACAS表现出了更好的可扩展性。相同配置下（相同拓扑/数据量/分块数），AlltoAll的求解时间普遍高于AllGather，这主要是由于AlltoAll的复杂度更高，搜索空间更大，导致求解时间增加。
 
 \begin{figure}[!htbp]
     \centering
@@ -814,14 +837,6 @@ AMD-2
     \caption{不同场景下AllGather算子的求解时间对比}
     \label{fig:allgather-solving-time}
 \end{figure}
-
-
-
-不同场景下AlltoAll的求解时间对比结果如\autoref {fig:alltoall-solving-time}所示。
-NDv2-4 与 AMD-2 拓扑的分块数为 2 的实验结果同样未在2小时内完成求解，因此相关数据未给出。
-对于AlltoAll算子，在所有场景下FTACAS的求解时间均显著优于TECCL，且比TECCL快2到4个数量级。数据量和分块数对于求解时间的影响和AllGather类似，FTACAS表现出了更好的可扩展性。相同配置下（相同拓扑/数据量/分块数），AlltoAll的求解时间普遍高于AllGather，这主要是由于AlltoAll的复杂度更高，搜索空间更大，导致求解时间增加。
-
-
 
 \begin{figure}[!htbp]
     \centering
@@ -838,7 +853,7 @@ NDv2-4 与 AMD-2 拓扑的分块数为 2 的实验结果同样未在2小时内�
 \setlength{\tabcolsep}{4.5pt}
 \begin{tabular}{lcccccc}
 \toprule
-\multirow{2}{*}{Topology} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AllToAll} \\
+\multirow{2}{*}{Topology} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AlltoAll} \\
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
 & 1MB & 64MB & 1GB & 1MB & 64MB & 1GB \\
 \midrule
@@ -870,8 +885,8 @@ AMD-2
 
 \section{本章小结}
 
-本章围绕复杂异构互连拓扑下集合通信性能难以充分发挥的问题展开研究。首先介绍了时间扩展网络 TEN 对集合通信过程的建模方式，并回顾了基于 TEN 的集合通信算法合成器 TACOS，分析其在多级交换机拓扑建模能力以及 AllToAll 等算子支持方面的局限性，从而明确了面向真实集群环境进行改进的研究动机。
+本章围绕复杂异构互连拓扑下集合通信性能难以充分发挥的问题展开研究。首先介绍了时间扩展网络 TEN 对集合通信过程的建模方式，并回顾了基于 TEN 的集合通信算法合成器 TACOS，分析其在多级交换机拓扑建模能力以及 AlltoAll 等算子支持方面的局限性，从而明确了面向真实集群环境进行改进的研究动机。
 
-针对上述问题，本章提出了一种交换机拓扑感知的通用集合通信算法合成器 FTACAS。该方法以真实物理拓扑为输入，统一建模设备节点与交换机节点，并显式刻画链路带宽、时延参数、交换机转发模式（Cut-Through / Store-and-Forward）以及端口并发约束。在此基础上，FTACAS 采用统一的前置条件与后置条件描述集合通信算子，通过数据分块挖掘更细粒度的通信并行性，并在 TEN 上维护链路与端口的时间占用状态，构建事件驱动的贪心合成流程。针对 AllGather 算子，引入基于直达设备邻接关系的源节点选择与 Replacement 机制以提高有效传输比例；针对 AllToAll 算子，设计逐跳推进、去重调度与动态优先级调整策略，以保证调度正确性并降低尾部通信延迟。同时，本章对算法的时间复杂度与可扩展性进行了分析，表明该方法能够在可控的合成开销下适配更大规模与更复杂的拓扑结构。
+针对上述问题，本章提出了一种交换机拓扑感知的通用集合通信算法合成器 FTACAS。该方法以真实物理拓扑为输入，统一建模设备节点与交换机节点，并显式刻画链路带宽、时延参数、交换机转发模式（Cut-Through / Store-and-Forward）以及端口并发约束。在此基础上，FTACAS 采用统一的前置条件与后置条件描述集合通信算子，通过数据分块挖掘更细粒度的通信并行性，并在 TEN 上维护链路与端口的时间占用状态，构建事件驱动的贪心合成流程。针对 AllGather 算子，引入基于直达设备邻接关系的源节点选择与 Replacement 机制以提高有效传输比例；针对 AlltoAll 算子，设计逐跳推进、去重调度与动态优先级调整策略，以保证调度正确性并降低尾部通信延迟。同时，本章对算法的时间复杂度与可扩展性进行了分析，表明该方法能够在可控的合成开销下适配更大规模与更复杂的拓扑结构。
 
-最后，本章在多种典型 GPU 集群拓扑上，对 FTACAS 与基于混合整数线性规划的 TECCL 方法进行了对比评估。实验结果表明，在多级交换机拓扑的 AllGather 场景中，FTACAS 在多组数据规模下均取得了显著的算法带宽优势，最高可达到约 $3.05\times$；在 AllToAll 场景下，FTACAS 的整体性能与 TECCL 相当，并在部分拓扑与配置中获得最高约 $1.50\times$ 的提升。同时，相较于 TECCL，FTACAS 的算法合成时间实现了数量级上的下降，在不同拓扑与数据规模下可获得 $10^{2}\!\sim\!10^{4}$ 量级的加速。综上所述，FTACAS 在保持较高调度质量的同时显著提升了合成效率，为复杂拓扑环境下集合通信算法的自动化设计提供了一种更具通用性与工程可行性的解决方案。
+最后，本章在多种典型 GPU 集群拓扑上，对 FTACAS 与基于混合整数线性规划的 TECCL 方法进行了对比评估。实验结果表明，在多级交换机拓扑的 AllGather 场景中，FTACAS 在多组数据规模下均取得了显著的算法带宽优势，最高可达到约 $3.05\times$；在 AlltoAll 场景下，FTACAS 的整体性能与 TECCL 相当，并在部分拓扑与配置中获得最高约 $1.50\times$ 的提升。同时，相较于 TECCL，FTACAS 的算法合成时间实现了数量级上的下降，在不同拓扑与数据规模下可获得 $10^{2}\!\sim\!10^{4}$ 量级的加速。综上所述，FTACAS 在保持较高调度质量的同时显著提升了合成效率，为复杂拓扑环境下集合通信算法的自动化设计提供了一种更具通用性与工程可行性的解决方案。

@@ -12,7 +12,7 @@
 
 
 
-\section{集合通信基础知识}
+\section{预备知识}
 
 \subsection{物理拓扑}
 
@@ -100,7 +100,7 @@ P = p_0 p_1 p_2 \cdots p_{k-1}
 \end{figure}
 对于多维对称性系统，通过合适的分解，BlueConnect算法能够建立物理拓扑与逻辑拓扑之间的合理映射，从而提高算法性能。BlueConnect可以看作分层Ring AllReduce在多维度下的拓展，对多维的带宽异构系统具有更高的适应性。在实际系统中部署Ring AllReduce算法时，大都采用了和BlueConnect类似的分层实现方式。
 
-\subsection{常用的集合通信库介绍}
+\subsection{集合通信库}
 
 集合通信算法的具体实现与性能表现都和硬件平台密切相关，为了方便不同硬件环境下的集合通信算法的高效实现，业界将与底层硬件和通信协议相关的实现封装起来，提供了多种集合通信库作为集合通信算法的实现接口以及开发平台。
 
@@ -129,7 +129,7 @@ AllGather算子的目标是将每个节点初始拥有的数据块分发到所�
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=1\linewidth]{figure/chapter4/AG_4nodes_ring.pdf}
+    \includegraphics[width=1\linewidth]{figure/chapter4/AG_4nodes_double_ring-2.pdf}
     \caption{\label{fig:double_ring_allgather}4节点双向链路并行Ring AllGather算法执行流程示意图}
 \end{figure}
 
@@ -139,7 +139,7 @@ AllGather算子的目标是将每个节点初始拥有的数据块分发到所�
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.6\linewidth]{figure/chapter4/AG_4nodes_half_ring.pdf}
+    \includegraphics[width=0.6\linewidth]{figure/chapter4/AG_4nodes_half_ring-2.pdf}
     \caption{\label{fig:double_half_ring_allgather}4节点改进Ring AllGather算法执行流程示意图}
 \end{figure}
 
@@ -149,7 +149,7 @@ AllGather算子的目标是将每个节点初始拥有的数据块分发到所�
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=1\linewidth]{figure/chapter4/AG_8nodes_half_ring.pdf}
+    \includegraphics[width=1\linewidth]{figure/chapter4/AG_8nodes_half_ring-2.pdf}
     \caption{\label{fig:double_half_ring_allgather_8}8节点双半环AllGather算法执行流程示意图}
 \end{figure}
 
@@ -288,7 +288,7 @@ Y^{(k)}=\sum_{p=0}^{n-1}X_p^{(k)},\quad k=0,1,\dots,n-1,
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=1\linewidth]{figure/chapter4/RS_4nodes_half_ring.pdf}
+    \includegraphics[width=1\linewidth]{figure/chapter4/RS_4nodes_half_ring-2.pdf}
     \caption{\label{fig:double_half_ring_reducescatter_4}4节点双半环 ReduceScatter 算法执行流程示意图}
 \end{figure}
 
@@ -388,13 +388,13 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 \begin{figure}[!htbp]
     \centering
     \subfigure[16节点物理拓扑\label{fig:910C_16}]{
-        \includegraphics[width=0.8\linewidth]{figure/chapter4/910C_16nodes_2.pdf}
+        \includegraphics[width=0.8\linewidth]{figure/chapter4/910C_16nodes.pdf}
     }
     \subfigure[32节点物理拓扑\label{fig:910C_32}]{
-        \includegraphics[width=0.8\linewidth]{figure/chapter4/910C_32nodes_2.pdf}
+        \includegraphics[width=0.8\linewidth]{figure/chapter4/910C_32nodes.pdf}
     }
     \subfigure[64节点物理拓扑\label{fig:910C_64}]{
-        \includegraphics[width=1\linewidth]{figure/chapter4/910C_64nodes_2.pdf}
+        \includegraphics[width=1\linewidth]{figure/chapter4/910C_64nodes.pdf}
     }
     \caption{不同规模下的910C集群物理拓扑示意图}
     \label{fig:910C_exp}
@@ -404,7 +404,7 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 我们在和实验拓扑结构相同的单机8节点拓扑下给出了机内两组Ring链路的示意图，如\autoref{fig:8nodes_ring}所示。
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.5\linewidth]{figure/chapter4/double_ring.pdf}
+    \includegraphics[width=0.5\linewidth]{figure/chapter4/910C_double_ring.pdf}
     \caption{单机8节点拓扑下的两组Ring链路示意图}
     \label{fig:8nodes_ring}
 \end{figure}

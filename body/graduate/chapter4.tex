@@ -1,4 +1,4 @@
-\chapter{分布式训练中的计算通信并行优化方法}
+\chapter{面向张量并行的计算通信并行优化方法}
 \section{引言}
 
 在分布式训练场景中，节点间需要频繁进行通信来协同训练，节点间通信时，每个节点上的计算资源往往处于等待的空闲状态，造成了资源浪费，并导致训练效率低下。针对该问题，通过算子细粒度拆解、数学等价变换、组合、调度计算和通信算子等方式，可以实现训练过程中计算和通信的并行执行。因此，如何通过计算与通信的并行优化来提升训练效率，对加速分布式训练具有重要意义。
@@ -31,8 +31,8 @@
 
 本章其余内容安排如下：4.2节介绍了数据并行和张量并行的基础方法；4.3节提出了基于算子拆分调度的计算通信并行优化方法；4.4节介绍了实验设置与结果分析；4.5节总结了本章内容。
 
-\section{数据并行/张量并行基础方法}\label{section3-2}
-\subsection{Transformer模型结构} \label{section3-2-1}
+\section{预备知识}
+\subsection{Transformer模型结构}
 Transformer模型\cite{vaswani2017attention}是一种基于自注意力机制的神经网络架构，广泛应用于自然语言处理和计算机视觉等领域。Transformer模型主要由编码器（Encoder）和解码器（Decoder）两部分组成，每部分包含多个相同的层。每个层主要包括多头自注意力机制（Multi-Head Self-Attention，MHA）和前馈神经网络（Feed-Forward Neural Network，FFN）两个子层。
 图\autoref {fig:Transformer-overall}给出了Transformer模型的整体架构示意图。图\autoref {fig:Transformer-layer}给出了Transformer层的基本结构示意图。从图中可以看到Transformer层主要由多头自注意力机制和前馈神经网络两部分组成，我们以下简称这两部分为Attention层和MLP层。这两部分都以通用矩阵乘法（General Matrix Multiplication，GEMM）为核心计算操作，通过拆分其中的的矩阵乘法操作，可以实现Transformer模型的张量并行训练。
 
@@ -49,7 +49,7 @@ Transformer模型\cite{vaswani2017attention}是一种基于自注意力机制的
 \end{figure}
 
 
-\subsection{数据并行} \label{section3-2-2}
+\subsection{数据并行}
 数据并行是一种常用的分布式训练策略，在数据并行中，每个计算节点持有整个模型的副本，并在划分的本地数据集上进行训练。各节点在本地计算梯度后，通过集合通信算子（如AllReduce）将本地梯度进行聚合，然后更新模型参数，以保持不同节点模型间的同步。 数据并行的主要优势在于其实现简单且易于扩展，适用于大多数神经网络模型。然而，随着模型规模的增大，单个节点可能无法容纳整个模型，导致数据并行面临存储和计算能力的限制。此外，数据并行中的通信开销也会随着节点数量的增加而显著上升，成为训练效率的瓶颈。因此，在实际应用中，数据并行常与其他并行方式（如张量并行、流水并行）结合使用，以充分利用计算资源并提升训练效率。数据并行训练模式的示意图如\autoref{fig:data_parallel}所示。
 
 \begin{figure}[!htbp]   
@@ -58,7 +58,7 @@ Transformer模型\cite{vaswani2017attention}是一种基于自注意力机制的
     \caption{\label{fig:data_parallel}数据并行训练模式示意图}
 \end{figure}
 
-\subsection{张量并行方法：Megatron}\label{subsection3-2-3}
+\subsection{Megatron张量并行方法}
 
 张量并行是一种通过在多个计算节点间划分神经网络模型的权重矩阵来实现分布式训练的方法。Megatron-LM（以下简称Megatron）\cite{shoeybi2019megatron}是NVIDIA提出的一种高效的张量并行训练框架，专门用于大规模Transformer模型的训练。Megatron-LM将Transformer模型的权重矩阵在行或列维度上进行划分，通过AllReduce操作确保划分前后的数学等效性，从而实现了高效的分布式训练。
 Megatron基于两种形式的矩阵分块乘法实现张量并行：列并行（Column Parallel，CP）与行并行（Row Parallel，RP）。列并行将权重矩阵按列划分，每个节点持有权重矩阵的一部分列，并在本地计算输入矩阵与该部分列的乘积，随后通过AllGather操作将各节点的计算结果进行汇总，得到完整的输出矩阵。行并行则将权重矩阵按行划分，同时将输入矩阵对应地按列切分，每个节点持有权重矩阵的一部分行，并在本地计算该部分行与输入矩阵对应部分列的乘积。随后通过AllReduce操作将各节点的计算结果进行汇总，得到完整的输出矩阵。
@@ -66,7 +66,7 @@ Megatron基于两种形式的矩阵分块乘法实现张量并行：列并行（
 
 \begin{figure}[!h]
     \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter3/column-row_parallel.pdf}
+    \includegraphics[width=0.8\linewidth]{figure/chapter3/column-row_parallel.pdf}
     \caption{矩阵分块乘法原理示意图}
     \label{fig:figure/chapter3/column-row_parallel}
 \end{figure}
@@ -128,13 +128,13 @@ $$
 
 
 
-\subsection{TP/DP混合并行模式}\label{subsection3-2-4}
+\subsection{TP/DP混合并行模式}
 
-TP/DP混合并行模式结合了数据并行和张量并行的优势，以应对大规模模型训练中的计算和内存需求。在这种模式下，模型首先通过张量并行在多个节点间划分权重矩阵，然后在每个节点上使用数据并行处理不同的数据批次。这样，每个节点持有模型的一个子集，并在本地数据上进行训练，同时通过AllReduce操作同步参数和梯度。该模式下，所有节点被组织成多个数据并行组和张量并行组，每个节点位于一个数据并行组和一个张量并行组中。在实际系统中部署时，考虑到不同并行模式的通信开销，一般将同一个张量并行组内的节点放在单个服务器内，以利用机内GPU间的高速链路降低通信开销，数据并行组内的节点则进行跨机通信。\autoref{fig:DP-TP}给出了512 GPU集群的8×64 TP/DP混合并行模式的示意图。在该图中，共有64个服务器，每个服务器内的8个GPU构成一个张量并行组，每个服务器内相同编号的GPU构成一个数据并行组，TP的维度为8，DP的维度为64，和一个分组内的GPU数量相对应。
+TP/DP混合并行模式结合了数据并行和张量并行的优势，以应对大规模模型训练中的计算和内存需求。在这种模式下，模型首先通过张量并行在多个节点间划分权重矩阵，然后在每个节点上使用数据并行处理不同的数据批次。这样，每个节点持有模型的一个子集，并在本地数据上进行训练，同时通过AllReduce操作同步参数和梯度。该模式下，所有节点被组织成多个数据并行组和张量并行组，每个节点位于一个数据并行组和一个张量并行组中。在实际系统中部署时，考虑到不同并行模式的通信开销，一般将同一个张量并行组内的节点放在单个服务器内，以利用机内GPU间的高速链路降低通信开销，数据并行组内的节点则进行跨机通信。\autoref{fig:DP-TP}给出了64 GPU集群的8×8 TP/DP混合并行模式的示意图。在该图中，共有8个服务器，每个服务器内的8个GPU构成一个张量并行组，每个服务器内相同编号的GPU构成一个数据并行组，TP和DP的维度均为8，和一个分组内的GPU数量相对应。
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.6\linewidth]{figure/chapter3/TP-DP.pdf}
+    \includegraphics[width=0.8\linewidth]{figure/chapter3/TP-DP.pdf}
     \caption{\label{fig:DP-TP}TP/DP混合并行模式示意图}
 \end{figure}
 
@@ -320,8 +320,8 @@ Y^{(r)}_i = X_i\, M_C^{(r)},\qquad i=0,1,\ldots,P-1 .
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter3/transformer_computation_graph.pdf}
-    \caption{\label{fig:transformer_computation_graph}前向传播与反向传播计算图\cite{qi2024zero}}
+    \includegraphics[width=0.6\linewidth]{figure/chapter3/transformer_computation_graph.pdf}
+    \caption{\label{fig:transformer_computation_graph}前向传播与反向传播计算图}
 \end{figure}
 
 在反向传播过程中，每一层的梯度计算由两部分组成，分别为损失函数关于输入的梯度（Input Gradient）计算和损失函数关于该层模型参数的梯度（Weight Gradient），在同一层中这两部分计算是互不依赖的，仅依赖于上一层的输入梯度。前向与反向的模型计算图如\autoref{fig:transformer_computation_graph}所示。因此，我们将反向传播中的梯度计算进行了上述拆分，从而进一步优化了计算与通信的并行性。

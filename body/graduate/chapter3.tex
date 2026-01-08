@@ -21,7 +21,7 @@
 
 \subsection{时间扩展网络}
 
-时间扩展网络（Time-expanded Network，TEN）是一种用于表示动态网络的静态网络模型，通过在时间维度上扩展原始网络来捕捉网络中随时间变化的动态特性。在TEN中，原始网络中的每个节点在不同时间点上被复制为多个时间节点，这些时间节点之间通过有向边连接，表示节点在不同时间点上的状态变化。TEN可以用于分析和优化动态网络中的各种问题，如最短路径、最大流等。Won等人\cite{won2024tacos}在2023年将TEN引入集合通信领域。TEN可以用一组包含时序的有向无环图表示集合通信算子在系统物理拓扑上的具体通信过程，也就是具体的集合通信算法。
+时间扩展网络（Time-expanded Network，TEN）是一种用于表示动态网络的静态网络模型，通过在时间维度上扩展原始网络来捕捉网络中随时间变化的动态特性，由一组包含时序的有向无环图构成。在TEN中，原始网络中的每个节点在不同时间点上被复制为多个时间节点，这些时间节点之间通过有向边连接，表示节点在不同时间点上的状态变化。TEN可以用于分析和优化动态网络中的各种问题，如最短路径、最大流等。Won等人\cite{won2024tacos}在2023年将TEN引入集合通信领域，首先采用了时间扩展网络TEN的建模方式合成网络拓扑上的集合通信算法。
 
 对于一个给定的物理拓扑，时间扩展网络TEN的构建方式是将其沿着时间维度进行展开，用不同时间下节点间的有向边表示时间序列中可用的节点间传输链路，\autoref{fig:ten}给出了一个简单物理拓扑转换为TEN的示例。
 
@@ -31,7 +31,17 @@
     \caption{\label{fig:ten}示例物理拓扑与对应时间扩展网络TEN示意图\cite{won2024tacos}}
 \end{figure}
 
-我们可以在TEN上直观地表示出集合通信算法的执行过程。\autoref{fig:ten-ring-allgather}给出了Ring AllGather算法的TEN表示。在该TEN中，每个节点在不同时间点上被复制为多个时间节点，表示节点在不同时间点上的状态变化。节点间的有向边表示节点间的数据传输过程，边上的色块表示传输的数据块，图中可以清晰地看到Ring AllGather算法中数据块的传输顺序和环状的传输路径。
+
+
+\subsection{基于时间扩展网络的集合通信算法合成}
+
+% Won等人\cite{won2024tacos}提出了TACOS，首先采用时间扩展网络TEN的建模方式合成网络拓扑上的集合通信算法。
+
+% TACOS可以高效地合成直连拓扑上的Allgather算子，并且适用于非对称异构的网络环境。然而TACOS算法存在两个严重的局限性：不直接支持交换机拓扑，尤其是多级交换机拓扑；不支持AlltoAll算子的合成。
+
+% TEN可以用一组包含时序的有向无环图表示集合通信算子在系统物理拓扑上的具体通信过程，即具体的集合通信算法。
+
+TEN可以直观地表示出集合通信算法的执行过程。\autoref{fig:ten-ring-allgather}给出了Ring AllGather算法的TEN表示。在该TEN中，每个节点在不同时间点上被复制为多个时间节点，表示节点在不同时间点上的状态变化。节点间的有向边表示节点间的数据传输过程，边上的色块表示传输的数据块，图中可以清晰地看到Ring AllGather算法中数据块的传输顺序和环状的传输路径。
 
 \begin{figure}[!htbp]
     \centering
@@ -39,11 +49,11 @@
     \caption{\label{fig:ten-ring-allgather}Ring AllGather算法的TEN表示\cite{won2024tacos}}
 \end{figure}
 
-\subsection{基于时间扩展网络的集合通信算法合成}
-
-Won等人\cite{won2024tacos}提出了TACOS，其可以在无需人工指导或干预的情况下，自主合成网络拓扑上的集合通信算法。TACOS使用TEN表示将集合通信算法合成问题建模为数据块与链路的匹配问题，采用基于贪婪的启发式匹配方法，在约束下最大化链路与数据块的匹配数量。
-
-TACOS的求解原理较为简单，输入包含转换为TEN的物理拓扑，以及目标集合通信算子，其中目标集合通信算子通过初始前置条件和最终后置条件描述。前置条件表示当前时刻节点上目前有哪些可用的数据块，后置条件表示当前时刻节点上还需要收集哪些数据块。整个求解过程迭代运行，不断增加时间t，在每个时刻基于贪婪的启发方法匹配链路与后置条件所需的数据块，直到所有节点的后置条件完全满足。\autoref{fig:tacos}给出了示例非对称四节点物理拓扑上 AllGather算子的端到端合成过程。
+TEN表示将集合通信算法合成问题转换为数据块与链路的匹配问题，通过在每个时刻最大化链路与数据块的匹配数量，可以实现算法的高效合成。
+输入包含转换为TEN的物理拓扑，以及目标集合通信算子，其中目标集合通信算子通过初始前置条件和最终后置条件描述。
+前置条件表示当前时刻节点上目前有哪些可用的数据块，后置条件表示当前时刻节点上还需要收集哪些数据块。
+整个求解过程迭代运行，不断增加时间t，在每个时刻基于贪婪的启发方法匹配链路与后置条件所需的数据块，直到所有节点的后置条件完全满足。
+\autoref{fig:tacos}给出了示例非对称四节点物理拓扑上 AllGather算子的端到端合成过程。
 
 \begin{figure}[!htbp]
     \centering
@@ -51,7 +61,7 @@ TACOS的求解原理较为简单，输入包含转换为TEN的物理拓扑，以
     \caption{\label{fig:tacos}示例非对称四节点物理拓扑上 AllGather算子的TACOS合成过程\cite{won2024tacos}}
 \end{figure}
 
-TACOS可以高效地合成直连拓扑上的Allgather算子，并且适用于非对称异构的网络环境。然而TACOS算法存在两个严重的局限性：不直接支持交换机拓扑，尤其是多级交换机拓扑；不支持AlltoAll算子的合成。
+
 
 \section{交换机拓扑感知的通用集合通信算法合成器}
 \subsection{算法框架}
@@ -679,7 +689,7 @@ FTACAS 在 AlltoAll 合成过程中还引入了以下两项关键机制，
 \label{tab:topology-summary}
 \begin{tabular}{lccc}
 \toprule
-Topology & GPUs per chassis & Chassis  & Total number of GPUs\\
+拓扑 & 单机箱GPU数 & 机箱数  & GPU总数\\
 \midrule
 Mesh($4\times4$)  & 16 & 1 & 16\\
 DGX1-1            & 8  & 1 & 8\\
@@ -710,16 +720,16 @@ AMD-2 拓扑由2个AMD GPU机箱组成，如\autoref{fig:AMD-2}所示。每个�
 \begin{figure}[!htbp]
     \centering
     \subfigure[Mesh($4\times4$)拓扑结构\label{fig:Mesh4x4}]{
-        \includegraphics[width=0.4\linewidth]{figure/chapter2/Mesh.pdf}
+        \includegraphics[width=0.42\linewidth]{figure/chapter2/Mesh.pdf}
     }
     \subfigure[DGX2-2拓扑结构\label{fig:DGX2-2}]{
-        \includegraphics[width=0.56\linewidth]{figure/chapter2/DGX2-2.pdf}
+        \includegraphics[width=0.54\linewidth]{figure/chapter2/DGX2-2.pdf}
     }
     \subfigure[NDv2-4拓扑结构\label{fig:NDv2-4}]{
-        \includegraphics[width=0.4\linewidth]{figure/chapter2/NDv2-4.pdf}
+        \includegraphics[width=0.38\linewidth]{figure/chapter2/NDv2-4.pdf}
     }
     \subfigure[AMD-2拓扑结构\label{fig:AMD-2}]{
-        \includegraphics[width=0.56\linewidth]{figure/chapter2/AMD-2.pdf}
+        \includegraphics[width=0.58\linewidth]{figure/chapter2/AMD-2.pdf}
     }
     \caption{实验中使用的不同拓扑结构示意图}
     \label{fig:topologies}
@@ -793,7 +803,7 @@ AMD-2 拓扑由2个AMD GPU机箱组成，如\autoref{fig:AMD-2}所示。每个�
 \setlength{\tabcolsep}{4.5pt}
 \begin{tabular}{lcccccc}
 \toprule
-\multirow{2}{*}{Topology} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AlltoAll} \\
+\multirow{2}{*}{拓扑} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AlltoAll} \\
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
 & 1MB & 64MB & 1GB & 1MB & 64MB & 1GB \\
 \midrule
@@ -853,7 +863,7 @@ NDv2-4 与 AMD-2 拓扑的分块数为 2 的实验结果同样未在2小时内�
 \setlength{\tabcolsep}{4.5pt}
 \begin{tabular}{lcccccc}
 \toprule
-\multirow{2}{*}{Topology} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AlltoAll} \\
+\multirow{2}{*}{拓扑} & \multicolumn{3}{c}{AllGather} & \multicolumn{3}{c}{AlltoAll} \\
 \cmidrule(lr){2-4}\cmidrule(lr){5-7}
 & 1MB & 64MB & 1GB & 1MB & 64MB & 1GB \\
 \midrule

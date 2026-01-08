@@ -76,7 +76,7 @@
 Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的规约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
 
 设节点数为$n$，Ring AllReduce的具体执行流程如下：（a）将所有节点编号并连接成一个环形结构，初始化对应的通信链路；（b）每个节点将数据分为$n$块，执行$n-1$次发送与接收操作，每次操作向下一节点发送一个数据块，从上一节点接收一个数据块，在$n-1$次操作后，所有节点对收到的数据块求平均，每个节点就都拥有了某特定索引数据块的完整数据，这一过程相当于执行ReduceScatter算子；（c）各节点将汇总后的得到的完整数据块以（b）中相同的方式沿环进行传输，传输$n-1$次后所有节点就都得到了包含全部$n$个数据块的完整数据，这一过程相当于执行AllGather算子。在$n=4$的情况下整个算法执行流程如\autoref{fig:ring_allreduce}所示。
-+
+
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=1\linewidth]{figure/chapter4/Ring_AllReduce_self.pdf}
@@ -129,7 +129,7 @@ AllGather算子的目标是将每个节点初始拥有的数据块分发到所�
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=1\linewidth]{figure/chapter4/AG_4nodes_double_ring-2.pdf}
+    \includegraphics[width=1\linewidth]{figure/chapter4/AG_4nodes_double_ring-3.pdf}
     \caption{\label{fig:double_ring_allgather}4节点双向链路并行Ring AllGather算法执行流程示意图}
 \end{figure}
 
@@ -139,7 +139,7 @@ AllGather算子的目标是将每个节点初始拥有的数据块分发到所�
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.6\linewidth]{figure/chapter4/AG_4nodes_half_ring-2.pdf}
+    \includegraphics[width=0.6\linewidth]{figure/chapter4/AG_4nodes_half_ring-3.pdf}
     \caption{\label{fig:double_half_ring_allgather}4节点改进Ring AllGather算法执行流程示意图}
 \end{figure}
 
@@ -149,7 +149,7 @@ AllGather算子的目标是将每个节点初始拥有的数据块分发到所�
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=1\linewidth]{figure/chapter4/AG_8nodes_half_ring-2.pdf}
+    \includegraphics[width=1\linewidth]{figure/chapter4/AG_8nodes_half_ring-3.pdf}
     \caption{\label{fig:double_half_ring_allgather_8}8节点双半环AllGather算法执行流程示意图}
 \end{figure}
 
@@ -288,7 +288,7 @@ Y^{(k)}=\sum_{p=0}^{n-1}X_p^{(k)},\quad k=0,1,\dots,n-1,
 
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=1\linewidth]{figure/chapter4/RS_4nodes_half_ring-2.pdf}
+    \includegraphics[width=1\linewidth]{figure/chapter4/RS_4nodes_half_ring-3.pdf}
     \caption{\label{fig:double_half_ring_reducescatter_4}4节点双半环 ReduceScatter 算法执行流程示意图}
 \end{figure}
 
@@ -378,7 +378,7 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 
 \section{实验评估}
 
-本节在实际生产环境下对提出的双半环算法进行了实验评估。我们在华为昇腾910C集群中进行了算法部署与性能验证。本实验使用华为开源的HCCL库\cite{hccl-doc}中通信算法层提供的编程接口实现，编程语言为C++。
+本节在实际生产环境下对提出的双半环算法进行了实验评估。本节在华为昇腾910C集群中进行了算法部署与性能验证。本实验使用华为开源的HCCL库\cite{hccl_doc}中通信算法层提供的编程接口实现，编程语言为C++。
 
 \subsection{实验拓扑与基线方法}
 

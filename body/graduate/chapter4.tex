@@ -32,6 +32,22 @@
 本章其余内容安排如下：4.2节介绍了数据并行和张量并行的基础方法；4.3节提出了基于算子拆分调度的计算通信并行优化方法；4.4节介绍了实验设置与结果分析；4.5节总结了本章内容。
 
 \section{预备知识}
+
+
+
+\subsection{数据并行}
+数据并行是一种常用的分布式训练策略，在数据并行中，每个计算节点持有整个模型的副本，并在划分的本地数据集上进行训练。各节点在本地计算梯度后，通过集合通信算子（如AllReduce）将本地梯度进行聚合，然后更新模型参数，以保持不同节点模型间的同步。 数据并行的主要优势在于其实现简单且易于扩展，适用于大多数神经网络模型。然而，随着模型规模的增大，单个节点可能无法容纳整个模型，导致数据并行面临存储和计算能力的限制。
+% 此外，数据并行中的通信开销也会随着节点数量的增加而显著上升，成为训练效率的瓶颈。
+因此，在实际应用中，数据并行常与其他并行方式（如张量并行、流水并行）结合使用，以充分利用计算资源并提升训练效率。数据并行训练模式的示意图如\autoref{fig:data_parallel}所示。
+
+\begin{figure}[!htbp]   
+    \centering
+    \includegraphics[width=0.9\linewidth]{figure/chapter3/DP.pdf}
+    \caption{\label{fig:data_parallel}数据并行训练模式示意图}
+\end{figure}
+
+
+
 \subsection{Transformer模型结构}
 Transformer模型\cite{vaswani2017attention}是一种基于自注意力机制的神经网络架构，广泛应用于自然语言处理和计算机视觉等领域。Transformer模型主要由编码器（Encoder）和解码器（Decoder）两部分组成，每部分包含多个相同的层。每个层主要包括多头自注意力机制（Multi-Head Self-Attention，MHA）和前馈神经网络（Feed-Forward Neural Network，FFN）两个子层。
 图\autoref {fig:Transformer-overall}给出了Transformer模型的整体架构示意图。图\autoref {fig:Transformer-layer}给出了Transformer层的基本结构示意图。从图中可以看到Transformer层主要由多头自注意力机制和前馈神经网络两部分组成，我们以下简称这两部分为Attention层和MLP层。这两部分都以通用矩阵乘法（General Matrix Multiplication，GEMM）为核心计算操作，通过拆分其中的的矩阵乘法操作，可以实现Transformer模型的张量并行训练。
@@ -49,14 +65,6 @@ Transformer模型\cite{vaswani2017attention}是一种基于自注意力机制的
 \end{figure}
 
 
-\subsection{数据并行}
-数据并行是一种常用的分布式训练策略，在数据并行中，每个计算节点持有整个模型的副本，并在划分的本地数据集上进行训练。各节点在本地计算梯度后，通过集合通信算子（如AllReduce）将本地梯度进行聚合，然后更新模型参数，以保持不同节点模型间的同步。 数据并行的主要优势在于其实现简单且易于扩展，适用于大多数神经网络模型。然而，随着模型规模的增大，单个节点可能无法容纳整个模型，导致数据并行面临存储和计算能力的限制。此外，数据并行中的通信开销也会随着节点数量的增加而显著上升，成为训练效率的瓶颈。因此，在实际应用中，数据并行常与其他并行方式（如张量并行、流水并行）结合使用，以充分利用计算资源并提升训练效率。数据并行训练模式的示意图如\autoref{fig:data_parallel}所示。
-
-\begin{figure}[!htbp]   
-    \centering
-    \includegraphics[width=0.9\linewidth]{figure/chapter3/DP.pdf}
-    \caption{\label{fig:data_parallel}数据并行训练模式示意图}
-\end{figure}
 
 \subsection{Megatron张量并行方法}
 
@@ -66,7 +74,7 @@ Megatron基于两种形式的矩阵分块乘法实现张量并行：列并行（
 
 \begin{figure}[!h]
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter3/column-row_parallel.pdf}
+    \includegraphics[width=0.7\linewidth]{figure/chapter3/column-row_parallel.pdf}
     \caption{矩阵分块乘法原理示意图}
     \label{fig:figure/chapter3/column-row_parallel}
 \end{figure}
@@ -111,7 +119,7 @@ $$
 类似地，以2节点张量并行组为例，针对Attention层，Megatron提出了如\autoref{fig:TP-Attention}所示的TP部署方法。
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.7\linewidth]{figure/chapter3/TP-Attention.pdf}
+    \includegraphics[width=0.8\linewidth]{figure/chapter3/TP-Attention.pdf}
     \caption{\label{fig:TP-Attention}Megatron张量并行Attention层部署示意图\cite{shoeybi2019megatron}}
 \end{figure}
 
@@ -134,7 +142,7 @@ TP/DP混合并行模式结合了数据并行和张量并行的优势，以应对
 
 \begin{figure}[!htbp]   
     \centering
-    \includegraphics[width=0.8\linewidth]{figure/chapter3/TP-DP.pdf}
+    \includegraphics[width=0.9\linewidth]{figure/chapter3/TP-DP.pdf}
     \caption{\label{fig:DP-TP}TP/DP混合并行模式示意图}
 \end{figure}
 
@@ -337,7 +345,7 @@ TP/DP混合并行是分布式训练中常用的设置，我们针对TP/DP混合�
     \caption{\label{fig:TP-DP_Overlap}TP/DP混合并行模式下的计算通信并行时间线示意图}
 \end{figure}
 
-\subsection{计算通信并行方案理论评估}
+\subsection{计算通信并行方案理论分析}
 本节对提出的计算通信并行方案进行了理论评估，其中相关参数定义如\autoref{tab:param_def}所示。
 \begin{table}[htbp]
   \centering

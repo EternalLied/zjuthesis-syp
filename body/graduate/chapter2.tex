@@ -54,7 +54,7 @@
     \caption{\label{fig:collective}集合通信算子示意图}
 \end{figure}
 
-分布式训练中常用的集合通信算子有AllReduce、ReduceScatter、AllGather、AlltoAll等，其中AllReduce是最常用的算子，AllReduce算子将所有节点的数据进行规约（一般为求平均操作，还可以进行求和、求最大/最小值等操作），并将结果分发到所有节点上。在分布式训练中，AllReduce通常用于同步各节点的模型参数或梯度，从而保证每个节点在每次迭代后都拥有一致的模型参数。AllReduce可以看作是ReduceScatter和AllGather两个算子的组合，首先通过ReduceScatter将所有节点的数据进行规约并分发到各节点上，然后通过AllGather将规约后的结果汇总到所有节点上。AllReduce的大部分算法实现也可以拆分成ReduceScatter和AllGather两部分，因此大部分经典研究都是针对AllReduce算子的。此外，随着大模型架构的发展，AlltoAll开始广泛应用于分布式训练场景中，如不同节点间的特征交换和混合专家模型（Mixture of Experts，MOE）中的Dispatch和Combine操作等。
+分布式训练中常用的集合通信算子有AllReduce、ReduceScatter、AllGather、AlltoAll等，其中AllReduce是最常用的算子，AllReduce算子将所有节点的数据进行归约（一般为求平均操作，还可以进行求和、求最大/最小值等操作），并将结果分发到所有节点上。在分布式训练中，AllReduce通常用于同步各节点的模型参数或梯度，从而保证每个节点在每次迭代后都拥有一致的模型参数。AllReduce可以看作是ReduceScatter和AllGather两个算子的组合，首先通过ReduceScatter将所有节点的数据进行归约并分发到各节点上，然后通过AllGather将归约后的结果汇总到所有节点上。AllReduce的大部分算法实现也可以拆分成ReduceScatter和AllGather两部分，因此大部分经典研究都是针对AllReduce算子的。此外，随着大模型架构的发展，AlltoAll开始广泛应用于分布式训练场景中，如不同节点间的特征交换和混合专家模型（Mixture of Experts，MOE）中的Dispatch和Combine操作等。
 
 \subsection{集合通信算法}
 集合通信算法是指实现集合通信算子的具体方法，不同的算法在通信步骤、数据传输方式和节点间协调等方面有所不同。常见的集合通信算法包括环形算法、树形算法和层级算法等。这些算法通过优化数据传输路径和减少通信开销，提高了集合通信的效率和性能。在分布式训练中，针对系统的物理拓扑选择合适的集合通信算法对于提高训练速度和资源利用率具有重要意义。集合通信算法通常指定一组逻辑数据传输路径和传输流程，可以视为在物理拓扑之上的逻辑拓扑。
@@ -67,13 +67,13 @@
     \caption{\label{fig:collective_alg}常用AllReduce算法示意图}
 \end{figure}
 
-% Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的规约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
+% Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的归约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
 
 % PairWise算法是一种常用的AlltoAll算子实现方法，它通过在每个通信步骤中让节点与另一个节点交换数据块，逐步完成所有节点间的数据交换。PairWise算法的优点在于其简单性和易于实现，但在大规模集群中可能会导致通信冲突和带宽浪费，同时对于无法建立直接通信链路的节点对，需要中间节点进行转发。为了提高AlltoAll的性能，现有研究提出了多种优化算法，如基于拓扑感知的调度算法和分层通信算法等，这些算法通过优化数据传输路径和减少通信冲突，提高了AlltoAll的效率。
 
 \subsection{Ring AllReduce算法及其衍生算法}\label{Ring AllReduce 算法及其衍生算法}
 
-Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的规约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
+Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的归约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
 
 设节点数为$n$，Ring AllReduce的具体执行流程如下：（a）将所有节点编号并连接成一个环形结构，初始化对应的通信链路；（b）每个节点将数据分为$n$块，执行$n-1$次发送与接收操作，每次操作向下一节点发送一个数据块，从上一节点接收一个数据块，在$n-1$次操作后，所有节点对收到的数据块求平均，每个节点就都拥有了某特定索引数据块的完整数据，这一过程相当于执行ReduceScatter算子；（c）各节点将汇总后的得到的完整数据块以（b）中相同的方式沿环进行传输，传输$n-1$次后所有节点就都得到了包含全部$n$个数据块的完整数据，这一过程相当于执行AllGather算子。在$n=4$的情况下整个算法执行流程如\autoref{fig:ring_allreduce}所示。
 
@@ -203,7 +203,7 @@ AllGather算子的目标是将每个节点初始拥有的数据块分发到所�
 
 \subsection{双半环 ReduceScatter/AllReduce 算法}
 
-ReduceScatter 与 AllGather 在通信调度上互为对偶：AllGather 将“分散在各节点的数据块”扩散到所有节点，而 ReduceScatter 则把“所有节点上的同索引数据块”进行规约并将结果分发到目标节点。设节点总数为 $n$，第 $p$ 个节点的输入张量按块切分为
+ReduceScatter 与 AllGather 在通信调度上互为对偶：AllGather 将“分散在各节点的数据块”扩散到所有节点，而 ReduceScatter 则把“所有节点上的同索引数据块”进行归约并将结果分发到目标节点。设节点总数为 $n$，第 $p$ 个节点的输入张量按块切分为
 $\{X_p^{(0)},X_p^{(1)},\dots,X_p^{(n-1)}\}$，
 其中 $X_p^{(k)}$ 表示第 $p$ 个节点上第 $k$ 个数据分块。ReduceScatter 的输出满足
 \begin{equation}
@@ -291,7 +291,7 @@ Y^{(k)}=\sum_{p=0}^{n-1}X_p^{(k)},\quad k=0,1,\dots,n-1,
     \caption{\label{fig:double_half_ring_reducescatter_4}4节点双半环 ReduceScatter 算法执行流程示意图}
 \end{figure}
 
-AllReduce 可分解为 ReduceScatter 与 AllGather 的串联操作：先通过 ReduceScatter 计算并分发各节点负责的规约分块，再通过 AllGather 将规约后的分块收集到所有节点。本文的双半环 AllReduce 直接复用\autoref{alg:double_half_ring_reducescatter_sum} 与前节双半环 AllGather算法（\autoref{alg:double_half_ring_allgather}），其流程总结为\autoref{alg:double_half_ring_allreduce_sum}。
+AllReduce 可分解为 ReduceScatter 与 AllGather 的串联操作：先通过 ReduceScatter 计算并分发各节点负责的归约分块，再通过 AllGather 将归约后的分块收集到所有节点。本文的双半环 AllReduce 直接复用\autoref{alg:double_half_ring_reducescatter_sum} 与前节双半环 AllGather算法（\autoref{alg:double_half_ring_allgather}），其流程总结为\autoref{alg:double_half_ring_allreduce_sum}。
 
 \begin{algorithm}[!htbp]
 \caption{双半环 AllReduce（Double Half-Ring AllReduce）}
@@ -363,7 +363,7 @@ T_{\mathrm{AG}}^{\mathrm{DHR}}
 双半环 ReduceScatter 是双半环 AllGather 的逆过程，其通信轮数与每轮数据传输量保持一致，
 仅在接收端将数据写入替换为求和累加。
 双半环 AllReduce 由 ReduceScatter 与 AllGather 串联得到，
-忽略本地规约计算开销，其通信时间可近似表示为
+忽略本地归约计算开销，其通信时间可近似表示为
 \begin{equation}
 T_{\mathrm{AR}}^{\mathrm{DHR}}
 =
@@ -494,7 +494,7 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 可以看到，双半环算法在中等数据量（64\,MB/256\,MB）下同样取得了明显的带宽提升。
 随着数据量与节点规模的增加，带宽提升幅度逐步减小，整体变化趋势和 AllGather 场景类似。
 与AllGather相比，ReduceScatter的带宽提升率略低一些，
-这是因为ReduceScatter在接收端需要进行规约计算，
+这是因为ReduceScatter在接收端需要进行归约计算，
 带来了额外的计算开销，从而削弱了通信性能的提升效果。
 
 
@@ -605,4 +605,4 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 
 本章针对双向链路环境下集合通信效率问题，提出了双半环集合通信算法。首先介绍了集合通信的基本概念与 Ring AllReduce 及其衍生算法，分析了双向环算法在链路利用与通信调度方面的局限性。
 在算法设计方面，本章系统阐述了双半环算法在 AllGather、ReduceScatter 及 AllReduce 等典型集合通信算子中的构造方法。该算法通过引入双半环通信模式，在保持双向链路并行通信能力的同时，将通信轮数压缩为双向环算法的约一半，并在多数阶段传输完整数据块，从而降低静态时延并提升带宽利用率。
-实验结果表明，双半环算法在不同节点规模与数据量配置下均能稳定提升算法带宽，在中等数据量场景中优势尤为显著；即使在大规模或大数据量条件下，其性能也不低于双向环算法，验证了算法的有效性与稳定性。
+实验结果表明，双半环算法在不同节点规模与数据量配置下均能稳定提升算法带宽。在中等数据量场景下，AllGather 场景最高可获得约 33\% 的带宽提升，ReduceScatter 场景最高可达 32\% 的带宽提升，AllReduce 场景可获得约 28\% 的带宽提升。即使在大规模或大数据量条件下，双半环算法性能也不低于双向环算法，验证了该算法的有效性与稳定性。

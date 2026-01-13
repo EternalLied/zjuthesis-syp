@@ -5,24 +5,34 @@
 面向真实物理拓扑的集合通信算法优化设计、
 集合通信算法自动合成
 以及
-张量并行下的计算通信并行三个层面展开研究，以提升分布式训练的通信效率与整体吞吐。本文主要工作如下：
+张量并行中的计算通信并行方法三个层面展开研究，以提升分布式训练的通信效率与整体吞吐。本文主要工作如下：
 
 (1)针对存在双向环形链路的物理系统中经典环形算法传输能力利用不足、通信轮数偏多的问题，设计了具有链路聚合特性的双半环集合通信算法。
 该方法通过数据块动态拆分、双向链路并行传输以及分阶段传输流程优化，将环形拓扑的双向链路容量进行有效聚合，在减少通信轮数的同时提升带宽利用率，并在此基础上给出了AllGather、ReduceScatter与AllReduce的统一实现方式。
-该方法在昇腾 910C 集群上进行了实现与评估，结果表明在不同节点数与数据量配置下，双半环算法相对双向环算法带宽提升 2.7\%–33.1\%，能够在多种节点规模场景下获取显著收益。
+该方法在昇腾 910C 集群上进行了实现与评估，结果表明在不同节点数与数据量配置下，双半环算法相对双向环算法带宽提升 2.7\%至33.1\%，能够在多种节点规模场景下获取显著收益。
 
 (2)针对多级交换机拓扑中人为设计算法难以兼顾性能与适配性，现有算法自动合成方法又难以兼顾性能和求解效率的问题，构建了交换机拓扑感知的集合通信算法自动合成方法 FTACAS。
 该方法以时间扩展网络为建模基础，统一刻画设备与交换机节点、链路带宽与时延以及转发机制，并在此之上设计事件驱动的贪心合成框架，通过基于贪心算法的数据块与链路动态匹配实现集合通信算法的自动合成，在短时间内合成高性能的通信方案。
 % 适用于AllGather与AlltoAll 算子。
 % 对多种典型 GPU 集群拓扑的实验结果表明，
 基于多种典型 GPU 集群拓扑配置的仿真实验结果表明，
-FTACAS 合成的集合通信算法的算法带宽整体优于对比基线 TECCL，在部分复杂拓扑上 AllGather 可达到基线的 1–3 倍；AlltoAll 在多数拓扑中与基线接近，部分拓扑能够达到基线的 1.5 倍。同时，FTACAS 的合成时间显著低于基线，平均可获得约 3 个数量级的加速比，提升了该方法在工程场景中的可用性。
+FTACAS 合成的集合通信算法的算法带宽整体优于对比基线 TECCL，在部分复杂拓扑上 AllGather 可达到基线的 1至3 倍；AlltoAll 在多数拓扑中与基线接近，部分拓扑能够达到基线的 1.5 倍。同时，FTACAS 的合成时间显著低于基线，平均可获得约 3 个数量级的加速比，提升了该方法在工程场景中的可用性。
 
 (3)针对张量并行训练中同步通信阻塞明显、易造成计算资源空闲的问题，提出了面向张量并行训练的计算通信并行优化方法。该方法通过算子等价拆分与调度重排，将张量并行过程中的AllReduce通信调度到可与矩阵计算重叠的时间窗口内，在保证训练过程等价的前提下提升计算通信并行度。
 % 该方法基于 PyTorch 接口完成实现并在
-混合并行场景下的实验验证结果表明，该方法在多种模型规格上可获得 1.25×–1.29× 的端到端加速，对应训练时间降低 20\%–22\%，有效缓解了通信引起的计算资源空闲问题，明显缩短了训练迭代时间。
+混合并行场景下的实验验证结果表明，该方法在多种模型规格上可获得1.25$\times$至1.29$\times$的端到端加速，对应训练时间降低 20\%至22\%，有效缓解了通信引起的计算资源空闲问题，明显缩短了训练迭代时间。
 
 \noindent \textbf{关键词：}分布式训练；集合通信；链路并行；算法合成；计算通信并行
 
 \cleardoublepage
 \chapternonum{Abstract}
+
+In recent years, deep learning has advanced rapidly, with training data volumes and model scales growing continuously. Constrained by single-device computational power and memory capacity, distributed training across multi-node clusters has become mainstream. During distributed training, compute nodes synchronize parameters, gradients, and activations through collective communication operations such as AllReduce, AllGather, ReduceScatter, and AlltoAll. As cluster scales expand and parallelization strategies become more complex, communication overhead has become a significant bottleneck for training efficiency. Meanwhile, modern clusters typically consist of diverse links and multi-level hierarchical structures with significant bandwidth and latency variations. Existing algorithms often fail to fully exploit link parallelism, leading to excessive communication rounds and unbalanced loads. Additionally, the coupling between communication and computation affects overall performance; for instance, in tensor parallelism, communication exhibits tight data dependencies with matrix computations, causing compute resources to idle. This thesis conducts research from three perspectives: collective communication algorithm optimization, automatic algorithm synthesis, and computation-communication parallelism, aiming to improve communication efficiency in distributed training. The main contributions are as follows:
+
+(1) To address underutilization of transmission capacity and excessive communication rounds in classical ring algorithms on systems with bidirectional links, we design a double half-ring collective communication algorithm with link aggregation. This method aggregates bidirectional link capacity through dynamic data chunk splitting, parallel transmission, and phased workflow optimization, reducing communication rounds while improving bandwidth utilization, with unified implementations for AllGather, ReduceScatter, and AllReduce. Evaluation on an Ascend 910C cluster shows 2.7\%–33.1\% bandwidth improvement over the bidirectional ring algorithm across different configurations.
+
+(2) To address the difficulty of balancing performance and adaptability in multi-level switch topologies, we develop FTACAS, a switch-topology-aware automatic collective communication algorithm synthesizer. Using time-expanded networks as the modeling foundation, it uniformly characterizes devices, switches, link properties, and forwarding mechanisms. An event-driven greedy synthesis framework achieves automatic algorithm synthesis through dynamic matching between data chunks and links. Simulations on typical GPU cluster topologies show that FTACAS achieves 1$\times$-3$\times$ the baseline TECCL performance for AllGather and up to 1.5× for AlltoAll, while reducing synthesis time by approximately three orders of magnitude.
+
+(3) To address synchronous communication blocking in tensor parallel training, we propose a computation-communication parallelism optimization method. Through operator equivalent splitting and schedule reordering, AllReduce communication is scheduled into time windows overlapping with matrix computation, improving parallelism while ensuring training equivalence. Experiments in hybrid parallelism scenarios show 1.25$\times$–1.29$\times$ end-to-end speedup, corresponding to 20\%–22\% reduction in training time.
+
+\noindent \textbf{Keywords:} Distributed Training; Collective Communication; Link Parallelism; Algorithm Synthesis; Computation-Communication Parallelism

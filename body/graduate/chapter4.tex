@@ -1,7 +1,7 @@
 \chapter{面向张量并行的计算通信并行优化方法}
 \section{引言}
 
-在分布式训练场景中，节点间需要频繁进行通信来协同训练，节点间通信时，每个节点上的计算资源往往处于等待的空闲状态，造成了资源浪费，并导致训练效率低下。针对该问题，通过算子细粒度拆解、数学等价变换、组合、调度计算和通信算子等方式，可以实现训练过程中计算和通信的并行执行。因此，如何通过计算与通信的并行优化来提升训练效率，对加速分布式训练具有重要意义。
+前两章分别从集合通信算法设计与算法自动合成两个角度研究了如何提升集合通信性能，两章工作均聚焦于优化通信算法本身。在实际分布式训练中，计算与通信往往串行执行，通信期间计算资源处于空闲状态，同样制约着训练效率。因此，本章从计算与通信并行调度的角度出发，研究如何通过算子拆分与重调度实现计算和通信的并行执行，隐藏通信开销，从而进一步提升训练效率。
 
 % 分布式训练任务中，常用的并行训练方式有数据并行（Data Parallelism，DP）、张量并行（Tensor Parallelism，TP）、流水并行（Pipeline Parallelism，PP）和专家并行（Expert Parallelism，EP）等。
 % 在数据并行中，每个节点持有整个模型的副本，并在划分的本地数据集上进行训练，各本地梯度通过例如AllReduce的集合通信方式进行聚合，然后更新参数，以保持不同节点模型间的同步。然而，数据并行可能无法满足大规模模型的训练需求，这些模型可能超出设备的存储和计算能力，因此，模型并行的使用变得不可避免。模型并行包括张量并行、流水并行和专家并行等方式。
@@ -79,11 +79,11 @@ Megatron基于两种形式的矩阵分块乘法实现张量并行：列并行（
     \label{fig:figure/chapter3/column-row_parallel}
 \end{figure}
 
-以2节点张量并行组为例，针对MLP层，Megatron提出了如\autoref{fig:TP-MLP}所示的TP部署方法。
+以2节点张量并行组为例，针对MLP层，Megatron提出了如\autoref{fig:TP-MLP}所示的TP部署方法\cite{shoeybi2019megatron}。
 \begin{figure}[!htbp]   
     \centering
     \includegraphics[width=0.7\linewidth]{figure/chapter3/TP-MLP.pdf}
-    \caption{\label{fig:TP-MLP}Megatron张量并行MLP层部署示意图\cite{shoeybi2019megatron}}
+    \caption{\label{fig:TP-MLP}Megatron张量并行MLP层部署示意图}
 \end{figure}
 MLP层的第一部分包括一个线性层和一个激活层，分别进行通用矩阵乘法计算和GeLU激活函数的非线性计算，其计算公式为
 $$
@@ -116,19 +116,19 @@ Z=\text{Dropout}\left( Y_1B_1+Y_2B_2 \right) ,
 $$
 由于Dropout为非线性函数，不满足可加性，因此，在进入Dropout计算之前需要一次同步操作，通过AllReduce通信聚合分块矩阵。而这种将行并行接续在列并行之后的部署组合，可以省去列并行模块后的AllGather通信，从而降低了通信开销。
 
-类似地，以2节点张量并行组为例，针对Attention层，Megatron提出了如\autoref{fig:TP-Attention}所示的TP部署方法。
+类似地，以2节点张量并行组为例，针对Attention层，Megatron提出了如\autoref{fig:TP-Attention}所示的TP部署方法\cite{shoeybi2019megatron}。
 \begin{figure}[!htbp]   
     \centering
     \includegraphics[width=0.8\linewidth]{figure/chapter3/TP-Attention.pdf}
-    \caption{\label{fig:TP-Attention}Megatron张量并行Attention层部署示意图\cite{shoeybi2019megatron}}
+    \caption{\label{fig:TP-Attention}Megatron张量并行Attention层部署示意图}
 \end{figure}
 
 在Attention层中，Megatron利用多头注意力机制MHA所固有的并行性，将与键（Key, K）、查询（Query, Q）和值（Value, V）相关的矩阵乘法采用列并行的方式执行，使得每个注意力头对应的矩阵乘法均可在单个节点上独立完成。这种划分方式能够将每个注意力头的参数与计算任务分布到不同节点上执行，在自注意力后的输出线性层中的矩阵乘法则采用行并行的方式执行，它能够直接接收并行Attention层的输出，无需在节点之间进行通信。
-这种方法在MLP层与Attention层中均实现了两个矩阵乘法的融合，有效消除了中间的同步点，从而提升了整体的可扩展性。最终，在一个完整的Transformer层中，所有矩阵乘法的计算仅需在前向传播中执行两次AllReduce操作，在反向传播中执行两次AllReduce操作，分别由\autoref{fig:TP-MLP}和\autoref{fig:TP-Attention}中的$f$运算符和$g$运算符表示。完整的Transformer层TP示意图如\autoref {fig:TP-Transformer-layer}所示。
+这种方法在MLP层与Attention层中均实现了两个矩阵乘法的融合，有效消除了中间的同步点，从而提升了整体的可扩展性。最终，在一个完整的Transformer层中，所有矩阵乘法的计算仅需在前向传播中执行两次AllReduce操作，在反向传播中执行两次AllReduce操作，分别由\autoref{fig:TP-MLP}和\autoref{fig:TP-Attention}中的$f$运算符和$g$运算符表示。完整的Transformer层TP示意图如\autoref {fig:TP-Transformer-layer}所示\cite{shoeybi2019megatron}。
 \begin{figure}[!htbp]   
     \centering
     \includegraphics[width=0.7\linewidth]{figure/chapter3/TP-comm.pdf}
-    \caption{\label{fig:TP-Transformer-layer}Megatron张量并行Transformer层部署示意图\cite{shoeybi2019megatron}}
+    \caption{\label{fig:TP-Transformer-layer}Megatron张量并行Transformer层部署示意图}
 \end{figure}
 
 在Transformer语言模型中，嵌入层的维度为隐藏层大小H与词汇表大小V的乘积。由于现代语言模型的词表规模通常在数万个词元量级，因此，Megatron也对嵌入层进行了并行化。然而，在Transformer语言模型中，输出嵌入层与输入嵌入层共享权重，这就要求同时对两者进行修改。
@@ -218,8 +218,7 @@ Transformer层基线方案和优化后计算通信并行方案的执行流程如
 \autoref{fig:transformer_method}左侧子图所示的基线方案采用Megatron提出的列并行与行并行交替进行的经典张量并行方法。Transformer包含Attention层和MLP层，采用列并行与行并行两种计算模式。在前向传播中，输入依次经过多头注意力（MHA）或GeLU激活函数、矩阵乘法（MatMul）、非线性变换（Non-Linear）、矩阵乘法，最终通过AllReduce进行梯度同步。反向传播过程中，误差梯度经由梯度矩阵乘法、非线性变换的梯度、梯度矩阵乘法，并通过AllReduce实现梯度的全局聚合。该方案在Attention层和MLP层后均需进行同步全局通信（AllReduce），由于通信操作与计算串行执行，设备在通信期间处于等待状态，造成了计算资源的空闲与浪费。
 \autoref{fig:transformer_method}右侧子图展示了Transformer层的计算和通信并行优化方案，该方案对前向传播和反向传播进行了针对性的优化设计。
 
-\noindent
-\textbf{1 前向传播阶段}
+\noindent\quad\textbf{1）前向传播阶段}
 
 在前向传播阶段，将原有的AllReduce操作拆解为ReduceScatter和AllGather操作，并将对应的行并行和列并行矩阵计算相应地进行拆分。行并行的计算拆分后可以和ReduceScatter通信并行，列并行的计算拆分后可以和AllGather通信并行，从而实现计算与通信的并行。
 \autoref{fig:transformer_optim_forward_detail}展示了Transformer层前向传播部分基线方案与对应计算通信并行优化方案的具体实现细节。
@@ -255,6 +254,11 @@ W_R=\big[\,W_R^{(0)};W_R^{(1)};\ldots;W_R^{(P-1)}\,\big],
 Z=\mathrm{AllReduce}\big(\widetilde{Z}^{(r)}\big)=\sum_{r=0}^{P-1}\widetilde{Z}^{(r)} ,
 \end{equation}
 该同步通信与计算串行执行，形成显著设备空闲（对应图左侧Attention子层行并行后的AllReduce）。
+
+% 为实现计算与通信的并行执行，本文采用三阶段优化策略：首先将 AllReduce 操作等价拆分为 ReduceScatter 与 AllGather 两个子操作，为后续重叠创造条件；随后通过对行并行矩阵计算进行分块，使其与 ReduceScatter 通信流水并行；最后利用列并行计算的可分性，将其与 AllGather 通信重叠执行。下面分别阐述上述三个阶段的具体实现。
+
+为实现计算与通信并行，将 AllReduce 拆分为 ReduceScatter 与 AllGather，并分别使其与行并行计算、列并行计算重叠执行，下面将具体介绍实现过程。
+
 
 \vspace{0.5em}
 \noindent
@@ -323,8 +327,7 @@ Y^{(r)}_i = X_i\, M_C^{(r)},\qquad i=0,1,\ldots,P-1 .
 
 
 
-\noindent
-\textbf{2 反向传播阶段}
+\noindent\quad\textbf{2）反向传播阶段}
 
 \begin{figure}[!htbp]   
     \centering
@@ -358,7 +361,7 @@ TP/DP混合并行是分布式训练中常用的设置，我们针对TP/DP混合�
       \toprule
       参数 & 参数含义 \\
       \midrule
-      $B$ & 总批次（Global batch size） \\
+      $B$ & 全局批次大小（Global batch size） \\
       $S$ & 序列长度（Sequence Length） \\
       $H$ & 隐藏维度（Hidden Size） \\
       $V$ & 词汇表长度（Vocabulary Size） \\
@@ -490,7 +493,8 @@ T_{\mathrm{lap}}^{\mathrm{bwd}}
     \label{tab:transformer_model_para}
     \begin{tabular}{cccccc}
         \toprule
-        模型规格 & Layers & Hidden size & Attention heads & Vocabulary size & Max sequence length\\
+        % 模型规格 & Layers & Hidden size & Attention heads & Vocabulary size & Max sequence length\\
+        模型规格 & 层数 & 隐藏层维度 & 注意力头数 & 词表大小 & 最大序列长度 \\
         \midrule
         一 & 12 & 2048 & 32 & 5000 & 1024\\
         二 & 24 & 3072 & 48 & 5000 & 1024\\
@@ -505,6 +509,8 @@ T_{\mathrm{lap}}^{\mathrm{bwd}}
 
 \autoref{tab:time_speedup}给出了三种模型规格下的端到端实跑结果。可以看到，在相同并行配置与硬件环境下，本章方法在三种模型规格上均取得了稳定收益：端到端训练时间降低约20\%--22\%，对应加速比为1.25$\times$、1.29$\times$、1.25$\times$。
 
+
+
 \begin{table}[htbp]
 \centering
 \caption{不同模型规格的训练时间与加速比对比}
@@ -512,7 +518,7 @@ T_{\mathrm{lap}}^{\mathrm{bwd}}
 % \small
 \begin{tabular}{c c c c c}
 \toprule
-模型规格 & Global batch size
+模型规格 & 全局批次大小 %Global batch size 
 & 基线时间(s) & 改进时间(s) & 加速比 \\
 \midrule
 一 & 64 & 2.347 & 1.876 & 1.25$\times$ \\
@@ -530,7 +536,7 @@ T_{\mathrm{lap}}^{\mathrm{bwd}}
 
 \begin{table}[htbp]
 \centering
-\caption{不同模型规格下前向与反向阶段计算通信并行效果对比（单位：ms）}
+\caption{不同模型规格下前向与反向阶段的计算通信并行效果对比（单位：ms）}
 \label{tab:overlap_fwd_bwd}
 % \small
 \scalebox{0.9}{
@@ -606,7 +612,7 @@ T_{\mathrm{lap}}^{\mathrm{bwd}}
     \subfigure[计算通信并行方案]{
         \includegraphics[width=1\linewidth]{figure/chapter3/profiling_forward_optim.pdf}
     }
-    \caption{Transformer层前向传播基线方案和计算通信并行方案的Profiling时间线对比}
+    \caption{Transformer层前向传播的基线方案和计算通信并行方案的Profiling时间线对比}
     \label{fig:profiling_forward}
 \end{figure}
 
@@ -620,7 +626,7 @@ T_{\mathrm{lap}}^{\mathrm{bwd}}
     \subfigure[计算通信并行方案]{
         \includegraphics[width=1\linewidth]{figure/chapter3/profiling_backward_optim.pdf}
     }
-    \caption{Transformer层反向传播基线方案和计算通信并行方案的Profiling时间线对比}
+    \caption{Transformer层反向传播的基线方案和计算通信并行方案的Profiling时间线对比}
     \label{fig:profiling_backward}
 \end{figure}
 
@@ -631,10 +637,14 @@ T_{\mathrm{lap}}^{\mathrm{bwd}}
 
 \section{本章小结}
 
-本章针对分布式训练中同步通信导致的设备空闲问题，围绕TP/DP混合并行场景提出了一种基于算子拆分与调度的计算通信并行优化方法。首先，本章梳理了数据并行、张量并行及其混合并行的基本原理，重点分析了Megatron张量并行中列并行/行并行交替结构带来的同步通信开销，指出Transformer层内多处AllReduce同步点是限制训练效率的重要因素。
+% 本章针对分布式训练中同步通信导致的设备空闲问题，围绕TP/DP混合并行场景提出了一种基于算子拆分与调度的计算通信并行优化方法。首先，本章梳理了数据并行、张量并行及其混合并行的基本原理，重点分析了Megatron张量并行中列并行/行并行交替结构带来的同步通信开销，指出Transformer层内多处AllReduce同步点是限制训练效率的重要因素。
 
-在方法设计方面，本章从嵌入层与Transformer层两个层面进行了针对性优化：在嵌入层，将词嵌入后的AllReduce与位置嵌入计算拆分到不同执行流并行；在Transformer层，将基线方案中的AllReduce等价拆分为ReduceScatter与AllGather，并结合矩阵乘法的分块可并行性，实现行并行计算与ReduceScatter、列并行计算与AllGather的流水重叠；在反向传播阶段，进一步利用输入梯度与权重梯度计算的独立性，将通信与梯度计算过程并行执行，以最大化隐藏通信开销。此外，本章将TP侧的并行化与DP侧的梯度桶通信机制结合，实现TP/DP混合并行模式下更充分的计算通信重叠。我们对提出的方法进行了理论评估，分析了不同模型参数设置下各阶段的可隐藏通信时间。
+% 在方法设计方面，本章从嵌入层与Transformer层两个层面进行了针对性优化：在嵌入层，将词嵌入后的AllReduce与位置嵌入计算拆分到不同执行流并行；在Transformer层，将基线方案中的AllReduce等价拆分为ReduceScatter与AllGather，并结合矩阵乘法的分块可并行性，实现行并行计算与ReduceScatter、列并行计算与AllGather的流水重叠；在反向传播阶段，进一步利用输入梯度与权重梯度计算的独立性，将通信与梯度计算过程并行执行，以最大化隐藏通信开销。此外，本章将TP侧的并行化与DP侧的梯度桶通信机制结合，实现TP/DP混合并行模式下更充分的计算通信重叠。我们对提出的方法进行了理论评估，分析了不同模型参数设置下各阶段的可隐藏通信时间。
 
-实验结果表明，所提出的计算通信并行方法在不同Transformer模型规格下均能取得稳定的性能提升，端到端训练时间平均降低约20\%，实现了1.25×及以上的加速比。进一步的Profiling时间线分析显示，原本位于关键路径上的同步通信在优化方案中被有效调度至与矩阵计算并行执行的区间，从而显著减少了通信阻塞带来的设备空闲，验证了本章方法在实际训练过程中的有效性。
+% 实验结果表明，所提出的计算通信并行方法在不同Transformer模型规格下均能取得稳定的性能提升，端到端训练时间平均降低约20\%，实现了1.25×及以上的加速比。进一步的Profiling时间线分析显示，原本位于关键路径上的同步通信在优化方案中被有效调度至与矩阵计算并行执行的区间，从而显著减少了通信阻塞带来的设备空闲，验证了本章方法在实际训练过程中的有效性。
 
-本章工作验证了在分布式训练中通过集合通信与计算算子的拆分与重调度实现计算与通信重叠的可行性与有效性。后续工作可进一步从自适应分块粒度选择、分块矩阵乘法算子效率提升以及跨节点网络环境下的调度与拓扑协同等方向展开，以提升方法在更大规模集群与更复杂硬件互连中的适用性与收益上限。
+% 本章工作验证了在分布式训练中通过集合通信与计算算子的拆分与重调度实现计算与通信重叠的可行性与有效性。后续工作可进一步从自适应分块粒度选择、分块矩阵乘法算子效率提升以及跨节点网络环境下的调度与拓扑协同等方向展开，以提升方法在更大规模集群与更复杂硬件互连中的适用性与收益上限。
+
+本章针对张量并行训练中同步通信导致计算资源空闲的问题展开研究。首先介绍了数据并行、张量并行及 Megatron 张量并行方法，分析了 Transformer 层内 AllReduce 同步点对训练效率的制约。
+针对上述问题，本章提出了基于算子拆分调度的计算通信并行优化方法，分别对嵌入层和 Transformer 层进行优化。在嵌入层，将词嵌入后的 AllReduce 与位置嵌入计算拆分到不同执行流并行执行；在 Transformer 层，将 AllReduce 等价拆分为 ReduceScatter 与 AllGather，结合矩阵乘法的分块特性实现行并行计算与 ReduceScatter、列并行计算与 AllGather 的流水重叠，并在反向传播阶段利用输入梯度与权重梯度计算的独立性进一步隐藏通信开销。此外，本章将 TP 侧优化与 DP 侧梯度桶通信机制结合，实现混合并行模式下更充分的计算通信重叠。
+实验结果表明，所提方法在不同 Transformer 模型规格下均能取得稳定收益，端到端训练时间降低约 20\%，加速比达到 1.25$\times$ 以上。Profiling 分析显示，原本位于关键路径上的同步通信被调度至与矩阵计算并行执行的区间，验证了本章方法的有效性。

@@ -19,7 +19,7 @@
 物理拓扑描述了计算节点之间的底层物理连接关系，可以由一组图给定。高性能计算集群系统的群物理拓扑中往往存在着明显的多级异构链路，这些链路具有不同的带宽以及静态时延等特性。
 
 目前分布式训练中，常用的设备是英伟达的NVIDIA系列GPU，常用的高性能计算集群系统有NVIDIA DGX系列系统。
-图\autoref{fig:DGX1}给出了NVIDIA DGX-1系统的机内物理拓扑结构示意图。单个DGX1服务器配备了8个NVIDIA V100 GPU, GPU间通过高速互连网络NVLink和PCIe进行连接。多个DGX-1服务器可以通过以太网或InfiniBand等网络进行互连，形成更大规模的集群系统。通过Infiniband互连的124机DGX-1集群拓扑结构如图\autoref{fig:DGX1-cluster}所示。
+图\autoref{fig:DGX1}给出了NVIDIA DGX-1系统的机内物理拓扑结构示意图\cite{nvidia_dgx1_blog}。单个DGX1服务器配备了8个NVIDIA V100 GPU, GPU间通过高速互连网络NVLink和PCIe进行连接。多个DGX-1服务器可以通过以太网或InfiniBand等网络进行互连，形成更大规模的集群系统。通过Infiniband互连的124机DGX-1集群拓扑结构如图\autoref{fig:DGX1-cluster}所示。
 
 \begin{figure}[!htbp]
     \centering
@@ -29,7 +29,7 @@
     \subfigure[124机集群物理拓扑结构\label{fig:DGX1-cluster}]{
         \includegraphics[width=0.45\linewidth]{figure/chapter2/DGX1-cluster.pdf}
     }
-    \caption{DGX-1系统物理拓扑结构示意图\cite{nvidia_dgx1_blog}}
+    \caption{DGX-1系统物理拓扑结构示意图}
     \label{fig:DGX1-system}
 \end{figure}
 
@@ -46,12 +46,12 @@
 
 \subsection{集合通信算子}
 
-集合通信是在并行计算环境中多个进程或节点之间协调和交换数据的一类操作，在分布式训练场景下，是每个计算节点间同步和交换参数的操作。一个指定的集合通信算子确定了每个计算节点需要发送和接收的数据。常用集合通信算子如\autoref{fig:collective}所示。
+集合通信是在并行计算环境中多个进程或节点之间协调和交换数据的一类操作，在分布式训练场景下，是每个计算节点间同步和交换参数的操作。一个指定的集合通信算子确定了每个计算节点需要发送和接收的数据。常用集合通信算子如\autoref{fig:collective}所示\cite{woolley2015nccl}。
 
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=1\linewidth]{figure/chapter2/collective.pdf}
-    \caption{\label{fig:collective}集合通信算子示意图\cite{woolley2015nccl}}
+    \caption{\label{fig:collective}集合通信算子示意图}
 \end{figure}
 
 分布式训练中常用的集合通信算子有AllReduce、ReduceScatter、AllGather、AlltoAll等，其中AllReduce是最常用的算子，AllReduce算子将所有节点的数据进行规约（一般为求平均操作，还可以进行求和、求最大/最小值等操作），并将结果分发到所有节点上。在分布式训练中，AllReduce通常用于同步各节点的模型参数或梯度，从而保证每个节点在每次迭代后都拥有一致的模型参数。AllReduce可以看作是ReduceScatter和AllGather两个算子的组合，首先通过ReduceScatter将所有节点的数据进行规约并分发到各节点上，然后通过AllGather将规约后的结果汇总到所有节点上。AllReduce的大部分算法实现也可以拆分成ReduceScatter和AllGather两部分，因此大部分经典研究都是针对AllReduce算子的。此外，随着大模型架构的发展，AlltoAll开始广泛应用于分布式训练场景中，如不同节点间的特征交换和混合专家模型（Mixture of Experts，MOE）中的Dispatch和Combine操作等。
@@ -92,11 +92,11 @@ P = p_0 p_1 p_2 \cdots p_{k-1}
 = \prod_{i<k} p_i,
 \quad p_i \in \mathbb{N},\; p_i > 1.
 \end{equation}
-分解后按\autoref{fig:blueconnect}所示步骤进行通信，该算法实现也可以顺序拆分为ReduceScatter和AllGather两个算子。
+分解后按\autoref{fig:blueconnect}所示步骤进行通信\cite{cho2019blueconnect}，该算法实现也可以顺序拆分为ReduceScatter和AllGather两个算子。
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=0.8\linewidth]{figure/chapter4/BlueConnect.pdf}
-    \caption{\label{fig:blueconnect}BlueConnect算法执行流程示意图\cite{cho2019blueconnect}}
+    \caption{\label{fig:blueconnect}BlueConnect算法执行流程示意图}
 \end{figure}
 对于多维对称性系统，通过合适的分解，BlueConnect算法能够建立物理拓扑与逻辑拓扑之间的合理映射，从而提高算法性能。BlueConnect可以看作分层Ring AllReduce在多维度下的拓展，对多维的带宽异构系统具有更高的适应性。在实际系统中部署Ring AllReduce算法时，大都采用了和BlueConnect类似的分层实现方式。
 
@@ -107,12 +107,11 @@ P = p_0 p_1 p_2 \cdots p_{k-1}
 集合通信库和具体硬件平台相关，不同的集合通信库支持不同的硬件平台和通信协议。针对GPU平台，常用的集合通信库包括NVIDIA NCCL、Intel OneCCL、华为HCCL以及阿里巴巴的ACCL等，这些集合通信库都提供了高效的AllReduce/ReduceScatter/AllGather/AlltoAll等算子的实现，并且针对各自支持的硬件平台进行了优化。\cite{weingram2023xccl,nccl_doc,oneccl_guide,hccl_doc,dong2021accl}
 
 目前使用最广泛的集合通信库是NVIDIA NCCL（NVIDIA Collective Communications Library），NCCL专为NVIDIA GPU设计，支持多种通信协议如NVLink、PCIe和InfiniBand等。NCCL提供了高效的Ring AllReduce和Tree AllReduce等算法实现，能够充分利用NVIDIA GPU的硬件特性。
-
-华为针对昇腾系列NPU开发了HCCL（Huawei Collective Communication Library），HCCL支持昇腾NPU的多种内部通信协议。HCCL同样提供了高效的集合通信算法实现，适用于昇腾NPU的分布式训练场景。同时，HCCL的软件栈进行了高度的模块化设计，方便根据实际硬件型号和客户需求进行定制化的集合通信算法开发。HCCL软件架构如\autoref{fig:hccl_arch}所示。本章实验在昇腾NPU上进行，使用HCCL进行自定义算法实现。
+华为针对昇腾系列NPU开发了HCCL（Huawei Collective Communication Library），HCCL支持昇腾NPU的多种内部通信协议。HCCL同样提供了高效的集合通信算法实现，适用于昇腾NPU的分布式训练场景。同时，HCCL的软件栈进行了高度的模块化设计，方便根据实际硬件型号和客户需求进行定制化的集合通信算法开发。HCCL软件架构如\autoref{fig:hccl_arch}所示\cite{hccl_doc}。本章实验在昇腾NPU上进行，使用HCCL进行自定义算法实现。
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=0.6\linewidth]{figure/chapter4/HCCL.pdf}
-    \caption{\label{fig:hccl_arch}HCCL软件架构示意图\cite{hccl_doc}}
+    \caption{\label{fig:hccl_arch}HCCL软件架构示意图}
 \end{figure}
 
 
@@ -133,9 +132,9 @@ AllGather算子的目标是将每个节点初始拥有的数据块分发到所�
     \caption{\label{fig:double_ring_allgather}4节点双向链路并行Ring AllGather算法执行流程示意图}
 \end{figure}
 
-图中方块表示GPU节点，圆圈表示数据块，箭头表示节点间传输链路，图形中的数字表示对应GPU节点或数据块的索引。该算法执行前先将每个节点上的数据均分成两份，图中索引为$i.j$的数据块表示第$i$个节点上的第$j$份数据块。索引$j$相同的数据块独立地在一组环形链路上执行Ring AllGather算法，最终每个节点上都能获得完整的数据。
+图中方块表示GPU节点，圆圈表示数据块，箭头表示节点间传输链路，图形中的数字表示对应GPU节点或数据块的索引。该算法执行前先将每个节点上的数据均分成两份，图中索引为$i.j$的数据块表示第$i$个节点上的第$j$份数据块。索引$j$相同的数据块独立地在一组环形链路上执行Ring AllGather算法，最终每个节点上都能获得完整的数据。为了便于描述，本文将这类双向链路直接并行的Ring算法称为\textbf{双向环算法}。
 
-事实上，存在双向链路时，每个节点可以同时向两个方向的相邻节点发送相同的数据块，不需要在一开始就进行数据块的切分。基于以上观察，我们对双向链路并行的Ring AllGather算法进行了改进，改进的算法执行流程如\autoref{fig:double_half_ring_allgather}所示。
+事实上，存在双向链路时，每个节点可以同时向两个方向的相邻节点发送相同的数据块，不需要在一开始就进行数据块的切分。基于以上观察，我们对双向环AllGather算法进行了改进，改进的算法执行流程如\autoref{fig:double_half_ring_allgather}所示。
 
 \begin{figure}[!htbp]
     \centering
@@ -145,7 +144,7 @@ AllGather算子的目标是将每个节点初始拥有的数据块分发到所�
 
 上图所示算法流程的步骤1中，每个节点向相邻节点发送当前拥有的完整数据块。在步骤1执行结束后，每个节点仅缺少来自对角节点的数据块。在接下来的步骤2中，为了使双向链路都得到利用，每个节点对待发送数据块进行切分，每组链路负责传输一半的数据块，在图中表现为顺时针的内环链路传输索引$j$为1的数据子块，逆时针的外环链路传输索引$j$为2的数据子块。经过步骤2的传输后，每个节点就都收集到了所有数据块，完成AllGather操作。
 
-我们将上述改进后的Ring AllGather算法流程推广到8节点，如\autoref{fig:double_half_ring_allgather_8}所示。图中可以直观地看到两组环形链路沿相反的方向执行一半步骤的Ring AllGather操作，并在最后一步进行数据块的切分以利用双向链路。在该算法流程中，两组环形链路上的数据块传输过程可以形象地看作两个向相反方向各自转动半圈的数据环，因此我们将该算法命名为双半环算法。
+我们将上述改进后的Ring AllGather算法流程推广到8节点，如\autoref{fig:double_half_ring_allgather_8}所示。图中可以直观地看到两组环形链路沿相反的方向执行一半步骤的Ring AllGather操作，并在最后一步进行数据块的切分以利用双向链路。在该算法流程中，两组环形链路上的数据块传输过程可以形象地看作两个向相反方向各自转动半圈的数据环，因此我们将该算法命名为\textbf{双半环算法}。
 
 \begin{figure}[!htbp]
     \centering
@@ -321,8 +320,8 @@ T_{\mathrm{p2p}}(m)=\alpha+\frac{m}{\eta(m)\,B},
 其中 $\alpha$ 表示与数据量无关的静态时延，包括协议处理、排队与传播等固定开销；$B$ 为链路峰值带宽；$\eta(m)\in(0,1]$ 为带宽利用率修正系数，用以反映当数据包较小时链路难以达到峰值带宽的实际情况。一般而言，$\eta(m)$ 随 $m$ 单调递增，当 $m$ 足够大时趋近于 $1$。
 以下分析以接收缓冲区的总大小 $S$ 表示总通信数据量，即每个节点在算子执行结束后需要持有的完整数据量。
 
-\paragraph{双向 Ring 算法.}
-作为对比基线，考虑双向Ring算法。该算法利用双向链路并行通信，但在每一通信步骤中需要将待传输的数据块预先切分为两份，分别沿两组环形通信链路传输。在 AllGather 场景下，通信轮数为 $n-1$，每一轮中两条方向的链路并行工作，每条链路上传输大小为 $S/(2n)$ 的数据块，其通信时间可表示为
+\paragraph{双向环算法.}
+作为对比基线，考虑双向环算法。该算法利用双向链路并行通信，但在每一通信步骤中需要将待传输的数据块预先切分为两份，分别沿两组环形通信链路传输。在 AllGather 场景下，通信轮数为 $n-1$，每一轮中两条方向的链路并行工作，每条链路上传输大小为 $S/(2n)$ 的数据块，其通信时间可表示为
 \begin{equation}
 T_{\mathrm{AG}}^{\mathrm{DR}}
 =(n-1)\alpha
@@ -339,12 +338,13 @@ T_{\mathrm{AR}}^{\mathrm{DR}}
 \label{eq:double_ring_allreduce_eff}
 \end{equation}
 
-可以看到，双向 Ring 虽然能够并行利用双向链路，但由于每轮传输的数据包被切分为半块，其有效带宽受限于较小的数据包规模 $S/(2n)$，带宽利用率为 $\eta(S/2n)$ 。
+可以看到，双向环 虽然能够并行利用双向链路，但由于每轮传输的数据包被切分为半块，其有效带宽受限于较小的数据包规模 $S/(2n)$，带宽利用率为 $\eta(S/2n)$ 。
 
 \paragraph{双半环算法.}
 以 AllGather 为例，当节点个数 $n$ 为奇数时，通信轮数为$\frac{n-1}{2}$；
 当 $n$ 为偶数时，通信轮数为$\frac{n}{2}$。
-因此总通信轮数可以统一表示为 $\lfloor n/2\rfloor$，
+因此总通信轮数可以统一表示为 $\lfloor n/2\rfloor$
+（符号$\lfloor\ \rfloor$表示向下取整），
 其通信时间可表示为
 \begin{equation}
 T_{\mathrm{AG}}^{\mathrm{DHR}}
@@ -371,7 +371,7 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 +\frac{(n-1)}{n}\cdot\frac{S}{\eta(S/n)\,B}.
 \label{eq:dhr_allreduce_eff}
 \end{equation}
-与双向 Ring AllReduce 相比，双半环 AllReduce 在静态时延项上将系数从 $2(n-1)$ 降低至约 $n$，
+与双向环 AllReduce 相比，双半环 AllReduce 在静态时延项上将系数从 $2(n-1)$ 降低至约 $n$，
 带宽利用率修正系数由 $\eta(S/2n)$ 提升为 $\eta(S/n)$。
 
 
@@ -383,7 +383,9 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 \subsection{实验拓扑与基线方法}
 
 本实验中采用三种规模的910C集群拓扑，节点数（以晶片Die为基本计算节点）分别为16、32和64。16节点拓扑的所有节点均在一个Server内，一个Server包含8个GPU，每个GPU内包含两个Die；32节点拓扑由两个Server组成；64节点拓扑由两个Pod组成，每个Pod包含两个Server。\autoref{fig:910C_exp}展示了这三种规模下的昇腾910C集群物理拓扑示意图。
-集群中共存在三类链路：单个GPU内两个节点间的SIO链路，同一Server/Pod内不同节点间通过HCCS Switch相连的HCCS链路，以及不同Pod间通过RDMA Switch连接的RDMA链路，所有链路均为全双工的双向链路。SIO、HCCS 和 RDMA 链路在图中分别以红色、蓝色和黄色线条表示。注意到Server/Pod内的节点也可以使用RDMA链路进行通信，但是由于RDMA链路带宽相对于SIO和HCCS较低，因此一般用于Pod间通信。由于昇腾 910C 集群的硬件参数尚未公开，本文实验中不对各类链路的具体带宽与静态时延数值等参数进行单独列举，相关性能评估均基于实际运行时间与测量结果给出。
+集群中共存在三类链路：GPU内两个Die间的SIO链路，Server/Pod内不同Die间通过HCCS Switch相连的HCCS链路，以及Pod间通过RDMA Switch连接的RDMA链路，所有链路均为全双工的双向链路。SIO、HCCS 和 RDMA 链路在图中分别以红色、蓝色和黄色线条表示。
+% 注意到Server/Pod内的节点也可以使用RDMA链路进行通信，但是由于RDMA链路带宽相对于SIO和HCCS较低，因此一般用于Pod间通信。
+由于昇腾 910C 集群的硬件参数尚未公开，本节实验中不对链路带宽与静态时延等具体参数进行单独列举，相关性能评估均基于实际运行时间与测量结果给出。
 
 \begin{figure}[!htbp]
     \centering
@@ -400,7 +402,7 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
     \label{fig:910C_exp}
 \end{figure}
 
-基线方法采用双向Ring算法，该算法在HCCL库中作为910C集群在较大数据量下的默认通信算法。实验拓扑中，Die间链路和Switch间链路共同组成机内的两组环形链路。
+基线方法采用双向环算法，该算法在HCCL库中作为910C集群在较大数据量下的默认通信算法。实验拓扑中，Die间链路和Switch间链路共同组成机内的两组环形链路。
 我们在和实验拓扑结构相同的单机8节点拓扑下给出了机内两组Ring链路的示意图，如\autoref{fig:8nodes_ring}所示。
 \begin{figure}[!htbp]
     \centering
@@ -408,22 +410,22 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
     \caption{单机8节点拓扑下的两组Ring链路示意图}
     \label{fig:8nodes_ring}
 \end{figure}
-对于32和64节点的多机场景，双向Ring和双半环算法均采用\autoref{Ring AllReduce 算法及其衍生算法}中的分层算法，即在Server/Pod间通信时使用单向Ring算法。
+对于32和64节点的多机场景，双向环和双半环算法均采用\autoref{Ring AllReduce 算法及其衍生算法}中的分层算法，即在Server/Pod间通信时使用传统的单向Ring算法。
 
 \subsection{实验设置与评价指标}
 
-本节对提出的双半环算法与双向 Ring 算法进行对比实验评估。实验在相同的拓扑配置与系统环境下进行，以保证对比结果的公平性。实验中针对每一种拓扑结构，分别测试 AllGather、ReduceScatter、AllReduce 三种集合通信算子在两种算法下的实际运行性能。
+本节对提出的双半环算法与双向环算法进行对比实验评估。实验在相同的拓扑配置与系统环境下进行，以保证对比结果的公平性。实验中针对每一种拓扑结构，分别测试 AllGather、ReduceScatter、AllReduce 三种集合通信算子在两种算法下的实际运行性能。
 
 为刻画不同数据量下集合通信算子的特征，实验选取了三种数据量设置，分别为 64\,MB、256\,MB 与 2\,GB。本文中，集合通信算子的通信总数据量统一定义为算子执行结束后每个节点接收缓冲区的总数据量大小。
 
-在上述实验设置下，本节以算法带宽（Algorithm Bandwidth）为指标对双半环算法与双向 Ring 算法进行对比分析。算法带宽$\mathrm{B_{alg}}$定义为集合通信过程中完成传输的接收缓冲区总数据量 $S_{\mathrm{total}}$ 与对应通信完成时间 $T_{\mathrm{coll}}$ 的比值，即
+在上述实验设置下，本节以算法带宽（Algorithm Bandwidth）为指标对双半环算法与双向环算法进行对比分析。算法带宽$\mathrm{B_{alg}}$定义为集合通信过程中完成传输的接收缓冲区总数据量 $S_{\mathrm{total}}$ 与对应通信完成时间 $T_{\mathrm{coll}}$ 的比值，即
 \begin{equation}
 \mathrm{B_{alg}}
 =
 \frac{S_{\mathrm{total}}}{T_{coll}}.
 \end{equation}
 
-为刻画双半环算法相对于双向 Ring 算法的带宽提升幅度，
+为刻画双半环算法相对于双向环算法的带宽提升幅度，
 引入算法带宽提升率作为对比指标，其定义为两者算法带宽的相对增幅，即
 \begin{equation}
 \Delta B_{\mathrm{alg}}
@@ -432,14 +434,14 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 {\mathrm{B_{alg}^{DR}}}
 \times 100\%,
 \end{equation}
-其中 $\mathrm{B_{alg}^{DHR}}$ 与 $\mathrm{B_{alg}^{DR}}$ 分别表示双半环算法与双向 Ring 算法的算法带宽。
+其中 $\mathrm{B_{alg}^{DHR}}$ 与 $\mathrm{B_{alg}^{DR}}$ 分别表示双半环算法与双向环算法的算法带宽。
 
 
 
 \subsection{实验结果与分析}
 
 \autoref{tab:allgather_bandwidth_improvement} 给出了在不同节点规模与数据量配置下，
-双半环算法与双向 Ring 算法在 AllGather 算子上的算法带宽及带宽提升率。
+双半环算法与双向环算法在 AllGather 算子上的算法带宽及带宽提升率。
 可以观察到，在所有测试配置下，双半环算法均取得了更高的算法带宽，
 表明其在 AllGather 场景中具有稳定的性能优势。
 在节点规模为 16 和 32 的场景中，双半环算法的带宽提升率尤为显著，
@@ -449,16 +451,16 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 使得链路带宽利用率趋近于峰值，双半环算法通过提升带宽利用率的优势减小。
 虽然大数据量下双半环算法优势减弱，但在 2\,GB 场景下仍保持在 10\% 以上，
 说明双半环算法在大数据量通信中依然能够有效提升通信效率。
-当节点规模进一步增大至 64 时，双半环算法相对于双向 Ring 算法的带宽提升幅度减小。
+当节点规模进一步增大至 64 时，双半环算法相对于双向环算法的带宽提升幅度减小。
 这是因为此时，通信受限于Pod间的低速RDMA链路，
 仅在单机内运行的双半环算法所带来的优势减小，
-但其通信性能仍优于双向 Ring 算法。
+但其通信性能仍优于双向环算法。
 
 
 
 \begin{table}[!htbp]
 \centering
-\caption{AllGather 算法带宽及双半环相对于双向 Ring 的带宽提升率}
+\caption{AllGather 算法带宽及双半环算法相对于双向环算法的带宽提升率}
 \label{tab:allgather_bandwidth_improvement}
 \begin{tabular}{c c c c c}
 \toprule
@@ -466,7 +468,7 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 \multicolumn{2}{c}{算法带宽 (GB/s)} &
 带宽提升率 \\
 \cmidrule(lr){3-4}
- & & 双向 Ring & 双半环 & (\%) \\
+ & & 双向环 & 双半环 & (\%) \\
 \midrule
 \multirow{3}{*}{16}
  & 64 MB  & 122.2 & 162.7 & 33.1\% \\
@@ -499,7 +501,7 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 
 \begin{table}[!htbp]
 \centering
-\caption{ReduceScatter 算法带宽及双半环相对于双向 Ring 的带宽提升率}
+\caption{ReduceScatter 算法带宽及双半环算法相对于双向环算法的带宽提升率}
 \label{tab:reducescatter_bandwidth_improvement}
 \begin{tabular}{c c c c c}
 \toprule
@@ -507,7 +509,7 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 \multicolumn{2}{c}{算法带宽 (GB/s)} &
 带宽提升率 \\
 \cmidrule(lr){3-4}
- & & 双向 Ring & 双半环 & (\%) \\
+ & & 双向环 & 双半环 & (\%) \\
 \midrule
 \multirow{3}{*}{16}
  & 64 MB  & 117.9 & 145.8 & 23.7\% \\
@@ -531,7 +533,7 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 
 \begin{table}[!htbp]
 \centering
-\caption{AllReduce 算法带宽及双半环相对于双向 Ring 的带宽提升率}
+\caption{AllReduce 算法带宽及双半环算法相对于双向环算法的带宽提升率}
 \label{tab:allreduce_bandwidth_improvement}
 \begin{tabular}{c c c c c}
 \toprule
@@ -539,7 +541,7 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 \multicolumn{2}{c}{算法带宽 (GB/s)} &
 带宽提升率 \\
 \cmidrule(lr){3-4}
- & & 双向 Ring & 双半环 & (\%) \\
+ & & 双向环 & 双半环 & (\%) \\
 \midrule
 \multirow{3}{*}{16}
  & 64 MB  & 60.2 & 77.2 & 28.2\% \\
@@ -567,7 +569,7 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 在 16/32 节点、64\,/256\,MB 数据量条件下，双半环算法均能取得显著的算法带宽提升，
 而在 64 节点、2\,GB 数据量下算法带宽提升幅度降至 2.7\%。
 尽管在大规模、大数据量场景中带宽提升幅度有限，
-双半环算法在所有测试配置下仍保持了不低于双向 Ring 算法的通信性能，
+双半环算法在所有测试配置下仍保持了不低于双向环算法的通信性能，
 验证了其在 AllReduce 场景中的有效性与稳定性。
 
 综合以上实验结果可以看出，
@@ -580,23 +582,27 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 
 \section{本章小结}
 
-本章围绕双半环集合通信算法的设计与实现展开研究，
-系统地介绍了双半环算法在 AllGather、ReduceScatter 以及 AllReduce 等典型集合通信算子中的构造方法，
-并分析了其相对于传统双向 Ring 算法的结构差异与潜在性能优势。
-通过引入双半环通信模式，算法在保持双向链路并行通信能力的同时，
-显著减少了通信轮数，并在多数通信阶段中传输完整数据块，
-从而为降低静态时延开销和提升有效带宽利用率提供了基础。
+% 本章围绕双半环集合通信算法的设计与实现展开研究，
+% 系统地介绍了双半环算法在 AllGather、ReduceScatter 以及 AllReduce 等典型集合通信算子中的构造方法，
+% 并分析了其相对于传统双向环算法的结构差异与潜在性能优势。
+% 通过引入双半环通信模式，算法在保持双向链路并行通信能力的同时，
+% 显著减少了通信轮数，并在多数通信阶段中传输完整数据块，
+% 从而为降低静态时延开销和提升有效带宽利用率提供了基础。
 
-在理论分析方面，本章从通信轮数、静态时延以及带宽利用率等角度对双半环算法进行了性能建模，并与双向 Ring 算法进行了对比分析。
-理论结果表明，双半环算法在通信轮数上可压缩为约双向 Ring 算法的一半，
-在带宽受限或小数据包效率较低的系统中具有更优的性能潜力。
+% 在理论分析方面，本章从通信轮数、静态时延以及带宽利用率等角度对双半环算法进行了性能建模，并与双向环算法进行了对比分析。
+% 理论结果表明，双半环算法在通信轮数上可压缩为约双向环算法的一半，
+% 在带宽受限或小数据包效率较低的系统中具有更优的性能潜力。
 
-在实验验证方面，
-本章在不同节点规模与数据量配置下对多种集合通信算子进行了测试，
-实验结果表明双半环算法在实际系统中能够稳定提升算法带宽，
-并在中等数据量场景中展现出显著优势。
-尽管在大规模或大数据量条件下其带宽提升幅度受限，
-双半环算法在所有测试配置下均保持了不低于双向 Ring 算法的性能。
+% 在实验验证方面，
+% 本章在不同节点规模与数据量配置下对多种集合通信算子进行了测试，
+% 实验结果表明双半环算法在实际系统中能够稳定提升算法带宽，
+% 并在中等数据量场景中展现出显著优势。
+% 尽管在大规模或大数据量条件下其带宽提升幅度受限，
+% 双半环算法在所有测试配置下均保持了不低于双向环算法的性能。
 
-综上所述，本章从算法设计、理论分析与实验验证三个层面系统论证了双半环算法的有效性与适用性，
-为后续在更复杂拓扑结构或更大规模的分布式系统中进一步扩展和优化集合通信算法奠定了基础。
+% 综上所述，本章从算法设计、理论分析与实验验证三个层面系统论证了双半环算法的有效性与适用性，
+% 为后续在更复杂拓扑结构或更大规模的分布式系统中进一步扩展和优化集合通信算法奠定了基础。
+
+本章针对双向链路环境下集合通信效率问题，提出了双半环集合通信算法。首先介绍了集合通信的基本概念与 Ring AllReduce 及其衍生算法，分析了双向环算法在链路利用与通信调度方面的局限性。
+在算法设计方面，本章系统阐述了双半环算法在 AllGather、ReduceScatter 及 AllReduce 等典型集合通信算子中的构造方法。该算法通过引入双半环通信模式，在保持双向链路并行通信能力的同时，将通信轮数压缩为双向环算法的约一半，并在多数阶段传输完整数据块，从而降低静态时延并提升带宽利用率。
+实验结果表明，双半环算法在不同节点规模与数据量配置下均能稳定提升算法带宽，在中等数据量场景中优势尤为显著；即使在大规模或大数据量条件下，其性能也不低于双向环算法，验证了算法的有效性与稳定性。

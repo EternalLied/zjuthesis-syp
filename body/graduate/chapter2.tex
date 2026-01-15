@@ -5,7 +5,6 @@
 % 当前分布式训练任务通常运行在高性能计算集群之上，集群内部往往同时存在多种通信链路，例如 NVLink、PCIe 以及 RoCE/InfiniBand 等。因此，如何充分挖掘多种通信链路的并行传输能力，是提升集合通信效率、缓解通信瓶颈的关键问题之一。
 
 在实际系统中，集合通信通常采用 Ring 算法等经典实现方式。这类算法结构简单、泛用性强，能够较为方便地部署于不同硬件环境中，并在多种应用场景下取得稳定的性能表现。然而，随着模型训练规模的持续增长以及计算集群硬件架构的不断演进，Ring 等经典算法在链路并行利用和通信调度灵活性方面逐渐显现出一定的局限性，难以充分发挥多链路环境下的潜在通信性能。
-
 基于上述背景，本章提出了一种适用于 AllReduce、ReduceScatter 和 AllGather 操作的双半环集合通信算法。该算法能够高效地利用实际系统中的双向并行链路资源，降低了算法的整体静态时延并提高了链路带宽利用率，从而有效提升了集合通信性能。
 
 本章其余内容安排如下：第 2.2 节介绍集合通信的相关概念与基础知识；第 2.3 节详细阐述所提出的双半环算法及其实现过程；第 2.4 节基于真实生产环境中的实验结果对算法性能进行验证与分析；第 2.5 节对本章工作进行总结。
@@ -16,10 +15,10 @@
 
 \subsection{物理拓扑}
 
-物理拓扑描述了计算节点之间的底层物理连接关系，可以由一组图给定。高性能计算集群系统的群物理拓扑中往往存在着明显的多级异构链路，这些链路具有不同的带宽以及静态时延等特性。
+物理拓扑描述了计算节点之间的底层物理连接关系，通常采用图结构进行建模：图中节点表示计算设备或通信中继设备（如交换机），边表示物理链路及其参数（如带宽、静态时延等）。在高性能计算集群系统中，物理拓扑通常呈现多级异构的特征，即不同层级的链路具有显著不同的带宽与静态时延等属性。
 
 目前分布式训练中，常用的设备是英伟达的NVIDIA系列GPU，常用的高性能计算集群系统有NVIDIA DGX系列系统。
-图\autoref{fig:DGX1}给出了NVIDIA DGX-1系统的机内物理拓扑结构示意图\cite{nvidia_dgx1_blog}。单个DGX1服务器配备了8个NVIDIA V100 GPU, GPU间通过高速互连网络NVLink和PCIe进行连接。多个DGX-1服务器可以通过以太网或InfiniBand等网络进行互连，形成更大规模的集群系统。通过Infiniband互连的124机DGX-1集群拓扑结构如图\autoref{fig:DGX1-cluster}所示。
+图\autoref{fig:DGX1}给出了NVIDIA DGX-1系统的机内物理拓扑结构示意图。单个DGX1服务器配备了8个NVIDIA V100 GPU, GPU间通过高速互连网络NVLink和PCIe进行连接。多个DGX-1服务器可以通过以太网或InfiniBand等网络进行互连，形成更大规模的集群系统。通过Infiniband互连的124机DGX-1集群拓扑结构如图\autoref{fig:DGX1-cluster}所示。
 
 \begin{figure}[!htbp]
     \centering
@@ -29,14 +28,14 @@
     \subfigure[124机集群物理拓扑结构\label{fig:DGX1-cluster}]{
         \includegraphics[width=0.45\linewidth]{figure/chapter2/DGX1-cluster.pdf}
     }
-    \caption{DGX-1系统物理拓扑结构示意图}
+    \caption[DGX-1系统物理拓扑结构示意图]{DGX-1系统物理拓扑结构示意图\cite{nvidia_dgx1_blog}}
     \label{fig:DGX1-system}
 \end{figure}
 
 此外，近些年来，国产GPU和面向AI的NPU加速器也得到了快速发展。
 % 比较知名的国产GPU有摩尔线程的MTT系列，比较知名的国产NPU有寒武纪的MLU系列与昇腾的910系列。
 华为的昇腾910系列NPU在AI分布式训练中得到了广泛应用。
-昇腾最新的的910C系列NPU采用双晶片架构，其简化拓扑结构如\autoref{fig:910C}所示（为了统一描述，图例与后文描述中使用GPU代替NPU），具体的拓扑信息将在本章实验部分进行介绍。
+昇腾最新的910C系列NPU采用双晶片架构，其简化拓扑结构如\autoref{fig:910C}所示（为了统一描述，图例与后文描述中使用GPU代替NPU），具体的拓扑信息将在本章实验部分进行介绍。
 % 单个910C服务器内包含多个GPU，每个NPU内包含两个晶片Die，GPU内的Die间通过SIO链路相连，不同GPU的Die通过HCCS链路连接到同一个交换机上。多个910C服务器可以组成超节点，超节点内部通过多级HCCS交换机可以实现高速互联，不同超节点之间则通过RDMA进行通信。
 \begin{figure}[!htbp]
     \centering
@@ -46,12 +45,12 @@
 
 \subsection{集合通信算子}
 
-集合通信是在并行计算环境中多个进程或节点之间协调和交换数据的一类操作，在分布式训练场景下，是每个计算节点间同步和交换参数的操作。一个指定的集合通信算子确定了每个计算节点需要发送和接收的数据。常用集合通信算子如\autoref{fig:collective}所示\cite{woolley2015nccl}。
+集合通信是在并行计算环境中多个进程或节点之间协调和交换数据的一类操作，在分布式训练场景下，是每个计算节点间同步和交换参数的操作。一个指定的集合通信算子确定了每个计算节点需要发送和接收的数据。常用集合通信算子如\autoref{fig:collective}所示。
 
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=1\linewidth]{figure/chapter2/collective.pdf}
-    \caption{\label{fig:collective}集合通信算子示意图}
+    \caption[常用集合通信算子示意图]{\label{fig:collective}集合通信算子示意图\cite{woolley2015nccl}}
 \end{figure}
 
 分布式训练中常用的集合通信算子有AllReduce、ReduceScatter、AllGather、AlltoAll等，其中AllReduce是最常用的算子，AllReduce算子将所有节点的数据进行归约（一般为求平均操作，还可以进行求和、求最大/最小值等操作），并将结果分发到所有节点上。在分布式训练中，AllReduce通常用于同步各节点的模型参数或梯度，从而保证每个节点在每次迭代后都拥有一致的模型参数。AllReduce可以看作是ReduceScatter和AllGather两个算子的组合，首先通过ReduceScatter将所有节点的数据进行归约并分发到各节点上，然后通过AllGather将归约后的结果汇总到所有节点上。AllReduce的大部分算法实现也可以拆分成ReduceScatter和AllGather两部分，因此大部分经典研究都是针对AllReduce算子的。此外，随着大模型架构的发展，AlltoAll开始广泛应用于分布式训练场景中，如不同节点间的特征交换和混合专家模型（Mixture of Experts，MOE）中的Dispatch和Combine操作等。
@@ -73,7 +72,7 @@
 
 \subsection{Ring AllReduce算法及其衍生算法}\label{Ring AllReduce 算法及其衍生算法}
 
-Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的归约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构拓扑或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
+Ring AllReduce算法是最为经典和常用的AllReduce算法，它通过将节点组织成一个环形结构，每个节点只与其相邻的两个节点进行数据传输，从而实现数据的归约和分发。Ring AllReduce的实现可以拆分为独立的Ring ReduceScatter和 Ring Allgather。Ring AllReduce算法的优点在于其简单性和高效性，能够充分利用网络带宽，适用于各种类型的物理拓扑。在异构网络环境或大规模集群中，Ring AllReduce可能无法充分利用所有链路资源，且通信静态时延项随节点总数线性增长，导致通信瓶颈，但Ring AllReduce的通信模式仍然是很多集合通信算法的基础。
 
 设节点数为$n$，Ring AllReduce的具体执行流程如下：（a）将所有节点编号并连接成一个环形结构，初始化对应的通信链路；（b）每个节点将数据分为$n$块，执行$n-1$次发送与接收操作，每次操作向下一节点发送一个数据块，从上一节点接收一个数据块，在$n-1$次操作后，所有节点对收到的数据块求平均，每个节点就都拥有了某特定索引数据块的完整数据，这一过程相当于执行ReduceScatter算子；（c）各节点将汇总后的得到的完整数据块以（b）中相同的方式沿环进行传输，传输$n-1$次后所有节点就都得到了包含全部$n$个数据块的完整数据，这一过程相当于执行AllGather算子。在$n=4$的情况下整个算法执行流程如\autoref{fig:ring_allreduce}所示。
 
@@ -92,11 +91,11 @@ P = p_0 p_1 p_2 \cdots p_{k-1}
 = \prod_{i<k} p_i,
 \quad p_i \in \mathbb{N},\; p_i > 1.
 \end{equation}
-分解后按\autoref{fig:blueconnect}所示步骤进行通信\cite{cho2019blueconnect}，该算法实现也可以顺序拆分为ReduceScatter和AllGather两个算子。
+分解后按\autoref{fig:blueconnect}所示步骤进行通信，该算法实现也可以顺序拆分为ReduceScatter和AllGather两个算子。
 \begin{figure}[!htbp]
     \centering
     \includegraphics[width=0.8\linewidth]{figure/chapter4/BlueConnect.pdf}
-    \caption{\label{fig:blueconnect}BlueConnect算法执行流程示意图}
+    \caption[BlueConnect算法执行流程示意图]{\label{fig:blueconnect}BlueConnect算法执行流程示意图\cite{cho2019blueconnect}}
 \end{figure}
 对于多维对称性系统，通过合适的分解，BlueConnect算法能够建立物理拓扑与逻辑拓扑之间的合理映射，从而提高算法性能。BlueConnect可以看作分层Ring AllReduce在多维度下的拓展，对多维的带宽异构系统具有更高的适应性。在实际系统中部署Ring AllReduce算法时，大都采用了和BlueConnect类似的分层实现方式。
 
@@ -107,11 +106,11 @@ P = p_0 p_1 p_2 \cdots p_{k-1}
 集合通信库和具体硬件平台相关，不同的集合通信库支持不同的硬件平台和通信协议。针对GPU平台，常用的集合通信库包括NVIDIA NCCL、Intel OneCCL、华为HCCL以及阿里巴巴的ACCL等，这些集合通信库都提供了高效的AllReduce/ReduceScatter/AllGather/AlltoAll等算子的实现，并且针对各自支持的硬件平台进行了优化。\cite{weingram2023xccl,nccl_doc,oneccl_guide,hccl_doc,dong2021accl}
 
 目前使用最广泛的集合通信库是NVIDIA NCCL（NVIDIA Collective Communications Library），NCCL专为NVIDIA GPU设计，支持多种通信协议如NVLink、PCIe和InfiniBand等。NCCL提供了高效的Ring AllReduce和Tree AllReduce等算法实现，能够充分利用NVIDIA GPU的硬件特性。
-华为针对昇腾系列NPU开发了HCCL（Huawei Collective Communication Library），HCCL支持昇腾NPU的多种内部通信协议。HCCL同样提供了高效的集合通信算法实现，适用于昇腾NPU的分布式训练场景。同时，HCCL的软件栈进行了高度的模块化设计，方便根据实际硬件型号和客户需求进行定制化的集合通信算法开发。HCCL软件架构如\autoref{fig:hccl_arch}所示\cite{hccl_doc}。本章实验在昇腾NPU上进行，使用HCCL进行自定义算法实现。
+华为针对昇腾系列NPU开发了HCCL（Huawei Collective Communication Library），HCCL支持昇腾NPU的多种内部通信协议。HCCL同样提供了高效的集合通信算法实现，适用于昇腾NPU的分布式训练场景。同时，HCCL的软件栈进行了高度的模块化设计，方便根据实际硬件型号和客户需求进行定制化的集合通信算法开发。HCCL软件架构如\autoref{fig:hccl_arch}所示。本章实验在昇腾NPU上进行，使用HCCL进行自定义算法实现。
 \begin{figure}[!htbp]
     \centering
-    \includegraphics[width=0.6\linewidth]{figure/chapter4/HCCL.pdf}
-    \caption{\label{fig:hccl_arch}HCCL软件架构示意图}
+    \includegraphics[width=0.6\linewidth]{figure/chapter4/HCCL-screen.pdf}
+    \caption[HCCL软件架构示意图]{\label{fig:hccl_arch}HCCL软件架构示意图\cite{hccl_doc}}
 \end{figure}
 
 
@@ -134,7 +133,7 @@ AllGather算子的目标是将每个节点初始拥有的数据块分发到所�
 
 图中方块表示GPU节点，圆圈表示数据块，箭头表示节点间传输链路，图形中的数字表示对应GPU节点或数据块的索引。该算法执行前先将每个节点上的数据均分成两份，图中索引为$i.j$的数据块表示第$i$个节点上的第$j$份数据块。索引$j$相同的数据块独立地在一组环形链路上执行Ring AllGather算法，最终每个节点上都能获得完整的数据。为了便于描述，本文将这类双向链路直接并行的Ring算法称为\textbf{双向环算法}。
 
-事实上，存在双向链路时，每个节点可以同时向两个方向的相邻节点发送相同的数据块，不需要在一开始就进行数据块的切分。基于以上观察，我们对双向环AllGather算法进行了改进，改进的算法执行流程如\autoref{fig:double_half_ring_allgather}所示。
+事实上，存在双向链路时，每个节点可以同时向两个方向的相邻节点发送相同的数据块，不需要在初始化时就进行数据块的切分。基于以上观察，我们对双向环AllGather算法进行了改进，改进的算法执行流程如\autoref{fig:double_half_ring_allgather}所示。
 
 \begin{figure}[!htbp]
     \centering
@@ -570,7 +569,7 @@ T_{\mathrm{AR}}^{\mathrm{DHR}}
 而在 64 节点、2\,GB 数据量下算法带宽提升幅度降至 2.7\%。
 尽管在大规模、大数据量场景中带宽提升幅度有限，
 双半环算法在所有测试配置下仍保持了不低于双向环算法的通信性能，
-验证了其在 AllReduce 场景中的有效性与稳定性。
+验证了 AllReduce 场景下的有效性与稳定性。
 
 综合以上实验结果可以看出，
 双半环算法在中小规模通信与中等数据量（几十MB至几百MB）条件下能够显著提升算法带宽，

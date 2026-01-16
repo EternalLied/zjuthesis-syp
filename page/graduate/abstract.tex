@@ -1,32 +1,17 @@
 \cleardoublepage
 \chapternonum{摘要}
 
-近年来，随着深度学习模型规模的持续扩大，单设备的算力与存储容量已难以满足大规模模型训练需求，基于多节点集群的分布式训练逐渐成为主流方案。在分布式训练过程中，各计算节点通过 AllReduce、AllGather、ReduceScatter 与 AlltoAll 等集合通信操作完成参数、梯度及中间激活值等信息的同步与交换。随着节点规模扩大与并行策略复杂化，集合通信愈发频繁且单次通信时间延长，通信开销成为端到端训练效率的重要制约因素。与此同时，目前主流训练集群通常由多种链路与多级交换机组成，链路带宽与时延差异显著，现有通信算法在此类复杂拓扑下往往难以充分利用链路并行能力，容易出现通信轮数偏多、负载不均等问题。此外，训练流程中的计算通信串行依赖导致通信时计算资源闲置，进一步制约整体训练效率。
-围绕上述问题，本文从
-% 面向真实物理拓扑的
-集合通信算法优化设计、
-集合通信算法自动合成
-以及
-计算通信并行优化三个层面展开研究，以提升分布式训练的通信效率与整体吞吐率。本文主要工作如下：
+近年来，随着深度学习模型规模的持续扩大，单设备的算力与存储容量已难以满足大规模模型训练需求，基于多节点集群的分布式训练逐渐成为主流方案。在分布式训练过程中，各计算节点通过 AllReduce、AllGather、ReduceScatter 与 AlltoAll 等集合通信操作完成参数、梯度及中间激活值等信息的同步与交换。随着节点规模扩大与并行策略复杂化，集合通信愈发频繁且单次通信时间延长，通信开销成为端到端训练效率的重要制约因素。与此同时，目前主流训练集群通常由多种链路与多级交换机组成，链路带宽与时延差异显著，现有通信算法在此类复杂拓扑下往往难以充分利用链路并行能力，容易出现通信轮数偏多、负载不均等问题。此外，训练流程中的计算通信串行依赖导致通信时计算资源闲置，进一步制约整体训练效率。围绕上述问题，本文从集合通信算法优化设计、集合通信算法自动合成以及计算通信并行优化三个层面展开研究，以提升分布式训练的通信效率与整体吞吐量。本文主要工作如下：
 
 (1)针对分布式训练集群中双向环形链路场景下经典环形算法通信轮数偏多、带宽利用率不足的问题，提出了具有链路聚合特性的双半环集合通信算法。
 该方法提出了双半环通信模式，引入了分阶段传输流程优化与数据块动态拆分机制，将环形拓扑的双向链路容量进行有效聚合，在减少通信轮数的同时提升了带宽利用率，并在此基础上给出了AllGather、ReduceScatter与AllReduce的统一实现方式。
-该方法在物理集群上进行了实现与评估，实验结果表明在多种节点数与数据量配置下，双半环算法相对双向环算法带宽提升2.7\%至33.1\%。
-% ，能够在多种节点规模场景下获取显著收益。
+该方法在物理集群上进行了实现与评估，实验结果表明在多种节点数与数据量配置下，双半环算法相对双向环算法带宽提升 2.7\% 至 33.1\%。
 
-(2)针对分布式训练集群中多级交换机拓扑场景下人为设计集合通信算法难以兼顾性能与适配性，现有自动合成方法又难以兼顾性能和求解效率的问题，提出了交换机拓扑感知的集合通信算法合成方法。
-该方法基于时间扩展网络对交换机拓扑结构与链路属性进行建模，
-% 设计了事件驱动的合成框架，
-采用贪心算法动态匹配数据块与链路，在可控时间开销内合成高效集合通信算法。
-多种典型GPU集群拓扑的仿真实验结果表明，该方法合成的 AllGather 算法带宽可达基线的1至3倍，AlltoAll算法带宽可达基线的1至1.5倍，不同场景下的合成时间相比基线降低2至4个数量级，具备更好的算法性能与可扩展性。
 
-(3)针对分布式训练的张量并行模式中同步通信阻塞明显、易造成计算资源空闲的问题，提出了基于算子拆分调度的计算通信并行方法。
-% 该方法通过算子等价变换与调度优化，缓解张量并行中计算通信的串行依赖，实现AllReduce通信与矩阵计算的重叠执行，
-该方法通过算子等价拆分与调度重排，解耦张量并行中矩阵计算与AllReduce通信的串行依赖，将通信
-调度到可与矩阵计算重叠的时间窗口内，
-在保证训练过程等价的前提下提升计算通信并行度，隐藏通信开销。
-% 该方法基于 PyTorch 接口完成实现并在
-混合并行场景下的实验验证结果表明，该方法在多种模型规格上可获得1.25$\times$至1.29$\times$的端到端加速，对应训练时间降低 20\%至22\%，显著提升了训练效率。
+(2)针对分布式训练集群中多级交换机拓扑场景下人为设计集合通信算法难以兼顾性能与适配性，现有自动合成方法又难以兼顾性能和求解效率的问题，提出了交换机拓扑感知的集合通信算法合成方法。该方法基于时间扩展网络对交换机拓扑结构与链路属性进行建模，采用贪心算法动态匹配数据块与链路，在可控时间开销内合成高效集合通信算法。
+多种典型 GPU 集群拓扑的仿真实验结果表明，该方法合成的 AllGather 算法带宽可达基线的1至3倍，AlltoAll算法带宽可达基线的1至1.5倍，不同场景下的合成时间相比基线降低2至4个数量级，具备更好的算法性能与可扩展性。
+
+(3)针对分布式训练的张量并行模式中同步通信阻塞明显、易造成计算资源空闲的问题，提出了基于算子拆分调度的计算通信并行方法。该方法通过算子等价拆分与调度重排，解耦张量并行中矩阵计算与AllReduce通信的串行依赖，将通信调度到可与矩阵计算重叠的时间窗口内，在保证训练过程等价的前提下提升计算通信并行度，隐藏通信开销。混合并行场景下的实验验证结果表明，该方法在多种模型规格上可获得1.25$\times$至1.29$\times$的端到端加速，对应训练时间降低 20\%至22\%，显著提升了训练效率。
 
 \noindent \textbf{关键词：}分布式训练；集合通信；链路并行；算法合成；计算通信并行
 
@@ -34,7 +19,6 @@
 \chapternonum{Abstract}
 
 In recent years, with the continuous growth of deep learning model scales, the computational power and memory capacity of a single device can no longer meet the demands of large-scale model training, making distributed training across multi-node clusters the mainstream approach. During distributed training, compute nodes synchronize and exchange parameters, gradients, and intermediate activations through collective communication operations such as AllReduce, AllGather, ReduceScatter, and AlltoAll. As cluster scales expand and parallelization strategies become more complex, collective communication becomes increasingly frequent with longer per-operation latency, making communication overhead a significant bottleneck for end-to-end training efficiency. Meanwhile, mainstream training clusters typically consist of diverse links and multi-level switches with significant variations in bandwidth and latency. Existing communication algorithms often fail to fully exploit link parallelism in such complex topologies, leading to excessive communication rounds and load imbalance. Furthermore, the serial dependency between computation and communication in training workflows causes compute resources to idle during communication, further constraining overall training efficiency.
-
 To address these challenges, this thesis conducts research from three perspectives: collective communication algorithm optimization, automatic algorithm synthesis, and computation-communication overlap, aiming to improve communication efficiency and overall throughput in distributed training. The main contributions are as follows:
 
 (1) To address the excessive communication rounds and insufficient bandwidth utilization of classical ring algorithms in bidirectional ring-link scenarios within distributed training clusters, we propose a double half-ring collective communication algorithm with link aggregation capability. This method introduces a double half-ring communication pattern, incorporating phased transmission workflow optimization and dynamic data chunk splitting mechanisms to effectively aggregate the bidirectional link capacity of ring topologies. It reduces communication rounds while improving bandwidth utilization, and provides unified implementations for AllGather, ReduceScatter, and AllReduce. Evaluation on physical clusters demonstrates that the double half-ring algorithm achieves 2.7\%-33.1\% bandwidth improvement over the bidirectional ring algorithm across various node counts and data volume configurations.
